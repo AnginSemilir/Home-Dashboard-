@@ -1,0 +1,318 @@
+# ╔══════════════════════════════════════════════════════════════════════════════╗
+# ║  Lenovo Tab M10 wall panel: Home Assistant dashboard                         ║
+# ║  Install guide: docs/dashboard.md    Designed for a 1280×800 browser area    ║
+# ╚══════════════════════════════════════════════════════════════════════════════╝
+#
+# Needs these HACS cards: Kiosk Mode, layout-card, button-card, ApexCharts Card,
+# Clock Weather Card, Calendar Card Pro.
+
+# Hide Home Assistant's header and sidebar on this dashboard.
+# Add ?disable_km to the URL to get them back (e.g. to edit on the tablet).
+kiosk_mode:
+  kiosk: true
+
+# ── 1. YOUR SETTINGS: edit these, then paste the whole file ───────────────────
+# Replace each example entity ID with yours (Settings → Entities → search).
+# For Octopus, copy the <serial>_<mpan> part of your IDs, e.g. from the entity
+# "…_current_demand", and replace 22l4132637_1900026354329 in all six lines.
+# Home Assistant fills these values into the cards when you save. Keep your
+# edited copy of this file for next time.
+panel_settings:
+  camera: &camera camera.front_door                    # Nest camera
+  thermostat: &thermostat climate.hallway              # Nest thermostat
+  weather: &weather weather.forecast_home              # Met.no (default) or Met Office
+  calendar: &calendar calendar.family                  # Google calendar to show
+  car_battery: &car_battery sensor.e_niro_ev_battery_level   # Kia (optional)
+  octopus_demand: &octopus_demand sensor.octopus_energy_electricity_22l4132637_1900026354329_current_demand
+  octopus_rate: &octopus_rate sensor.octopus_energy_electricity_22l4132637_1900026354329_current_rate
+  octopus_cost: &octopus_cost sensor.octopus_energy_electricity_22l4132637_1900026354329_current_accumulative_cost
+  octopus_rates_today: &octopus_rates_today event.octopus_energy_electricity_22l4132637_1900026354329_current_day_rates
+  octopus_rates_tomorrow: &octopus_rates_tomorrow event.octopus_energy_electricity_22l4132637_1900026354329_next_day_rates
+
+# ── 2. The panel (no need to edit below here) ─────────────────────────────────
+button_card_templates:
+  # App-launcher button. Set `app` (Android package) or `intent` (a full intent: URI).
+  # Works in Fully Kiosk Browser (via its JavaScript interface) and in the Home Assistant
+  # Companion app / Chrome (which hand intent: links to Android).
+  launcher:
+    variables:
+      app: ''
+      intent: ''
+      hold_app: ''
+    layout: icon_name
+    size: 34px
+    styles:
+      card: [height: 64px, padding: 0 16px]
+      name: [font-size: 18px, font-weight: 500, justify-self: start, padding-left: 12px]
+      img_cell: [width: 44px, justify-content: center]
+      icon: [width: 34px]
+      grid: [grid-template-columns: 44px 1fr]
+    tap_action:
+      action: javascript
+      javascript: |
+        [[[
+          const open = (app, intent) => {
+            const uri = intent || `intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${app};launchFlags=0x10000000;end`;
+            if (window.fully && !intent) fully.startApplication(app);
+            else if (window.fully) fully.startIntent(uri);
+            else window.open(uri);
+          };
+          open(variables.app, variables.intent);
+        ]]]
+    hold_action:
+      action: javascript
+      javascript: |
+        [[[
+          if (!variables.hold_app) return;
+          if (window.fully) fully.startApplication(variables.hold_app);
+          else window.open(`intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=${variables.hold_app};launchFlags=0x10000000;end`);
+        ]]]
+
+views:
+  - title: Home
+    path: home
+    type: custom:grid-layout
+    layout:
+      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr)
+      grid-template-rows: auto minmax(0, 1fr) auto auto
+      grid-template-areas: |
+        "cam   clock  cal"
+        "chart price  cal"
+        "chart tiles  cal"
+        "dock  dock   dock"
+      # layout-card gives every card a 4px side / 8px bottom margin, so the
+      # padding + zero gap below produce even 8px gutters and exactly 100vh.
+      height: calc(100vh - 8px)
+      margin: 0
+      padding: 8px 4px 0px 4px
+      grid-gap: 0
+    cards:
+      # Live camera. camera_view: live is required for Nest cameras (they have no snapshots).
+      # BATTERY-powered Nest cam/doorbell? Google stops battery streams after 5 minutes, so
+      # replace this card with a "tap for live" tile:
+      #   - type: tile
+      #     view_layout: {grid-area: cam}
+      #     entity: *camera
+      #     name: Front door (tap for live)
+      #     tap_action: {action: more-info}
+      - type: picture-entity
+        view_layout: {grid-area: cam}
+        entity: *camera
+        camera_view: live
+        show_name: false
+        show_state: false
+        aspect_ratio: "16:9"
+        fit_mode: cover
+
+      - type: custom:clock-weather-card
+        view_layout: {grid-area: clock}
+        entity: *weather
+        sun_entity: sun.sun
+        locale: en-GB
+        time_format: 24
+        date_pattern: ccc d LLL
+        forecast_rows: 4
+        animated_icon: false
+        show_decimal: false
+
+      - type: custom:calendar-card-pro
+        view_layout: {grid-area: cal}
+        entities:
+          - entity: *calendar
+            accent_color: '#03a9f4'
+        days_to_show: 2
+        show_empty_days: true
+        empty_day_text: Nothing planned
+        show_past_events: false
+        show_location: true
+        today_indicator: true
+        allday_badge: title
+        time_24h: true
+        refresh_interval: 15
+        height: 100%
+
+      - type: custom:apexcharts-card
+        view_layout: {grid-area: chart}
+        section_mode: true
+        graph_span: 24h
+        span: {start: hour, offset: -1h}
+        update_interval: 5min
+        now: {show: true, label: Now}
+        header: {show: true, title: Agile price (p/kWh), show_states: false}
+        yaxis: [{min: ~0, decimals: 0}]
+        apex_config:
+          legend: {show: false}
+          plotOptions:
+            bar:
+              columnWidth: 85%
+              colors:
+                ranges:
+                  - {from: -100, to: 0, color: '#2196f3'}
+                  - {from: 0, to: 15, color: '#43a047'}
+                  - {from: 15, to: 25, color: '#fb8c00'}
+                  - {from: 25, to: 200, color: '#e53935'}
+        series:
+          - entity: *octopus_rates_today
+            name: Price
+            type: column
+            unit: p
+            float_precision: 1
+            time_delta: '+15min'   # centre each bar on its half-hour slot
+            show: {in_header: false, legend_value: false}
+            # Today's rates plus tomorrow's (published ~4pm), from the matching next_day_rates entity.
+            data_generator: |
+              const next = hass.states[entity.entity_id.replace('current_day_rates', 'next_day_rates')];
+              const rates = [...(entity.attributes.rates || []), ...((next && next.attributes.rates) || [])];
+              return rates.map((r) => [new Date(r.start).getTime(), Math.round(r.value_inc_vat * 1000) / 10]);
+
+      - type: custom:button-card
+        view_layout: {grid-area: price}
+        section_mode: true   # fill the grid cell's height
+        entity: *octopus_rate
+        variables:
+          today: *octopus_rates_today
+          tomorrow: *octopus_rates_tomorrow
+        show_icon: false
+        show_name: false
+        show_state: false
+        tap_action: {action: none}
+        custom_fields:
+          label: Agile price now
+          price: |
+            [[[ const p = parseFloat(entity.state) * 100;
+                return isNaN(p) ? '–' : p.toFixed(1) + '<span style="font-size:0.5em">p/kWh</span>'; ]]]
+          sub: |
+            [[[
+              const rates = [
+                ...((states[variables.today] && states[variables.today].attributes.rates) || []),
+                ...((states[variables.tomorrow] && states[variables.tomorrow].attributes.rates) || []),
+              ];
+              const now = Date.now();
+              const i = rates.findIndex((r) => new Date(r.start) <= now && now < new Date(r.end));
+              if (i < 0) return 'Waiting for prices…';
+              const hm = (d) => new Date(d).toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'});
+              const day = (d) => new Date(d).toDateString() === new Date().toDateString() ? '' : ' tomorrow';
+              const pence = (r) => (r.value_inc_vat * 100).toFixed(1) + 'p';
+              const ahead = rates.slice(i + 1);
+              const best = ahead.reduce((a, b) => (b.value_inc_vat < a.value_inc_vat ? b : a), rates[i]);
+              return `until ${hm(rates[i].end)}` + (ahead.length ? ` · then ${pence(ahead[0])}` : '') +
+                `<br>cheapest ahead: <b>${pence(best)}</b> at ${hm(best.start)}${day(best.start)}`;
+            ]]]
+        styles:
+          card: [height: 100%, padding: 12px 16px, box-sizing: border-box]
+          grid:
+            - grid-template-areas: '"label" "price" "sub"'
+            - grid-template-rows: min-content 1fr min-content
+            - grid-template-columns: 1fr
+            - justify-items: start
+          custom_fields:
+            label: [font-size: 14px, opacity: 0.7, justify-self: start]
+            price:
+              - align-self: center
+              - font-size: clamp(32px, 7vh, 56px)   # shrinks on shorter screens
+              - font-weight: 600
+              - line-height: 1.1
+              - color: |
+                  [[[ const p = parseFloat(entity.state) * 100;
+                      return isNaN(p) ? 'inherit' : p <= 0 ? '#2196f3' : p < 15 ? '#43a047' : p < 25 ? '#fb8c00' : '#e53935'; ]]]
+            sub: [font-size: 14px, opacity: 0.85, text-align: left, line-height: 1.5]
+
+      # Tiles: full version (with usage sparkline + battery gauge) on screens at least
+      # 700 CSS px tall; a compact version on smaller screens (e.g. a 960x600 viewport).
+      - type: grid
+        view_layout:
+          grid-area: tiles
+          show: {mediaquery: "(min-height: 700px)"}
+        columns: 2
+        square: false
+        cards:
+          - &tile_usage
+            type: tile
+            entity: *octopus_demand
+            name: Using now
+            icon: mdi:flash
+            color: amber
+            features_position: bottom
+            features:
+              - type: trend-graph
+                hours_to_show: 6
+          - &tile_car
+            type: tile
+            entity: *car_battery
+            name: e-Niro
+            icon: mdi:car-electric
+            color: light-blue
+            features_position: bottom
+            features:
+              - type: bar-gauge
+                min: 0
+                max: 100
+          - &tile_cost
+            type: tile
+            entity: *octopus_cost
+            name: Today so far
+            icon: mdi:currency-gbp
+            color: green
+          - &tile_indoor
+            type: tile
+            entity: *thermostat
+            name: Indoor
+            state_content: current_temperature
+            color: deep-orange
+      - type: grid
+        view_layout:
+          grid-area: tiles
+          show: {mediaquery: "(max-height: 699.98px)"}
+        columns: 2
+        square: false
+        cards:
+          - {<<: *tile_usage, name: Using, features: []}
+          - {<<: *tile_car, features: []}
+          - {<<: *tile_cost, name: Today}
+          - *tile_indoor
+
+      - type: grid
+        view_layout: {grid-area: dock}
+        columns: 5
+        square: false
+        cards:
+          - type: custom:button-card
+            template: launcher
+            name: Shopping
+            icon: mdi:cart-outline
+            color: '#fbbc04'
+            variables:
+              app: com.google.android.keep
+          - type: custom:button-card
+            template: launcher
+            name: Spotify
+            icon: mdi:spotify
+            color: '#1db954'
+            variables:
+              app: com.spotify.music
+          - type: custom:button-card
+            template: launcher
+            name: Claude
+            icon: mdi:asterisk
+            color: '#d97757'
+            variables:
+              # Claude's assistant (voice) screen. If a Claude update breaks this, delete the
+              # `intent:` line and the button opens the app normally (then tap the voice icon).
+              intent: intent:#Intent;action=android.intent.action.VOICE_ASSIST;component=com.anthropic.claude/.mainactivity.AssistantOverlayActivity;launchFlags=0x10000000;end
+              app: com.anthropic.claude
+              hold_app: com.anthropic.claude     # press and hold: open the full app
+          - type: custom:button-card
+            template: launcher
+            name: Gemini
+            icon: mdi:microphone
+            color: '#4285f4'
+            variables:
+              intent: intent:#Intent;action=android.intent.action.VOICE_ASSIST;package=com.google.android.googlequicksearchbox;launchFlags=0x10000000;end
+              hold_app: com.google.android.apps.bard   # press and hold: open the Gemini app
+          - type: custom:button-card
+            template: launcher
+            name: Home
+            icon: mdi:home-outline
+            color: '#9e9e9e'
+            variables:
+              intent: intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.HOME;launchFlags=0x10000000;end
