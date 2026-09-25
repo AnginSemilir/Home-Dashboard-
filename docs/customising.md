@@ -33,4 +33,4 @@ The code is written to be edited by an AI assistant. Open this repository in Cla
 - "Make the price chart show 12 hours instead of 24."
 - "Add a sixth button that opens the BBC Sounds app."
 
-Then check it: `npm test && npm run test:e2e` runs all the tests, and `npm run preview` saves screenshots of the panel at three tablet sizes into `shots/`.
+Then check it: `npm test && npm run test:e2e` runs all the tests, and `npm run preview` saves screenshots of the panel at three tablet sizes into `shots/`. (Once per computer, first run `npm install` and `npx playwright install chromium` for the browser the tests use.)

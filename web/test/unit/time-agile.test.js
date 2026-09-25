@@ -55,6 +55,16 @@ test('ratesFromOctopus: sorts, de-duplicates, prefers direct-debit prices, fills
   assert.equal(rates[2].end - rates[2].start, 1800e3);
 });
 
+test('ratesFromOctopus: a fixed/variable tariff\'s open-ended current rate covers the whole period asked for', () => {
+  const until = iso('2026-09-27T00:00:00+01:00');
+  const rates = ratesFromOctopus([
+    { value_inc_vat: 24.5, valid_from: '2026-07-01T00:00:00+01:00', valid_to: null },
+    { value_inc_vat: 26, valid_from: '2026-04-01T00:00:00+01:00', valid_to: '2026-07-01T00:00:00+01:00' },
+  ], { until });
+  assert.equal(rates[1].end, until);
+  assert.equal(priceSummary(rates, iso('2026-09-25T12:00:00+01:00')).current.p, 24.5);
+});
+
 test('priceSummary: current, next, cheapest ahead (including tomorrow and "now")', () => {
   const dayStart = iso('2026-09-24T23:00:00Z'); // Fri 25 Sep 00:00 BST
   const rates = slots(dayStart, 96, (i) => (i === 50 ? 2 : 20 + (i % 3)));

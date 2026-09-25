@@ -80,6 +80,7 @@ export class LiveStream {
     this.endsAt = 0;
     this.connectTimeoutMs = connectTimeoutMs;
     this.live = false;
+    this.stopped = false;
   }
 
   async start(video) {
@@ -92,23 +93,43 @@ export class LiveStream {
     pc.addTransceiver('video', { direction: 'recvonly' });
     pc.createDataChannel('dataSendChannel');
     const stream = new MediaStream();
+    // Browsers fire 'track' as soon as the answer is applied, before any media arrives. The
+    // video track "unmutes" when frames actually flow; only then is the view live.
+    const goLive = () => {
+      if (this.live || this.stopped) return;
+      this.live = true;
+      this.onState('live');
+    };
     pc.addEventListener('track', (ev) => {
       stream.addTrack(ev.track);
       video.srcObject = stream;
       video.play?.().catch(() => {});
-      this.live = true;
-      this.onState('live');
+      if (ev.track.kind !== 'video') return;
+      if (ev.track.muted) ev.track.addEventListener('unmute', goLive, { once: true });
+      else goLive();
     });
     pc.addEventListener('connectionstatechange', () => {
-      if (['failed', 'closed'].includes(pc.connectionState)) this.onState('ended');
+      if (pc.connectionState === 'failed' && this.pc === pc) this.stop();
     });
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    if (this.stopped) return null;
     const res = await this.nest.command(this.id, 'sdm.devices.commands.CameraLiveStream.GenerateWebRtcStream', { offerSdp: offer.sdp });
-    this.session = res.mediaSessionId;
+    if (this.stopped) {
+      // Closed while Google was setting up the stream: end that new session straight away.
+      await this.#sendStop(res.mediaSessionId);
+      return null;
+    }
+    this.session = res.mediaSessionId || null;
     let answer = res.answerSdp || '';
     if (!answer.endsWith('\n')) answer += '\n';
-    await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+    try {
+      await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+    } catch (e) {
+      if (this.stopped) return null;
+      throw e;
+    }
+    if (this.stopped) return null;
     // A sleeping battery camera can take a few seconds to wake; give up if no video comes.
     this.timers.push(setTimeout(() => { if (!this.live) { this.onState('timeout'); this.stop(); } }, this.connectTimeoutMs));
     const expires = res.expiresAt ? Date.parse(res.expiresAt) : Date.now() + 5 * 60e3;
@@ -131,7 +152,10 @@ export class LiveStream {
     }
   }
 
+  /** Safe to call more than once, and while start() is still waiting on Google. */
   async stop() {
+    if (this.stopped) return;
+    this.stopped = true;
     for (const t of this.timers) { clearTimeout(t); clearInterval(t); }
     this.timers = [];
     const { session, pc } = this;
@@ -139,10 +163,13 @@ export class LiveStream {
     this.pc = null;
     try { pc?.close(); } catch { /* already closed */ }
     this.onState('ended');
-    if (session) {
-      try {
-        await this.nest.command(this.id, 'sdm.devices.commands.CameraLiveStream.StopWebRtcStream', { mediaSessionId: session });
-      } catch { /* the session expires on its own anyway */ }
-    }
+    await this.#sendStop(session);
+  }
+
+  async #sendStop(session) {
+    if (!session) return;
+    try {
+      await this.nest.command(this.id, 'sdm.devices.commands.CameraLiveStream.StopWebRtcStream', { mediaSessionId: session });
+    } catch { /* the session expires on its own anyway */ }
   }
 }

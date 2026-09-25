@@ -31,9 +31,9 @@ export function rateResults(from, to) {
   return out.reverse();
 }
 
-export function telemetry(now, dayStart) {
+export function telemetry(now, dayStart, stopsAt = Infinity) {
   const rows = [];
-  for (let t = dayStart; t <= now; t += 1800e3) {
+  for (let t = dayStart; t <= Math.min(now, stopsAt); t += 1800e3) {
     rows.push({ readAt: new Date(t).toISOString(), consumption: 1000, consumptionDelta: 180 + ((t / 1800e3) % 5) * 60, demand: 520 + ((t / 1800e3) % 7) * 40, export: 0 });
   }
   return rows;
@@ -110,7 +110,7 @@ export function fullSettings(now) {
  * Install fake network for a Playwright page. Returns a log of calls, and `fail` to make a
  * service return errors (e.g. fail.add('octopus')).
  */
-export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false } = {}) {
+export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt } = {}) {
   const calls = [];
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
   const kiaPayload = await encryptReading(kiaReading || { battery: 78, range: 182, charging: false, plugged: false, updated: now - 2 * 3600e3 }, KIA_KEY);
@@ -120,6 +120,8 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     const url = new URL(req.url());
     calls.push({ service: 'octopus', url: req.url(), headers: req.headers(), body: req.postData() });
     if (fail.has('octopus')) return json(route, { detail: 'Service unavailable' }, 503);
+    if (url.pathname === '/v1/graphql/' && fail.has('graphql')) return json(route, { errors: [{ message: 'Invalid API key.', extensions: { errorCode: 'KT-CT-1138' } }] });
+    if (url.pathname.includes('/standard-unit-rates/') && fail.has('rates')) return json(route, { detail: 'Service unavailable' }, 503);
     if (url.pathname === '/v1/graphql/') {
       const q = JSON.parse(req.postData() || '{}').query || '';
       if (q.includes('obtainKrakenToken')) {
@@ -127,7 +129,7 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
         const token = `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
         return json(route, { data: { obtainKrakenToken: { token, refreshToken: 'krt', refreshExpiresIn: exp + 86400 } } });
       }
-      if (q.includes('smartMeterTelemetry')) return json(route, { data: { smartMeterTelemetry: telemetry(now, dayStart) } });
+      if (q.includes('smartMeterTelemetry')) return json(route, { data: { smartMeterTelemetry: telemetry(now, dayStart, homeMiniStopsAt) } });
       if (q.includes('electricityAgreements')) {
         return json(route, { data: { account: { electricityAgreements: [{ meterPoint: { mpan: '1900026354329', direction: 'IMPORT', meters: [{ serialNumber: '22L4132637', smartImportElectricityMeter: { deviceId: '00-11-22-33-44-55-66-77' } }], agreements: [{ validFrom: '2025-01-01T00:00:00+00:00', validTo: null, tariff: { productCode: 'AGILE-24-10-01', tariffCode: TARIFF } }] } }] } } });
       }
@@ -153,6 +155,10 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     return json(route, { access_token: 'at-refreshed', expires_in: 3599, token_type: 'Bearer' });
   });
 
+  await page.route(/^https:\/\/oauth2\.googleapis\.com\/revoke/, (route) => {
+    calls.push({ service: 'google-revoke', body: Object.fromEntries(new URLSearchParams(route.request().postData() || '')) });
+    return json(route, {});
+  });
   await page.route(/^https:\/\/smartdevicemanagement\.googleapis\.com\//, async (route) => {
     const req = route.request();
     const url = new URL(req.url());

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeEvent, groupDays, dateToMs } from '../../js/calendar.js';
+import { normalizeEvent, groupDays, dateToMs, fetchEvents } from '../../js/calendar.js';
 import { describe, lookupPlace } from '../../js/weather.js';
 import { encryptReading, decryptReading, newKey } from '../../js/kia.js';
 import { detectEnv, actionFor, appLink, launchIntent, APPS } from '../../js/launcher.js';
@@ -38,6 +38,22 @@ test('calendar: today hides finished events; all-day first; multi-day on both da
   assert.equal(tomorrow.label, 'Tomorrow');
 });
 
+test('calendar: the same event on two chosen calendars shows once', () => {
+  const now = iso('2026-09-25T09:00:00+01:00');
+  const raw = { id: 'evt123', iCalUID: 'abc@google.com', summary: 'Parents evening', start: { dateTime: '2026-09-25T18:00:00+01:00' }, end: { dateTime: '2026-09-25T19:00:00+01:00' } };
+  const events = [normalizeEvent(raw, { id: 'family' }), normalizeEvent(raw, { id: 'me' })];
+  assert.deepEqual(groupDays(events, now)[0].events.map((e) => e.title), ['Parents evening']);
+});
+
+test('calendar: one failing calendar still shows the others and names the failure; all failing throws', async () => {
+  const google = { api: async (url) => { if (url.includes('school')) throw new Error('404 Not Found'); return { items: [] }; } };
+  const now = iso('2026-09-25T09:00:00+01:00');
+  const r = await fetchEvents(google, [{ id: 'me', name: 'Me' }, { id: 'school', name: 'School' }], now);
+  assert.deepEqual(r.events, []);
+  assert.deepEqual(r.failed.map((f) => f.name), ['School']);
+  await assert.rejects(fetchEvents(google, [{ id: 'school', name: 'School' }], now), /404/);
+});
+
 test('weather: WMO codes', () => {
   assert.equal(describe(0, true).icon, 'sun');
   assert.equal(describe(0, false).icon, 'moon');
@@ -65,6 +81,8 @@ test('kia: encrypt/decrypt round trip; wrong key explains itself', async () => {
   const key = newKey();
   const payload = await encryptReading({ battery: 78 }, key);
   assert.deepEqual(Object.keys(payload).sort(), ['data', 'iv', 'v']);
+  const other = await encryptReading({ battery: 5, range: 12, charging: true, plugged: true, updated: 1790322000000 }, key);
+  assert.equal(payload.data.length, other.data.length, 'same size whatever the reading');
   assert.deepEqual(await decryptReading(payload, key), { battery: 78 });
   await assert.rejects(decryptReading(payload, newKey()), /key does not match/);
   await assert.rejects(decryptReading({ v: 2 }, key), /format/);
@@ -100,7 +118,7 @@ test('chart: bars, now marker, tomorrow note, empty state, no NaN', () => {
   assert.equal((out.match(/class="ch-bar/g) || []).length, 31); // 08:30 (an hour before the 09:30 slot) to midnight
   assert.match(out, /class="ch-now"/);
   assert.match(out, /~4pm/);
-  assert.match(out, /#3d9bff/, 'plunge price is blue');
+  assert.match(out, /#3d9bff" class="ch-bar band-plunge/, 'plunge price is blue (and themeable via CSS)');
   assert.doesNotMatch(out, /NaN/);
   assert.match(renderChart({ rates: [], now, width: 300, height: 200 }), /No prices yet/);
 });

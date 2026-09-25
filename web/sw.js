@@ -16,6 +16,11 @@ self.addEventListener('fetch', (e) => {
         const cache = await caches.open(CACHE);
         cache.put(e.request, res.clone());
       }
+      // A GitHub Pages error (404/5xx) during the nightly reload: use the last good copy.
+      if (!res.ok) {
+        const hit = await caches.match(e.request, { ignoreSearch: true });
+        if (hit) return hit;
+      }
       return res;
     } catch {
       const hit = await caches.match(e.request, { ignoreSearch: true });

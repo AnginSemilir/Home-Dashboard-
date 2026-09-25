@@ -135,38 +135,46 @@ test('night mode dims the panel when idle, a tap wakes it for 5 minutes', async 
   await day.ctx.close();
 });
 
+// Like a real browser: applying the answer fires 'track' straight away with a *muted* video
+// track (no frames yet). window.__unmute() makes frames "arrive". The mock's answer SDP is fake,
+// so the real setRemoteDescription is skipped.
+const fakeCameraRTC = () => {
+  const Real = window.RTCPeerConnection;
+  window.RTCPeerConnection = class extends Real {
+    async setRemoteDescription(d) {
+      window.__answer = d.sdp;
+      const track = document.createElement('canvas').captureStream().getVideoTracks()[0];
+      Object.defineProperty(track, 'muted', { value: true, configurable: true });
+      window.__unmute = () => { Object.defineProperty(track, 'muted', { value: false, configurable: true }); track.dispatchEvent(new Event('unmute')); };
+      const ev = new Event('track');
+      ev.track = track;
+      this.dispatchEvent(ev);
+    }
+  };
+};
+const nestCmds = (calls) => calls.filter((c) => c.service === 'nest' && c.url.endsWith(':executeCommand')).map((c) => JSON.parse(c.body));
+
 test('camera: a tap asks Nest for a WebRTC stream and a battery camera stops after 5 minutes', async () => {
-  const { ctx, page, calls, problems } = await openPanel(env, {
-    clock: 'install',
-    // Real offer from Chromium. The mock's answer is fake, so skip applying it and hand the
-    // page a blank video track instead, as if the camera had connected.
-    initScript: () => {
-      const Real = window.RTCPeerConnection;
-      window.RTCPeerConnection = class extends Real {
-        async setRemoteDescription(d) {
-          window.__answer = d.sdp;
-          const ev = new Event('track');
-          ev.track = document.createElement('canvas').captureStream().getVideoTracks()[0];
-          queueMicrotask(() => this.dispatchEvent(ev));
-        }
-      };
-    },
-  });
+  const { ctx, page, calls, problems } = await openPanel(env, { clock: 'install', initScript: fakeCameraRTC });
   await ready(page);
   await page.locator('#cam').click();
-  const cmds = () => calls.filter((c) => c.service === 'nest' && c.url.endsWith(':executeCommand')).map((c) => JSON.parse(c.body));
-  const gen = await waitFor(() => cmds().find((c) => c.command.endsWith('GenerateWebRtcStream')), 'GenerateWebRtcStream');
+  const gen = await waitFor(() => nestCmds(calls).find((c) => c.command.endsWith('GenerateWebRtcStream')), 'GenerateWebRtcStream');
   assert.ok(calls.find((c) => c.service === 'nest' && c.url.endsWith(':executeCommand')).url.endsWith('/devices/CAM1:executeCommand'));
   const sdp = gen.params.offerSdp;
   assert.ok(sdp.indexOf('m=audio') < sdp.indexOf('m=video') && sdp.indexOf('m=video') < sdp.indexOf('m=application'), 'audio, video, data in that order');
   await waitFor(() => page.evaluate(() => window.__answer), 'answer');
   assert.equal(await page.evaluate(() => window.__answer), 'v=0\r\nfake-answer\n');
   assert.match(await page.locator('#cam').getAttribute('class'), /expanded/);
+  assert.equal(await page.evaluate(() => document.querySelector('#cam video').muted), true, 'camera audio stays muted');
   await page.clock.runFor(2000);
+  assert.match(await text(page, '.cam-bar'), /connecting/, 'not "live" until frames arrive');
+  await page.evaluate(() => window.__unmute());
+  await page.clock.runFor(1000);
   assert.match(await text(page, '.cam-bar'), /LIVE[\s\S]*4:5\d/);
-  assert.equal(cmds().some((c) => c.command.endsWith('StopWebRtcStream')), false);
-  await page.clock.runFor(5 * 60e3);
-  const stop = await waitFor(() => cmds().find((c) => c.command.endsWith('StopWebRtcStream')), 'StopWebRtcStream');
+  await page.clock.runFor(60e3);
+  assert.equal(nestCmds(calls).some((c) => c.command.endsWith('StopWebRtcStream')), false, 'the 30 s no-video check passed');
+  await page.clock.runFor(4 * 60e3);
+  const stop = await waitFor(() => nestCmds(calls).find((c) => c.command.endsWith('StopWebRtcStream')), 'StopWebRtcStream');
   assert.deepEqual(stop.params, { mediaSessionId: 'session-1' });
   assert.doesNotMatch(await page.locator('#cam').getAttribute('class'), /expanded/);
   assert.equal(await page.locator('.cam-bar').isVisible(), false);
@@ -174,36 +182,47 @@ test('camera: a tap asks Nest for a WebRTC stream and a battery camera stops aft
   await ctx.close();
 });
 
-test("camera: if no video arrives it gives up after 30 s and says so", async () => {
-  const { ctx, page, calls } = await openPanel(env, {
-    clock: 'install',
-    initScript: () => {
-      const Real = window.RTCPeerConnection;
-      window.RTCPeerConnection = class extends Real { async setRemoteDescription() {} };
-    },
-  });
+test('camera: if no video arrives it gives up after 30 s and says so', async () => {
+  const { ctx, page, calls } = await openPanel(env, { clock: 'install', initScript: fakeCameraRTC });
   await ready(page);
   await page.locator('#cam').click();
   await page.locator('.cam-bar', { hasText: 'connecting' }).waitFor();
+  await waitFor(() => page.evaluate(() => window.__answer), 'answer');
   await page.clock.runFor(31e3);
   await page.locator('.toast', { hasText: "didn't send any video" }).waitFor();
-  await waitFor(() => calls.some((c) => c.service === 'nest' && /StopWebRtcStream/.test(c.body || '')), 'StopWebRtcStream');
+  await waitFor(() => nestCmds(calls).some((c) => c.command.endsWith('StopWebRtcStream')), 'StopWebRtcStream');
   assert.equal(await page.locator('.cam-bar').isVisible(), false);
   await ctx.close();
 });
 
-test('camera: the close button stops the stream straight away', async () => {
-  const { ctx, page, calls } = await openPanel(env, {
-    initScript: () => {
-      const Real = window.RTCPeerConnection;
-      window.RTCPeerConnection = class extends Real { async setRemoteDescription() {} };
-    },
-  });
+test('camera: closing while it connects is clean, and a new stream is not disturbed by the old one', async () => {
+  const { ctx, page, calls, problems } = await openPanel(env, { initScript: fakeCameraRTC });
   await ready(page);
+  // Hold Google's reply to the first GenerateWebRtcStream until the test lets it go.
+  let release;
+  const held = new Promise((r) => { release = r; });
+  let first = true;
+  await page.route(/smartdevicemanagement\.googleapis\.com\/.*:executeCommand/, async (route) => {
+    if (first && /GenerateWebRtcStream/.test(route.request().postData() || '')) { first = false; await held; }
+    return route.fallback();
+  });
   await page.locator('#cam').click();
-  await page.locator('.cam-bar').waitFor();
+  await page.locator('.cam-bar', { hasText: 'connecting' }).waitFor();
   await page.locator('.cam-bar .close').click();
-  await waitFor(() => calls.some((c) => c.service === 'nest' && /StopWebRtcStream/.test(c.body || '')), 'StopWebRtcStream');
+  assert.equal(await page.locator('.cam-bar').isVisible(), false);
+  await page.locator('#cam').click(); // second stream
+  await waitFor(() => page.evaluate(() => window.__answer), 'second answer');
+  await page.evaluate(() => window.__unmute());
+  await page.locator('.cam-bar', { hasText: 'LIVE' }).waitFor();
+  release(); // the first stream's reply finally arrives
+  await waitFor(() => nestCmds(calls).filter((c) => c.command.endsWith('StopWebRtcStream')).length >= 1, 'Stop for the abandoned stream');
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.cam-bar', { hasText: 'LIVE' }).isVisible(), true, 'second stream still showing');
+  assert.equal(await page.locator('#cam .dot.error').count(), 0, 'no false camera error');
+  assert.equal(await page.locator('.toast:not(.hidden)', { hasText: 'Camera:' }).count(), 0);
+  await page.locator('.cam-bar .close').click();
+  await waitFor(() => nestCmds(calls).filter((c) => c.command.endsWith('StopWebRtcStream')).length >= 2, 'Stop for the second stream');
+  assert.deepEqual(problems, []);
   await ctx.close();
 });
 
@@ -218,9 +237,11 @@ test('buttons in the kiosk app (Android WebView) open Android apps and screens',
   await page.waitForTimeout(800);
   await page.mouse.up();
   await waitFor(() => nav.length >= 6, 'six navigations');
+  assert.match(nav[0], /^intent:#Intent;action=android\.intent\.action\.MAIN;category=android\.intent\.category\.HOME;/);
+  assert.match(nav[1], /^intent:#Intent;action=android\.intent\.action\.VOICE_ASSIST;component=com\.anthropic\.claude\//);
   assert.deepEqual(nav, [
-    'intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.HOME;launchFlags=0x10000000;end',
-    'intent:#Intent;action=android.intent.action.VOICE_ASSIST;component=com.anthropic.claude/.mainactivity.AssistantOverlayActivity;launchFlags=0x10000000;end',
+    APPS.home.special,
+    APPS.claude.special,
     APPS.gemini.special,
     launchIntent('com.spotify.music'),
     launchIntent('com.google.android.keep'),

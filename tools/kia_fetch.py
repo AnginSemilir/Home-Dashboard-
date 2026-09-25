@@ -5,7 +5,8 @@ the car. Output is {"v": 1, "iv": ..., "data": ...}: AES-256-GCM with the base64
 KIA_PANEL_KEY, the same format web/js/kia.js decrypts.
 
 Environment: KIA_USERNAME, KIA_PASSWORD (or a Kia refresh token), KIA_PANEL_KEY,
-optional KIA_PIN, KIA_VIN, KIA_REGION (1 = Europe), KIA_BRAND (1 = Kia).
+optional KIA_PIN, KIA_VIN, KIA_REGION (1 = Europe), KIA_BRAND (1 = Kia). All of these come from
+repository *secrets*, which GitHub masks in the public logs.
 
 Usage: python tools/kia_fetch.py out/kia.json
 
@@ -23,14 +24,19 @@ from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 KM_PER_MILE = 1.609344
+PAD_TO = 256  # every file is the same size, so its length says nothing about the car
 
 
 def encrypt_reading(reading: dict, key_b64: str) -> dict:
     key = base64.b64decode(key_b64)
     if len(key) != 32:
         raise ValueError("KIA_PANEL_KEY must be 32 bytes, base64 encoded (use the panel's 'Generate a new key')")
+    plain = json.dumps(reading).encode()
+    if len(plain) > PAD_TO:
+        raise ValueError("Kia reading too long")
     iv = os.urandom(12)
-    data = AESGCM(key).encrypt(iv, json.dumps(reading).encode(), None)  # ciphertext + tag, as WebCrypto expects
+    # Trailing spaces are ignored by JSON.parse on the panel. Output is ciphertext + tag, as WebCrypto expects.
+    data = AESGCM(key).encrypt(iv, plain.ljust(PAD_TO, b" "), None)
     return {"v": 1, "iv": base64.b64encode(iv).decode(), "data": base64.b64encode(data).decode()}
 
 

@@ -23,7 +23,7 @@ export async function startBrowser() {
  * test drives with page.clock.runFor). `settings`: null for a first run.
  */
 export async function openPanel(env, {
-  now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript,
+  now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
 } = {}) {
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block' });
   const page = await ctx.newPage();
@@ -32,7 +32,7 @@ export async function openPanel(env, {
   page.on('pageerror', (e) => problems.push(e.message));
   if (clock === 'install') await page.clock.install({ time: now });
   else await page.clock.setFixedTime(now);
-  const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading });
+  const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt });
   const s = settings === undefined ? fullSettings(now) : settings;
   if (s) {
     // Only on the first load, so tests can reload and keep what the page saved.

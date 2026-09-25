@@ -23,6 +23,7 @@ What's different in Chrome:
 - **Home** can't be done by a web page in Chrome. The button shows a reminder to swipe up from the bottom edge instead.
 - **Claude** opens the Claude app on a new chat (tap its voice button); press-and-hold does the same.
 - **Gemini**, **Spotify** and **Shopping** open their apps.
+- The **car** tile (without Kia data) opens the Kia app's Play Store page; tap **Open** there.
 - Keep-screen-on uses the browser's Wake Lock, which works while the panel is in front.
 
 The panel detects where it's running and picks the right kind of link. You can force it in ⚙ → Panel → **App buttons mode**.
@@ -40,6 +41,7 @@ The panel detects where it's running and picks the right kind of link. You can f
 
 It's laid out for the M10's 1280×800 screen in landscape, and also tested at 1333×800 and 960×600.
 
-## Anyone at the wall can open ⚙
+## Keeping the keys safe
 
-The ⚙ button shows your settings (keys are hidden, but **Copy settings** reveals them). For a family wall that's usually fine. If visitors use the tablet unsupervised, bear it in mind.
+- **Anyone at the wall can open ⚙.** It shows your settings (keys are hidden, but **Copy settings** reveals them). For a family wall that's usually fine. If visitors use the tablet unsupervised, bear it in mind.
+- **Browser storage is shared by every page on `anginsemilir.github.io`.** If you ever publish another GitHub Pages site from this GitHub account, pages on it could read the panel's settings in the same browser. So on the tablet, don't open other `anginsemilir.github.io` pages in the browser that holds the panel's settings (the kiosk app only ever opens the panel). For complete separation, give the panel its own domain (GitHub → Settings → Pages → Custom domain) and update the Google redirect URI to match.

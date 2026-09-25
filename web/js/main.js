@@ -2,7 +2,7 @@
 
 import { loadSettings, saveSettings, loadCache, saveCache } from './config.js';
 import { backoffMs, describeError, HttpError } from './util.js';
-import { inWindow, partsInTz } from './time.js';
+import { inWindow, partsInTz, hhmm } from './time.js';
 import { Octopus, costToday } from './octopus.js';
 import { Google } from './google.js';
 import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
@@ -59,38 +59,59 @@ function renderAll() {
 const sources = {};
 
 /**
- * Run `fn` now and then every `interval()` ms. Failures back off (30 s → 15 min) and mark
- * the source stale once its data is older than `staleAfter`.
+ * Run `fn` now and then every `interval()` ms. Failures back off (30 s → 15 min). A source
+ * turns stale (amber) once its data is older than `staleAfter`; `dataAt()` says how old the
+ * data itself is when that differs from the last successful call (e.g. a Home Mini that has
+ * stopped reporting still answers). `clear()` forgets cached data when the source is switched off.
  */
-function source(name, fn, interval, { staleAfter, enabled = () => true, render = renderAll } = {}) {
-  let failures = 0, timer = null, lastOk = 0;
+function source(name, fn, interval, { staleAfter, dataAt, clear, enabled = () => true, render = renderAll } = {}) {
+  let failures = 0, timer = null, lastOk = 0, busy = false, nextAt = 0;
+  const staleCheck = () => {
+    const st = state.status[name];
+    const t = dataAt?.() ?? lastOk;
+    if (st?.ok && staleAfter && Date.now() - t > staleAfter) st.stale = true;
+  };
   const run = async () => {
+    if (busy) return;
     clearTimeout(timer);
-    if (!enabled()) { state.status[name] = null; return; }
+    if (!enabled()) {
+      state.status[name] = null;
+      if (clear) { clear(); persist(); render(); }
+      return;
+    }
+    busy = true;
     try {
       await fn();
       failures = 0;
       lastOk = Date.now();
       state.status[name] = { ok: true, at: lastOk };
+      staleCheck();
     } catch (e) {
       failures++;
       const rateLimited = e instanceof HttpError && e.status === 429;
       state.status[name] = { error: describeError(e), at: Date.now(), stale: true };
       if (rateLimited) failures = Math.max(failures, 4);
       console.warn(`[${name}]`, e);
+    } finally {
+      busy = false;
     }
     persist();
     render();
-    timer = setTimeout(run, failures ? backoffMs(failures) : interval());
+    const delay = failures ? backoffMs(failures) : interval();
+    nextAt = Date.now() + delay;
+    timer = setTimeout(run, delay);
   };
-  sources[name] = { run, staleCheck: () => {
-    const st = state.status[name];
-    if (st?.ok && staleAfter && Date.now() - lastOk > staleAfter) st.stale = true;
-  } };
+  // Coming back to the panel: refresh now, unless it's backing off after errors.
+  const runIfDue = () => { if (!busy && (failures === 0 || Date.now() >= nextAt)) run(); };
+  sources[name] = { run, runIfDue, staleCheck };
   return run;
 }
 
 const nightNow = () => inWindow(Date.now(), settings.panel.nightFrom, settings.panel.nightTo, tz);
+
+// Half-hourly readings are stamped with the start of their half hour, so a healthy reading
+// can be up to ~30 minutes old.
+const HOME_MINI_STALE = 45 * 60e3;
 
 let discovering = null;
 /** Look up tariff, meter and Home Mini from the account (once a day). Shared by both sources. */
@@ -103,21 +124,29 @@ async function ensureDiscovered() {
 }
 
 async function refreshRates() {
-  await ensureDiscovered();
+  try {
+    await ensureDiscovered();
+  } catch (e) {
+    // Prices are public: keep them coming with the tariff we already know.
+    if (!octopus.tariff()) throw e;
+    console.warn('[rates] account lookup failed; using the known tariff', e);
+  }
   state.rates = await octopus.rates(Date.now(), tz);
   try { state.standingP = await octopus.standingCharge(); } catch { /* cost just omits it */ }
   updateCost();
 }
 
 function updateCost() {
-  state.costP = state.tele ? costToday(state.tele.slots, state.rates, state.standingP || 0) : null;
+  // No figure rather than a wrong one: every half hour with usage needs a known price.
+  const priced = (s) => !s.kwh || state.rates.some((r) => r.start <= s.start && s.start < r.end);
+  state.costP = state.tele && state.tele.slots.every(priced) ? costToday(state.tele.slots, state.rates, state.standingP || 0) : null;
 }
 
 async function refreshHomeMini() {
   await ensureDiscovered();
   const tele = await octopus.telemetryToday(Date.now(), tz);
   state.tele = tele;
-  if (Number.isFinite(tele.demandW)) {
+  if (Number.isFinite(tele.demandW) && Date.now() - tele.demandAt < HOME_MINI_STALE) {
     state.demand.push({ t: Date.now(), w: tele.demandW });
     state.demand = state.demand.filter((p) => p.t > Date.now() - 2 * 3600e3);
   }
@@ -127,13 +156,16 @@ async function refreshHomeMini() {
 async function refreshNest() {
   const d = await nest.device(settings.google.thermostatId);
   state.thermo = { ...parseThermostat(d), at: Date.now() };
-  if (settings.google.cameraId && !state.camera) {
-    try { state.camera = parseCamera(await nest.device(settings.google.cameraId)); } catch { /* name only */ }
+  if (settings.google.cameraId && state.camera?.id !== settings.google.cameraId) {
+    try { state.camera = { ...parseCamera(await nest.device(settings.google.cameraId)), id: settings.google.cameraId }; } catch { /* name only */ }
   }
 }
 
 async function refreshCalendar() {
-  state.events = await fetchEvents(google, settings.google.calendars, Date.now(), tz);
+  const { events, failed } = await fetchEvents(google, settings.google.calendars, Date.now(), tz);
+  state.events = events;
+  // Show what we have, but say which calendar is missing.
+  if (failed.length) throw new Error(`Couldn't read ${failed.map((f) => `"${f.name}" (${describeError(f.error)})`).join(', ')}`);
 }
 
 async function refreshWeather() {
@@ -141,35 +173,48 @@ async function refreshWeather() {
 }
 
 async function refreshKia() {
-  state.kia = await fetchKia(settings.kia);
+  const r = await fetchKia(settings.kia);
+  state.kia = r;
+  // The reading stays on screen, but say so if the GitHub job has stopped updating it.
+  if (r.fetched && Date.now() - r.fetched > KIA_JOB_STALE) {
+    throw new Error(`The Kia GitHub job last ran ${Math.round((Date.now() - r.fetched) / 3600e3)} h ago. Check the repository's Actions tab.`);
+  }
 }
+const KIA_JOB_STALE = 3 * 3600e3;
 
 // ---------- Camera ----------
 async function openCamera() {
   if (live && live.state !== 'ended') { live.expanded = !live.expanded; ui.renderCamera(refs, settings, state, live); return; }
   if (!settings.google.cameraId) { ui.toast(refs, 'Set up the Nest camera in Settings'); return; }
-  live = { state: 'connecting', expanded: true, endsAt: 0 };
+  // Each tap gets its own session object; callbacks from an older stream can't touch a newer one.
+  const mine = { state: 'connecting', expanded: true, endsAt: 0 };
+  live = mine;
   const stream = new LiveStream(nest, settings.google.cameraId, {
     battery: settings.panel.cameraBattery,
     onState: (st) => {
-      if (!live) return;
+      if (live !== mine) return;
       if (st === 'timeout') { ui.toast(refs, "The camera didn't send any video. Tap to try again."); return; }
-      live.state = st;
+      mine.state = st;
       if (st === 'ended') live = null;
       ui.renderCamera(refs, settings, state, live);
     },
   });
-  live.stream = stream;
+  mine.stream = stream;
   ui.renderCamera(refs, settings, state, live);
   try {
     await stream.start(refs.video);
-    if (live) live.endsAt = stream.endsAt;
-    state.status.camera = { ok: true, at: Date.now() };
+    if (live === mine) {
+      mine.endsAt = stream.endsAt;
+      state.status.camera = { ok: true, at: Date.now() };
+    }
   } catch (e) {
-    state.status.camera = { error: describeError(e), at: Date.now() };
-    ui.toast(refs, `Camera: ${describeError(e)}`);
     await stream.stop();
-    live = null;
+    if (live === mine) {
+      // Only report errors for the session still on screen, not one the user already closed.
+      state.status.camera = { error: describeError(e), at: Date.now() };
+      ui.toast(refs, `Camera: ${describeError(e)}`);
+      live = null;
+    }
   }
   ui.renderCamera(refs, settings, state, live);
 }
@@ -189,13 +234,20 @@ function launch(name, hold) {
 }
 
 /** Tapping a card with a red or amber dot says why. */
-function explain(st) {
-  const why = st?.error || (st?.stale ? 'Not updated recently. The panel keeps retrying by itself.' : '');
+function explain(st, staleWhy = 'Not updated recently. The panel keeps retrying by itself.') {
+  const why = st?.error || (st?.stale ? staleWhy : '');
   if (why) ui.toast(refs, why, 6000);
 }
 
+const homeMiniStaleWhy = () => (state.tele?.demandAt
+  ? `No new Home Mini reading since ${hhmm(state.tele.demandAt, tz)}. Check it's plugged in and on Wi-Fi (the Octopus app shows the same).`
+  : undefined);
+
 // ---------- Night mode, wake lock, daily reload ----------
+// An automatic nightly reload isn't a touch, so it shouldn't wake the screen.
+const AUTO_RELOAD = 'wallpanel.autoreload';
 let lastTouch = Date.now();
+try { if (sessionStorage.getItem(AUTO_RELOAD)) { lastTouch = 0; sessionStorage.removeItem(AUTO_RELOAD); } } catch { /* storage blocked */ }
 let nightSnoozeUntil = 0;
 function updateNight() {
   const show = nightNow() && Date.now() > nightSnoozeUntil && Date.now() - lastTouch > 90e3 && !live;
@@ -216,7 +268,10 @@ function scheduleDailyReload() {
   const [h, m] = settings.panel.reloadAt.split(':').map(Number);
   setInterval(() => {
     const p = partsInTz(Date.now(), tz);
-    if (p.h === h && p.min === m && !live && document.visibilityState === 'visible') location.reload();
+    if (p.h === h && p.min === m && !live && document.visibilityState === 'visible') {
+      try { sessionStorage.setItem(AUTO_RELOAD, '1'); } catch { /* fine */ }
+      location.reload();
+    }
   }, 60e3);
 }
 
@@ -229,7 +284,9 @@ async function boot() {
     settings: () => openSettings(document.body, { settings, save, state, google }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
-      explain(state.status[{ usage: 'homemini', cost: 'homemini', indoor: 'thermostat', car: 'kia' }[key]]);
+      if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
+      if (key === 'cost') return explain(ui.worst(state.status.homemini, state.status.rates), homeMiniStaleWhy());
+      explain(state.status[{ indoor: 'thermostat', car: 'kia' }[key]]);
     },
     status: (key) => explain(state.status[key]),
     nightTap: () => { nightSnoozeUntil = Date.now() + 5 * 60e3; updateNight(); },
@@ -244,13 +301,24 @@ async function boot() {
   if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google });
 
   const minutes = (m) => () => m * 60e3;
-  source('rates', refreshRates, minutes(15), { staleAfter: 3 * 3600e3, enabled: () => !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)) })();
-  source('homemini', refreshHomeMini, () => (nightNow() ? 300e3 : Math.max(30, settings.octopus.pollSeconds) * 1000),
-    { staleAfter: 15 * 60e3, enabled: () => !!(settings.octopus.apiKey && settings.octopus.account) })();
-  source('thermostat', refreshNest, minutes(5), { staleAfter: 30 * 60e3, enabled: () => !!(google.signedIn && settings.google.thermostatId) })();
-  source('calendar', refreshCalendar, minutes(10), { staleAfter: 60 * 60e3, enabled: () => !!(google.signedIn && settings.google.calendars.length) })();
-  source('weather', refreshWeather, minutes(30), { staleAfter: 3 * 3600e3, enabled: () => settings.weather.lat != null })();
-  source('kia', refreshKia, minutes(15), { staleAfter: 6 * 3600e3, enabled: () => !!(settings.kia.url && settings.kia.key) })();
+  // A source that's switched off (signed out, key removed…) also forgets what it showed.
+  source('rates', refreshRates, minutes(15), {
+    staleAfter: 3 * 3600e3, enabled: () => !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)),
+    clear: () => { state.rates = []; state.standingP = null; state.costP = null; },
+  })();
+  source('homemini', refreshHomeMini, () => (nightNow() ? 300e3 : Math.max(30, settings.octopus.pollSeconds) * 1000), {
+    staleAfter: HOME_MINI_STALE, dataAt: () => state.tele?.demandAt ?? null, enabled: () => !!(settings.octopus.apiKey && settings.octopus.account),
+    clear: () => { state.tele = null; state.demand = []; state.costP = null; },
+  })();
+  source('thermostat', refreshNest, minutes(5), {
+    staleAfter: 30 * 60e3, enabled: () => !!(google.signedIn && settings.google.thermostatId),
+    clear: () => { state.thermo = null; state.camera = null; },
+  })();
+  source('calendar', refreshCalendar, minutes(10), {
+    staleAfter: 60 * 60e3, enabled: () => !!(google.signedIn && settings.google.calendars.length), clear: () => { state.events = null; },
+  })();
+  source('weather', refreshWeather, minutes(30), { staleAfter: 3 * 3600e3, enabled: () => settings.weather.lat != null, clear: () => { state.weather = null; } })();
+  source('kia', refreshKia, minutes(15), { staleAfter: 6 * 3600e3, enabled: () => !!(settings.kia.url && settings.kia.key), clear: () => { state.kia = null; } })();
 
   // Every second: clock + camera countdown. Every 30 s: price/chart (slot changes), staleness, night.
   setInterval(() => { const now = Date.now(); ui.renderClock(refs, now, tz); ui.renderCamTimer(refs, live, now); }, 1000);
@@ -258,7 +326,7 @@ async function boot() {
   let lastW = innerWidth, lastH = innerHeight;
   addEventListener('resize', () => { if (innerWidth !== lastW || innerHeight !== lastH) { lastW = innerWidth; lastH = innerHeight; renderAll(); } });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { keepAwake(); for (const s of Object.values(sources)) s.run(); }
+    if (document.visibilityState === 'visible') { keepAwake(); for (const s of Object.values(sources)) s.runIfDue(); }
     else if (live) closeCamera(); // don't leave a stream running in the background
   });
   keepAwake();

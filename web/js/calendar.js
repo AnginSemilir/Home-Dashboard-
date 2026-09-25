@@ -21,6 +21,8 @@ export function normalizeEvent(e, cal = {}, tz = DEFAULT_TZ) {
   if ((e.attendees || []).some((a) => a.self && a.responseStatus === 'declined')) return null;
   return {
     id: `${cal.id || ''}/${e.id || start}`,
+    // The same meeting on two chosen calendars (e.g. family + your own) has the same iCalUID.
+    key: `${e.iCalUID || e.id || ''}|${e.originalStartTime?.dateTime || e.originalStartTime?.date || start}`,
     title: e.summary || '(no title)',
     location: e.location || '',
     start,
@@ -42,7 +44,7 @@ export function groupDays(events, now, tz = DEFAULT_TZ, days = 2) {
     const to = startOfDay(now, tz, i + 1);
     const list = events
       .filter((e) => e && e.start < to && e.end > from && (i > 0 || e.end > now)) // today: hide finished events
-      .filter((e, idx, arr) => arr.findIndex((x) => x.id === e.id) === idx)
+      .filter((e, idx, arr) => arr.findIndex((x) => (x.key || x.id) === (e.key || e.id)) === idx)
       .sort((a, b) => (b.allDay - a.allDay) || (a.start - b.start) || a.title.localeCompare(b.title));
     out.push({ label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : '', dayStart: from, events: list });
   }
@@ -57,14 +59,15 @@ export async function listCalendars(google) {
 export async function fetchEvents(google, calendars, now, tz = DEFAULT_TZ) {
   const timeMin = new Date(startOfDay(now, tz)).toISOString();
   const timeMax = new Date(startOfDay(now, tz, 2)).toISOString();
-  const all = [];
+  const events = [];
+  const failed = [];
   const results = await Promise.allSettled(calendars.map(async (cal) => {
     const url = `${CAL}/calendars/${encodeURIComponent(cal.id)}/events?singleEvents=true&orderBy=startTime&maxResults=100&timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`;
     const body = await google.api(url);
     return (body?.items || []).map((e) => normalizeEvent(e, cal, tz)).filter(Boolean);
   }));
-  const errors = [];
-  for (const r of results) r.status === 'fulfilled' ? all.push(...r.value) : errors.push(r.reason);
-  if (!all.length && errors.length) throw errors[0];
-  return all;
+  results.forEach((r, i) => (r.status === 'fulfilled' ? events.push(...r.value) : failed.push({ name: calendars[i].name || calendars[i].id, error: r.reason })));
+  // Every calendar failing is an error; some failing still shows the rest (the caller reports them).
+  if (failed.length && failed.length === calendars.length) throw failed[0].error;
+  return { events, failed };
 }

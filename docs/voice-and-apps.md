@@ -44,4 +44,4 @@ In Gemini → Settings → **Apps**, turn on **Spotify** and link your account. 
 
 ## The car tile
 
-Without Kia data ([kia.md](kia.md)) the car tile says "Kia app · Tap to open" and opens the Kia app. If it opens the Play Store instead, put the right app ID in ⚙ → Panel → **Car app** (the `id=…` part of the app's Play Store link).
+Without Kia data ([kia.md](kia.md)) the car tile says "Kia app · Tap to open" and opens the Kia app. In the kiosk app, if it opens the wrong app or nothing, put the right app ID in ⚙ → Panel → **Car app** (the `id=…` part of the app's Play Store link). In Chrome the tile always opens the app's Play Store page (tap **Open** there), because web pages in Chrome can't launch it directly.

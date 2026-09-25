@@ -17,13 +17,17 @@ export async function decryptReading(payload, keyB64, subtle = globalThis.crypto
   return JSON.parse(new TextDecoder().decode(plain));
 }
 
-/** Used by tests and the Settings "generate key" button. */
+/** The same as tools/kia_fetch.py (used by the tests). Padded, so the size gives nothing away. */
 export async function encryptReading(obj, keyB64, subtle = globalThis.crypto.subtle) {
   const key = await subtle.importKey('raw', b64ToBytes(keyB64), 'AES-GCM', false, ['encrypt']);
   const iv = globalThis.crypto.getRandomValues(new Uint8Array(12));
-  const data = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj))));
+  const json = JSON.stringify(obj);
+  if (json.length > PAD_TO) throw new Error('Kia reading too long');
+  const data = new Uint8Array(await subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(json.padEnd(PAD_TO, ' '))));
   return { v: 1, iv: bytesToB64(iv), data: bytesToB64(data) };
 }
+
+const PAD_TO = 256;
 
 export const newKey = () => bytesToB64(globalThis.crypto.getRandomValues(new Uint8Array(32)));
 

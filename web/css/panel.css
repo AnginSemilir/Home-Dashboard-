@@ -135,6 +135,8 @@ svg { display: block; }
 .chart-svg .ch-now { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .chart-svg .ch-now-label { fill: var(--accent); font-weight: 700; }
 .chart-svg .ch-past { opacity: 0.35; }
+.chart-svg .ch-bar.band-plunge { fill: var(--plunge); } .chart-svg .ch-bar.band-cheap { fill: var(--cheap); }
+.chart-svg .ch-bar.band-mid { fill: var(--mid); } .chart-svg .ch-bar.band-high { fill: var(--high); }
 .chart-svg .ch-empty { fill: var(--faint); font-size: 14px; }
 .chart-svg .ch-note { fill: var(--faint); font-size: 12px; }
 

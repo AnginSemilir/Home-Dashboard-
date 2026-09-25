@@ -4,7 +4,7 @@
 import { startOfDay, hhmm, dayKey, DEFAULT_TZ } from './time.js';
 
 /** Convert Octopus REST `standard-unit-rates` results into sorted, de-duplicated rates. */
-export function ratesFromOctopus(results, { preferDirectDebit = true } = {}) {
+export function ratesFromOctopus(results, { preferDirectDebit = true, until } = {}) {
   const out = new Map();
   for (const r of results || []) {
     if (r.payment_method && preferDirectDebit && r.payment_method.toUpperCase() !== 'DIRECT_DEBIT') continue;
@@ -16,9 +16,12 @@ export function ratesFromOctopus(results, { preferDirectDebit = true } = {}) {
     out.set(start, { start, end, p });
   }
   const sorted = [...out.values()].sort((a, b) => a.start - b.start);
-  // Rates without an end (fixed tariffs) end where the next one starts.
+  // Rates without an end (a fixed or variable tariff's current rate) end where the next one
+  // starts, or run to the end of the period asked for. (Not Infinity: it's saved as JSON.)
   for (let i = 0; i < sorted.length; i++) {
-    if (!Number.isFinite(sorted[i].end)) sorted[i].end = sorted[i + 1] ? sorted[i + 1].start : sorted[i].start + 30 * 60e3;
+    if (!Number.isFinite(sorted[i].end)) {
+      sorted[i].end = sorted[i + 1] ? sorted[i + 1].start : Math.max(sorted[i].start + 30 * 60e3, Number.isFinite(until) ? until : 0);
+    }
   }
   return sorted;
 }

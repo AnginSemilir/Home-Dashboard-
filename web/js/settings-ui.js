@@ -104,7 +104,7 @@ export function openSettings(root, ctx) {
     field('Home Mini refresh (seconds)', input(draft.octopus, 'pollSeconds', { type: 'number', step: 10 }),
       'Octopus allows about 100 requests an hour. 60 is safe.'),
     field('Proxy URL (only if needed)', input(draft.octopus, 'proxy', { placeholder: 'https://octopus-proxy.<you>.workers.dev' }),
-      'Leave empty. Only if the checklist says Octopus is blocked in this browser: see docs/octopus.md.'));
+      'Leave empty. Only if the checklist says Octopus is blocked in this browser: see docs/octopus.md (the address also has to be added to web/index.html).'));
 
   // Google
   const redirect = redirectUri();
@@ -121,7 +121,8 @@ export function openSettings(root, ctx) {
     googleState,
     btn('Sign in with Google', async () => {
       if (!draft.google.clientId || !draft.google.clientSecret) throw new Error('Enter the client ID and secret first');
-      if (detectEnv() === 'webview') throw new Error('Google blocks sign-in inside kiosk apps. Sign in using Chrome on this tablet, then use "Copy settings" below and paste them here.');
+      // Any Android WebView (WebView Kiosk, Fully Kiosk…) gets Google's disallowed_useragent page.
+      if (/; wv\)/.test(navigator.userAgent) || ['webview', 'fully'].includes(detectEnv())) throw new Error('Google blocks sign-in inside kiosk apps. Sign in using Chrome on this tablet, then use "Copy settings" below and paste them here.');
       Object.assign(s, draft); save();
       google.signIn();
     }),
@@ -152,7 +153,21 @@ export function openSettings(root, ctx) {
       }));
     }, true),
     calPick,
-    btn('Sign out of Google', async () => { draft.google.refreshToken = ''; showGoogle(); }, true));
+    btn('Sign out of Google', async () => {
+      // Revoke the token at Google too (a form post: no CORS preflight), then forget the choices.
+      const token = draft.google.refreshToken;
+      if (token) {
+        await fetch('https://oauth2.googleapis.com/revoke', {
+          method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token }),
+        }).catch(() => {});
+      }
+      Object.assign(draft.google, { refreshToken: '', scopes: '', calendars: [], cameraId: '', thermostatId: '' });
+      devicePick.replaceChildren();
+      calPick.replaceChildren();
+      showGoogle();
+      renderList();
+      say('Signed out of Google. Save & close to clear the calendar, thermostat and camera from the panel.');
+    }, true));
 
   // Kia
   const keyOut = h('div', { class: 'help' });

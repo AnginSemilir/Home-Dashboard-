@@ -4,7 +4,7 @@
 
 Each card has a small dot in its corner when something's wrong:
 
-- **Amber:** the data is older than it should be (for example, no new Home Mini reading for 15 minutes). The card still shows the last good values.
+- **Amber:** the data is older than it should be (for example, the Home Mini hasn't sent a new reading for 45 minutes: tap for when it last did). The card still shows the last good values.
 - **Red:** the last attempt failed. **Tap the card** to see why.
 
 The panel retries by itself, waiting longer each time (30 seconds up to 15 minutes), so a short internet or service outage fixes itself. The ⚙ Settings screen's **setup checklist** shows ✓ (working), ✗ (failing, with the reason), … (set up, checked after Save & close) or ○ (not set up) for every part.
@@ -15,8 +15,12 @@ The panel retries by itself, waiting longer each time (30 seconds up to 15 minut
 |---|---|---|
 | The URL shows a GitHub 404 page | GitHub Pages isn't on yet | Settings → Pages → Source: **GitHub Actions**, then Actions → Test and publish → Re-run |
 | Octopus ✗ "Network error (… blocked a browser request)", weather ✓ | Octopus blocks this browser | The proxy in [octopus.md](octopus.md#if-octopus-is-blocked) |
+| Octopus ✗ "Add https://… to connect-src in web/index.html first" | The proxy's address isn't on the page's allowed list | Step 5 of the proxy instructions in [octopus.md](octopus.md#if-octopus-is-blocked) |
+| Today so far shows "–" | Some of today's usage has no known price yet (e.g. prices couldn't be fetched) | It fills in once prices load; see the price card's dot |
+| Calendar red dot, "Couldn't read "…"" | One chosen calendar failed (removed or unshared); the others still show | ⚙ → Choose calendars again |
 | Octopus ✗ "Octopus rejected the API key" | Key or account number mistyped | Copy them again from the Octopus website |
 | Home Mini "not found" after Connect | Home Mini not paired, or on a different account | Check the Octopus app shows live usage |
+| Using now: amber dot, "No new Home Mini reading since …" | The Home Mini has stopped reporting | Check it's plugged in and on Wi-Fi; the Octopus app will show the same gap |
 | Home Mini red dot, "Octopus rate limit reached" | Too many Octopus requests this hour | It backs off by itself. Raise ⚙ → Octopus → Home Mini refresh to 90–120 s |
 | Google ✗ "sign in again" | The Google app is still in *Testing* (7-day limit), or access was removed | [google.md](google.md) step 1.6, then sign in again in Chrome and Copy/Paste settings |
 | `disallowed_useragent` when signing in | Google blocks sign-in inside kiosk apps | Sign in in Chrome, then copy settings across ([google.md](google.md), step 3) |

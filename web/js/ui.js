@@ -37,7 +37,11 @@ export function buildPanel(root, on) {
   const r = {};
   const dot = () => h('span', { class: 'dot' });
 
-  r.video = h('video', { playsinline: true, muted: true, autoplay: true, class: 'hidden' });
+  r.video = h('video', { playsinline: true, autoplay: true, class: 'hidden' });
+  // The muted *attribute* doesn't mute a stream set later; the property does. Muted video may
+  // autoplay without a fresh tap (a sleeping camera can take a while), and the panel stays quiet.
+  r.video.muted = true;
+  r.video.defaultMuted = true;
   r.camName = h('div', { class: 'cam-name' });
   r.camHint = h('div', { class: 'cam-hint' }, icon('play'), h('span', {}, 'Tap for live view'));
   r.camSub = h('div', { class: 'muted' });
@@ -108,6 +112,12 @@ export function toast(r, text, ms = 3500) {
   r.toast.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => r.toast.classList.add('hidden'), ms);
+}
+
+/** The more serious of two statuses (error > stale > ok). */
+export function worst(a, b) {
+  const rank = (s) => (s?.error ? 2 : s?.stale ? 1 : 0);
+  return rank(b) > rank(a) ? b : a;
 }
 
 function setDot(el, st) {
@@ -237,7 +247,7 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
   }
 
   // Today so far
-  setDot(r.tCost.dot, st.status.homemini);
+  setDot(r.tCost.dot, worst(st.status.homemini, st.status.rates));
   if (st.costP != null && st.tele) {
     r.tCost.value.textContent = `£${(st.costP / 100).toFixed(2)}`;
     r.tCost.extra.replaceChildren(h('div', { class: 'muted' }, `${st.tele.todayKWh.toFixed(1)} kWh used`));
@@ -274,7 +284,7 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
 
 export function renderCamera(r, s, st, live) {
   setDot(r.camDot, st.status.camera);
-  r.camName.textContent = st.camera?.name || s.panel.cameraName || 'Camera';
+  r.camName.textContent = s.panel.cameraName || st.camera?.name || 'Camera';
   r.camBarName.textContent = r.camName.textContent;
   const ready = !!(s.google.projectId && s.google.cameraId);
   r.camHint.classList.toggle('hidden', !ready);

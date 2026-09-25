@@ -23,7 +23,7 @@ Colours: green below 15p, amber, red from 25p, **blue at or below 0p** (plunge p
 
 ## Limits
 
-Octopus allows about **100 API requests an hour** per account. The panel uses about 60 an hour for the Home Mini at the default 60-second refresh (every 5 minutes at night), plus 4 an hour for prices. If you also use other apps that read your Octopus data through the API, raise **Home Mini refresh** to 90 or 120 seconds. If the limit is hit, the panel backs off by itself and the Home Mini card shows an amber dot.
+Octopus allows about **100 API requests an hour** per account. The panel uses about 60 an hour for the Home Mini at the default 60-second refresh (every 5 minutes at night), plus 4 an hour for prices. If you also use other apps that read your Octopus data through the API, raise **Home Mini refresh** to 90 or 120 seconds. If the limit is hit, the panel backs off by itself and the Home Mini card shows a red dot (tap it: "Octopus rate limit reached").
 
 ## If Octopus is blocked
 
@@ -58,6 +58,8 @@ Websites can only call another site's API if that API allows it (CORS). Octopus'
      },
    };
    ```
-4. Copy the worker's address (like `https://octopus-proxy.yourname.workers.dev`), then on the panel: ⚙ → Octopus → **Proxy URL** → paste → **Connect** → **Save & close**.
+4. Copy the worker's address (like `https://octopus-proxy.yourname.workers.dev`).
+5. Allow the panel to talk to it. On GitHub, open `web/index.html` → ✏️ edit. In the `Content-Security-Policy` line, after `https://api.octopus.energy`, add a space and your worker's address, then **Commit changes**. This page security list is why the panel can't send your keys anywhere you haven't named. After a minute the updated page is live.
+6. On the panel: ⚙ → Octopus → **Proxy URL** → paste → **Connect** → **Save & close**. (If you skipped step 5, the panel tells you to add the address first.)
 
 The worker only passes requests through. Your API key goes via Cloudflare to Octopus, the same way your browser would send it to Octopus directly. Cloudflare's free plan allows 100,000 requests a day; the panel uses about 1,600.

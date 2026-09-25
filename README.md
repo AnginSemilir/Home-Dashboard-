@@ -26,7 +26,7 @@ A wall panel for a Lenovo Tab M10 (3rd gen, TB328), built as **one web page on G
 
 ## Your keys stay on the tablet
 
-The site is public, so it contains **no keys and no personal data**. Anyone else who opens the URL sees an empty "set me up" screen. You type your Octopus API key and Google details once, into the panel's own Settings screen on the tablet. They're stored only in that browser's storage and only ever sent to the service they belong to.
+The site is public, so it contains **no keys and no personal data**. Anyone else who opens the URL sees an empty "set me up" screen. You type your Octopus API key and Google details once, into the panel's own Settings screen on the tablet. They're stored only in that browser's storage, and the panel only ever sends each one to the service it belongs to. (One caveat: the browser shares that storage with any other page on `anginsemilir.github.io`. See [docs/tablet.md](docs/tablet.md#keeping-the-keys-safe).)
 
 The one exception is the optional Kia job: your Kia login goes into GitHub's encrypted **Actions secrets**, never into the code.
 
@@ -56,7 +56,8 @@ Everything was tested in a browser against **fake** versions of every service: 3
 Plain HTML, CSS and JavaScript modules in [`web/`](web/), with no build step and no libraries, so you (or Claude) can edit it directly. [`web/js/`](web/js/) has one file per service (`octopus.js`, `google.js`, `nest.js`, `calendar.js`, `weather.js`, `kia.js`), plus `launcher.js` for the buttons and `ui.js` for the layout. `.github/workflows/pages.yml` runs the tests and publishes `web/` on every push.
 
 ```sh
-npm install          # Playwright, for the browser tests
+npm install                      # Playwright, for the browser tests
+npx playwright install chromium  # once: the browser the tests drive (add --with-deps on Linux)
 npm test             # unit tests
 npm run test:e2e     # browser tests (all services faked)
 npm run preview      # screenshots in shots/ at three tablet sizes

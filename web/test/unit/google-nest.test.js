@@ -101,6 +101,11 @@ class FakeRTC {
   close() { this.closed = true; }
 }
 globalThis.MediaStream ??= class { addTrack() {} };
+/** A fake track; muted ones "unmute" when the test calls .unmute(). */
+function videoTrack(muted = true, kind = 'video') {
+  const l = {};
+  return { kind, muted, addEventListener: (n, f) => { l[n] = f; }, unmute() { this.muted = false; l.unmute?.(); } };
+}
 
 function fakeNest() {
   const cmds = [];
@@ -114,7 +119,7 @@ test('LiveStream (battery): audio+video+data offer, answer newline fix, stops it
     const states = [];
     const ls = new LiveStream(nest, 'dev/CAM', { battery: true, RTC: FakeRTC, onState: (s) => states.push(s) });
     await ls.start({});
-    FakeRTC.last.listeners.track({ track: {} });
+    FakeRTC.last.listeners.track({ track: videoTrack(false) });
     assert.deepEqual(states, ['connecting', 'live']);
     assert.deepEqual(FakeRTC.last.tx, [['audio', 'recvonly'], ['video', 'recvonly']]);
     assert.equal(FakeRTC.last.dc.length, 1);
@@ -140,7 +145,7 @@ test('LiveStream (wired): extends every 4 minutes and never stops by itself', as
     const nest = fakeNest();
     const ls = new LiveStream(nest, 'dev/CAM', { battery: false, RTC: FakeRTC });
     await ls.start({});
-    FakeRTC.last.listeners.track({ track: {} });
+    FakeRTC.last.listeners.track({ track: videoTrack(false) });
     mock.timers.tick(8 * 60e3 + 1000);
     await new Promise((r) => setImmediate(r));
     assert.equal(nest.cmds.filter((c) => c.command.endsWith('ExtendWebRtcStream')).length, 2);
@@ -168,4 +173,60 @@ test('LiveStream: gives up after 30 s if no video arrives', async () => {
   } finally {
     mock.timers.reset();
   }
+});
+
+test('LiveStream: "live" only once video actually flows (track unmutes), not when the answer is applied', async () => {
+  const nest = fakeNest();
+  const states = [];
+  const ls = new LiveStream(nest, 'dev/CAM', { battery: true, RTC: FakeRTC, onState: (s) => states.push(s) });
+  await ls.start({});
+  const audio = videoTrack(false, 'audio');
+  const video = videoTrack(true);
+  FakeRTC.last.listeners.track({ track: audio });
+  FakeRTC.last.listeners.track({ track: video });
+  assert.deepEqual(states, ['connecting']);
+  video.unmute();
+  assert.deepEqual(states, ['connecting', 'live']);
+  await ls.stop();
+});
+
+test('LiveStream: closed while Google is still setting up: no error, and the new session is stopped', async () => {
+  let release;
+  const cmds = [];
+  const nest = {
+    command: async (id, command, params) => {
+      cmds.push({ command, params });
+      if (command.endsWith('GenerateWebRtcStream')) {
+        await new Promise((r) => { release = r; });
+        return { answerSdp: 'v=0', mediaSessionId: 'S9', expiresAt: new Date(Date.now() + 300e3).toISOString() };
+      }
+      return {};
+    },
+  };
+  const states = [];
+  const ls = new LiveStream(nest, 'dev/CAM', { battery: true, RTC: FakeRTC, onState: (s) => states.push(s) });
+  const started = ls.start({});
+  await new Promise((r) => setImmediate(r));
+  await ls.stop();
+  await ls.stop(); // twice is fine
+  release();
+  assert.equal(await started, null);
+  assert.equal(FakeRTC.last.remote, undefined, 'answer never applied to the closed connection');
+  assert.deepEqual(cmds.map((c) => c.command.split('.').pop()), ['GenerateWebRtcStream', 'StopWebRtcStream']);
+  assert.deepEqual(cmds[1].params, { mediaSessionId: 'S9' });
+  assert.deepEqual(states, ['connecting', 'ended']);
+});
+
+test('LiveStream: a failed connection stops the stream properly', async () => {
+  const nest = fakeNest();
+  const states = [];
+  const ls = new LiveStream(nest, 'dev/CAM', { battery: false, RTC: FakeRTC, onState: (s) => states.push(s) });
+  await ls.start({});
+  const pc = FakeRTC.last;
+  pc.connectionState = 'failed';
+  pc.listeners.connectionstatechange();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(pc.closed, true);
+  assert.ok(nest.cmds.some((c) => c.command.endsWith('StopWebRtcStream')));
+  assert.deepEqual(states, ['connecting', 'ended']);
 });

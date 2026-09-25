@@ -1,6 +1,7 @@
 # OPTIONAL: Kia e-Niro battery for the panel. Does nothing until you add the three secrets
 # (repo Settings → Secrets and variables → Actions): KIA_USERNAME, KIA_PASSWORD, KIA_PANEL_KEY.
-# Optional secret: KIA_PIN. Optional variable: KIA_VIN (if the account has more than one car).
+# Optional secrets: KIA_PIN, and KIA_VIN (only if the account has more than one car). Use
+# secrets, not variables: variables are printed in the public logs.
 #
 # Once an hour it reads the battery level the car last reported to Kia (it never wakes the
 # car), encrypts it with KIA_PANEL_KEY and publishes the encrypted file on the "kia-data"
@@ -63,7 +64,7 @@ jobs:
           KIA_PASSWORD: ${{ secrets.KIA_PASSWORD }}
           KIA_PIN: ${{ secrets.KIA_PIN }}
           KIA_PANEL_KEY: ${{ secrets.KIA_PANEL_KEY }}
-          KIA_VIN: ${{ vars.KIA_VIN }}
+          KIA_VIN: ${{ secrets.KIA_VIN }}
         run: python tools/kia_fetch.py out/kia.json
 
       - name: Publish the encrypted file to the kia-data branch

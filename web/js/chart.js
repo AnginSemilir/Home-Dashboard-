@@ -53,7 +53,7 @@ export function renderChart({ rates, now, width, height, tz = DEFAULT_TZ, cheap 
     const w = Math.max(1, x1 - x0 - Math.min(2, (x1 - x0) * 0.18));
     const y0 = y(Math.max(r.p, 0)), y1 = y(Math.min(r.p, 0));
     const past = r.end <= now ? ' ch-past' : '';
-    out.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(1, y1 - y0).toFixed(1)}" rx="1.5" fill="${BAND_COLOURS[band(r.p, { cheap, pricey })]}" class="ch-bar${past}"/>`);
+    out.push(`<rect x="${x0.toFixed(1)}" y="${y0.toFixed(1)}" width="${w.toFixed(1)}" height="${Math.max(1, y1 - y0).toFixed(1)}" rx="1.5" fill="${BAND_COLOURS[band(r.p, { cheap, pricey })]}" class="ch-bar band-${band(r.p, { cheap, pricey })}${past}"/>`);
   }
 
   // X labels: every 3 hours on the local clock; the day name at midnight.

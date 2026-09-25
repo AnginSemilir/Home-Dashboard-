@@ -66,9 +66,10 @@ export function parseTelemetry(items) {
     }))
     .filter((r) => Number.isFinite(r.start))
     .sort((a, b) => a.start - b.start);
-  const last = rows[rows.length - 1];
+  // The newest half hour can arrive before its demand figure; use the newest one that has it.
+  const last = rows.filter((r) => Number.isFinite(r.demand)).pop();
   return {
-    demandW: last && Number.isFinite(last.demand) ? last.demand : null,
+    demandW: last ? last.demand : null,
     demandAt: last ? last.start : null,
     todayKWh: rows.reduce((s, r) => s + (Number.isFinite(r.kwh) ? r.kwh : 0), 0),
     slots: rows.map(({ start, kwh }) => ({ start, kwh })),
@@ -85,6 +86,16 @@ export function costToday(slots, rates, standingChargeP = 0) {
   return p;
 }
 
+const isRateLimit = (err) => !!err && /KT-CT-1199|too many requests/i.test(`${err.extensions?.errorCode || ''} ${err.message || ''}`);
+
+/** Whether the page's security policy lets it call `origin` (always true outside a browser). */
+function cspAllows(origin) {
+  const meta = globalThis.document?.querySelector?.('meta[http-equiv="Content-Security-Policy"]');
+  if (!meta) return true;
+  const m = /connect-src([^;]*)/.exec(meta.getAttribute('content') || '');
+  return !!m && m[1].trim().split(/\s+/).includes(origin);
+}
+
 export class Octopus {
   constructor(settings) {
     this.s = settings;
@@ -98,7 +109,10 @@ export class Octopus {
   /** Octopus, or the optional proxy in front of it (docs/octopus.md). */
   get base() {
     const p = (this.s.octopus.proxy || '').trim().replace(/\/+$/, '');
-    return /^https:\/\/[^/]+$/.test(p) ? p : API;
+    if (!p) return API;
+    if (!/^https:\/\/[^/]+$/.test(p)) throw new Error('The Octopus proxy URL must look like https://name.example.workers.dev');
+    if (!cspAllows(p)) throw new Error(`Add ${p} to connect-src in web/index.html first (see docs/octopus.md)`);
+    return p;
   }
 
   #url(pathOrUrl) {
@@ -118,6 +132,8 @@ export class Octopus {
     });
     const t = body?.data?.obtainKrakenToken;
     if (!t?.token) {
+      const err = body?.errors?.[0];
+      if (isRateLimit(err)) throw new HttpError(429, 'Octopus rate limit reached');
       if (this.refreshToken) { this.refreshToken = null; return this.#obtainToken(); }
       throw new Error(body?.errors?.[0]?.message || 'Octopus rejected the API key');
     }
@@ -138,7 +154,7 @@ export class Octopus {
       const err = body.errors[0];
       const code = err.extensions?.errorCode || '';
       if (/KT-CT-1124|KT-CT-1139|expired|signature/i.test(`${code} ${err.message}`)) this.token = null;
-      if (/KT-CT-1199|too many requests/i.test(`${code} ${err.message}`)) throw new HttpError(429, 'Octopus rate limit reached');
+      if (isRateLimit(err)) throw new HttpError(429, 'Octopus rate limit reached');
       throw new Error(err.message || 'Octopus GraphQL error');
     }
     return body.data;
@@ -167,7 +183,7 @@ export class Octopus {
       results.push(...(body?.results || []));
       url = body?.next ? this.#url(body.next) : null;
     }
-    return ratesFromOctopus(results);
+    return ratesFromOctopus(results, { until: Date.parse(to) });
   }
 
   /** Today's standing charge in pence (public endpoint). */

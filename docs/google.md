@@ -66,6 +66,8 @@ A battery camera sleeps. After you tap it may take a few seconds to show video. 
 
 For a personal panel, yes. Google's own sample web app for Nest works the same way. The secret only works together with your redirect address (your GitHub Pages site) and your own Google sign-in. It never leaves the tablet except to go to Google. To revoke everything at once: <https://myaccount.google.com/permissions> → Home panel → Remove access, or delete the OAuth client in Cloud Console.
 
+To sign out, use ⚙ → **Sign out of Google**. It also cancels the panel's access at Google. Then **Save & close** to clear the calendar, thermostat and camera from the screen. If you signed in with Chrome and copied the settings across, also clear the site's data in Chrome (see [troubleshooting.md](troubleshooting.md#starting-again)).
+
 ## If Google stops working
 
 - **"Google sign-in expired or was revoked: sign in again"**: the app is still in Testing (step 1.6), or you removed access. Publish it, then Sign in again (in Chrome, then Copy/Paste settings).

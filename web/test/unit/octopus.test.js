@@ -34,7 +34,8 @@ test('parseTelemetry and costToday', () => {
     { readAt: '2026-09-25T01:00:00+01:00', consumptionDelta: null, demand: null },
   ]);
   assert.equal(t.todayKWh, 0.5);
-  assert.equal(t.demandW, null); // the latest row has no demand yet
+  assert.equal(t.demandW, 400, 'newest half hour with a demand figure');
+  assert.equal(t.demandAt, Date.parse('2026-09-25T00:30:00+01:00'));
   assert.equal(t.slots.length, 3);
   const rates = [{ start: Date.parse('2026-09-24T23:00:00Z'), end: Date.parse('2026-09-24T23:30:00Z'), p: 10 }, { start: Date.parse('2026-09-24T23:30:00Z'), end: Date.parse('2026-09-25T00:00:00Z'), p: 20 }];
   assert.equal(costToday(t.slots, rates, 45), 45 + 0.2 * 10 + 0.3 * 20);
@@ -115,5 +116,15 @@ test('Octopus client: optional proxy replaces the Octopus address everywhere, in
   assert.deepEqual(calls.map((c) => new URL(c.url).origin), Array(4).fill('https://octo.me.workers.dev'));
   assert.equal(calls[1].url, 'https://octo.me.workers.dev/v1/products/X/?page=2');
   s.octopus.proxy = 'http://insecure.example';
-  assert.equal(o.base, 'https://api.octopus.energy', 'only https proxies are used');
+  assert.throws(() => o.base, /must look like https/, 'never sends keys to a non-https proxy');
+  s.octopus.proxy = '';
+  assert.equal(o.base, 'https://api.octopus.energy');
+});
+
+test('Octopus client: a rate limit while getting a token also counts as a rate limit', async () => {
+  const s = loadSettings(memStore());
+  Object.assign(s.octopus, { account: 'A-1', apiKey: 'sk_x', discovered: { deviceId: 'd' } });
+  fakeFetch(() => ({ body: { errors: [{ message: 'Too many requests.', extensions: { errorCode: 'KT-CT-1199' } }] } }));
+  await assert.rejects(new Octopus(s).telemetryToday(), (e) => e instanceof HttpError && e.status === 429);
+  assert.equal(calls.length, 1, 'no immediate second attempt');
 });
