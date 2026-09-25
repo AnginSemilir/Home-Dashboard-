@@ -1,11 +1,12 @@
-// Inline SVG icons (24×24, drawn with currentColor). Weather icons get their own colours.
+// Inline SVG icons (24×24, drawn with currentColor in a light 1.75 stroke). Weather icons get
+// their own soft colours.
 
 const S = (body, extra = '') =>
-  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${body}</svg>`;
+  `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${body}</svg>`;
 
-const sun = '<circle cx="12" cy="12" r="4.2" fill="#ffc53d" stroke="#ffc53d"/><g stroke="#ffc53d"><path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></g>';
-const cloud = (dx = 0, dy = 0, c = '#cfd8e3') => `<path transform="translate(${dx} ${dy})" d="M7 18.5h9.5a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.3 11 3.8 3.8 0 0 0 7 18.5z" fill="${c}" stroke="${c}"/>`;
-const drops = (c = '#5aa9ff') => `<g stroke="${c}"><path d="M9 20.5l-1 2M13 20.5l-1 2M17 20.5l-1 2"/></g>`;
+const sun = '<circle cx="12" cy="12" r="4.2" fill="#f3c24f" stroke="#f3c24f"/><g stroke="#f3c24f"><path d="M12 2.5v2M12 19.5v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M2.5 12h2M19.5 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></g>';
+const cloud = (dx = 0, dy = 0, c = '#c9d3df') => `<path transform="translate(${dx} ${dy})" d="M7 18.5h9.5a4 4 0 0 0 .4-8A5.5 5.5 0 0 0 6.3 11 3.8 3.8 0 0 0 7 18.5z" fill="${c}" stroke="${c}"/>`;
+const drops = (c = '#6aaef0') => `<g stroke="${c}"><path d="M9 20.5l-1 2M13 20.5l-1 2M17 20.5l-1 2"/></g>`;
 
 export const WEATHER = {
   sun: S(sun),
@@ -17,7 +18,7 @@ export const WEATHER = {
   drizzle: S(`${cloud(0, -3)}${drops('#7fbfff')}`),
   rain: S(`${cloud(0, -3, '#aab7c6')}${drops()}`),
   snow: S(`${cloud(0, -3)}<g stroke="#ffffff"><path d="M8 21h.01M12 22h.01M16 21h.01"/></g>`),
-  storm: S(`${cloud(0, -3, '#8e9aab')}<path d="M12.5 15.5l-2 3.5h3l-2 3.5" stroke="#ffc53d"/>`),
+  storm: S(`${cloud(0, -3, '#8e9aab')}<path d="M12.5 15.5l-2 3.5h3l-2 3.5" stroke="#f3c24f"/>`),
 };
 
 export const UI = {

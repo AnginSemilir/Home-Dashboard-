@@ -3,13 +3,24 @@
 
 import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
-import { hhmm, longDate, weekdayShort, ago, DEFAULT_TZ } from './time.js';
+import { hhmm, longDate, weekdayShort, ago, partsInTz, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
 import { renderChart } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
 
 const icon = (name, set = UI) => svg(set[name] || UI.camera);
+
+/** Words for the price bands: colour is never the only cue. */
+export const BAND_WORD = { plunge: 'Plunge', cheap: 'Cheap', mid: 'Normal', high: 'Peak' };
+
+/** Part of the day, for the Ambient style's faint background tint. */
+export function timeOfDay(hour) {
+  if (hour >= 5 && hour < 8) return 'dawn';
+  if (hour >= 8 && hour < 17) return 'day';
+  if (hour >= 17 && hour < 21) return 'dusk';
+  return 'night';
+}
 
 const DOCK = [
   { id: 'shopping', label: 'Shopping', icon: 'cart' },
@@ -66,11 +77,16 @@ export function buildPanel(root, on) {
   r.cal = h('section', { class: 'card cal', id: 'cal' }, r.calBody, (r.calDot = dot()));
 
   r.chartBox = h('div', { class: 'chart-box' });
-  r.chart = h('section', { class: 'card chart', id: 'chart' }, h('div', { class: 'label' }, 'Agile price (p/kWh)'), r.chartBox, (r.chartDot = dot()));
+  r.legend = h('div', { class: 'legend' });
+  r.chart = h('section', { class: 'card chart', id: 'chart' },
+    h('div', { class: 'chart-head' }, h('div', { class: 'label' }, 'Agile price ', h('span', { class: 'unit' }, 'p/kWh')), r.legend),
+    r.chartBox, (r.chartDot = dot()));
 
   r.priceBig = h('div', { class: 'big' });
+  r.priceBand = h('span', { class: 'band-chip hidden' });
   r.priceSub = h('div', { class: 'sub' });
-  r.price = h('section', { class: 'card price', id: 'price' }, h('div', { class: 'label' }, 'Agile price now'), r.priceBig, r.priceSub, (r.priceDot = dot()));
+  r.price = h('section', { class: 'card price', id: 'price' }, h('div', { class: 'label' }, 'Agile price now'),
+    h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, (r.priceDot = dot()));
 
   const tile = (cls, ico, label) => {
     const t = { value: h('div', { class: 't-value' }), label: h('div', { class: 't-label' }, label), extra: h('div', { class: 'extra' }), dot: dot() };
@@ -88,7 +104,7 @@ export function buildPanel(root, on) {
 
   r.dock = h('nav', { class: 'dock', id: 'dock' });
   for (const b of DOCK) {
-    const btn = h('button', { class: `b-${b.id}`, 'data-app': b.id }, icon(b.icon), h('span', {}, b.label));
+    const btn = h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon)), h('span', {}, b.label));
     pressable(btn, () => on.launch?.(b.id, false), () => on.launch?.(b.id, true));
     r.dock.append(btn);
   }
@@ -97,7 +113,12 @@ export function buildPanel(root, on) {
     el.addEventListener('click', (e) => { if (!e.target.closest('button')) on.status?.(key); });
   }
 
-  r.panel = h('main', { class: 'panel' }, r.cam, r.clock, r.cal, r.chart, r.price, r.tiles, r.dock);
+  // Two columns for the Bold style; the Ambient style lays the cards out on one grid
+  // (its stylesheet makes these wrappers transparent with display: contents).
+  r.panel = h('main', { class: 'panel' },
+    h('div', { class: 'col-main' }, r.clock, r.price, r.chart, r.tiles),
+    h('div', { class: 'col-side' }, r.cal, r.cam),
+    r.dock);
   r.nightTime = h('div');
   r.night = h('div', { class: 'night hidden', id: 'night' }, r.nightTime);
   r.night.addEventListener('click', () => on.nightTap?.());
@@ -129,6 +150,11 @@ export function renderClock(r, now, tz = DEFAULT_TZ) {
   r.time.textContent = hhmm(now, tz);
   r.date.textContent = longDate(now, tz);
   r.nightTime.textContent = hhmm(now, tz);
+  const tod = `tod-${timeOfDay(partsInTz(now, tz).h)}`;
+  if (!r.panel.classList.contains(tod)) {
+    r.panel.classList.remove('tod-dawn', 'tod-day', 'tod-dusk', 'tod-night');
+    r.panel.classList.add(tod);
+  }
 }
 
 export function renderWeather(r, w, st, tz = DEFAULT_TZ) {
@@ -195,14 +221,61 @@ export function renderCalendar(r, events, now, st, tz = DEFAULT_TZ, maxRows = 9,
       const what = h('div', { class: 'what' }, h('div', { class: 'title' }, e.title), e.location ? h('div', { class: 'where' }, e.location) : null);
       if (e.color) what.style.borderLeftColor = e.color;
       const starts = e.start < day.dayStart ? '…' : hhmm(e.start, tz);
-      items.push(h('div', { class: 'ev' }, h('div', { class: 'when' }, starts, h('br'), e.end - e.start < 864e5 ? hhmm(e.end, tz) : ''), what));
+      items.push(h('div', { class: 'ev' }, h('div', { class: 'when' }, h('span', { class: 't-start' }, starts), h('br'),
+        h('span', { class: 't-end end' }, e.end - e.start < 864e5 ? hhmm(e.end, tz) : '')), what));
     }
     const empty = !allDay.length && !timed.length ? h('div', { class: 'empty' }, day.label === 'Today' ? 'Nothing else today' : 'Nothing planned') : null;
     return h('div', { class: 'cal-day' },
       h('h3', {}, h('span', {}, day.label), h('span', {}, longDate(day.dayStart + 12 * 3600e3, tz).replace(/^\w+ /, ''))),
-      chips, ...items, empty, hidden ? h('div', { class: 'more' }, `+${hidden} more`) : null);
+      chips, ...items, empty, h('div', { class: `more${hidden ? '' : ' hidden'}`, 'data-n': hidden }, `+${hidden} more`));
   });
   r.calBody.replaceChildren(...days);
+  fitCalendar(r.calBody);
+  // Re-fit when the column changes size (Settings closed, screen rotated…).
+  if (!r.calFit && typeof ResizeObserver === 'function') {
+    r.calFit = new ResizeObserver(([e]) => {
+      const hgt = Math.round(e.contentRect.height);
+      if (hgt === r.calH) return; // only a real change of space, never our own re-render
+      r.calH = hgt;
+      if (r.lastCal) renderCalendar(...r.lastCal);
+    });
+    r.calFit.observe(r.calBody);
+  }
+  r.lastCal = [r, events, now, st, tz, maxRows, signedIn];
+}
+
+/** Hide events from the end until the calendar fits its space, keeping each day's "+N more" right. */
+function fitCalendar(body) {
+  if (!body.clientHeight) return;
+  const evs = [...body.querySelectorAll('.ev')];
+  const fits = () => body.scrollHeight <= body.clientHeight + 1;
+  while (!fits() && evs.length) {
+    const ev = evs.pop();
+    ev.classList.add('hidden');
+    const more = ev.closest('.cal-day').querySelector('.more');
+    const n = Number(more.dataset.n) + 1;
+    more.dataset.n = n;
+    more.textContent = `+${n} more`;
+    more.classList.remove('hidden');
+  }
+}
+
+/** A small coloured mark beside a price; the number next to it carries the meaning. */
+const bandDot = (p, opts) => h('span', { class: `band-dot band-${band(p, opts)}` });
+
+/** Band key for the chart. Plunge only appears when a price at or below 0p is on the chart. */
+function renderLegend(r, rates, now, opts) {
+  const from = Math.floor(now / 1800e3) * 1800e3 - 3600e3, to = from + 24 * 3600e3; // the chart's window
+  const plunge = (rates || []).some((x) => x.end > from && x.start < to && band(x.p, opts) === 'plunge');
+  const key = `${opts.cheap}/${opts.pricey}/${plunge}/${!!rates?.length}`;
+  if (r.legend.dataset.key === key) return;
+  r.legend.dataset.key = key;
+  if (!rates?.length) { r.legend.replaceChildren(); return; }
+  const item = (b, text) => h('span', { class: `lg lg-${b}` }, h('span', { class: `sw band-${b}` }), text);
+  r.legend.replaceChildren(...[
+    plunge ? item('plunge', 'Plunge ≤0') : null,
+    item('cheap', `Cheap <${opts.cheap}`), item('mid', 'Normal'), item('high', `Peak ${opts.pricey}+`),
+  ].filter(Boolean));
 }
 
 export function renderPrice(r, rates, now, st, opts, tz = DEFAULT_TZ) {
@@ -210,18 +283,27 @@ export function renderPrice(r, rates, now, st, opts, tz = DEFAULT_TZ) {
   setDot(r.chartDot, st);
   const s = rates?.length ? priceSummary(rates, now, tz) : null;
   if (!s) {
-    r.priceBig.className = 'big';
+    r.priceBig.className = 'big none';
     r.priceBig.textContent = '–';
+    r.priceBand.className = 'band-chip hidden';
+    delete r.price.dataset.band;
     r.priceSub.replaceChildren(st?.error ? 'Prices unavailable' : rates?.length ? 'No price for right now yet' : 'Waiting for prices…');
   } else {
-    r.priceBig.className = `big band-${band(s.current.p, opts)}`;
-    r.priceBig.replaceChildren(`${round1(s.current.p).toFixed(1)}`, h('small', {}, 'p/kWh'));
+    // The number stays in text ink; the band is a chip with a word (never colour alone).
+    const b = band(s.current.p, opts);
+    r.priceBig.className = 'big';
+    r.priceBig.replaceChildren(h('span', { class: 'num' }, `${round1(s.current.p).toFixed(1)}`), h('small', {}, 'p/kWh'));
+    r.priceBand.className = `band-chip chip-${b} band-${b}`;
+    r.priceBand.textContent = BAND_WORD[b] || '';
+    r.price.dataset.band = b;
     r.priceSub.replaceChildren(
-      `until ${hhmm(s.current.end, tz)}`, s.next ? ` · then ${round1(s.next.p).toFixed(1)}p` : '', h('br'),
-      'cheapest ahead: ', h('b', {}, `${round1(s.cheapest.p).toFixed(1)}p`), ` ${s.cheapestIsNow ? 'now' : `at ${s.cheapestLabel}`}`);
+      h('div', {}, `until ${hhmm(s.current.end, tz)}`, ...(s.next ? [' · then ', bandDot(s.next.p, opts), h('b', {}, `${round1(s.next.p).toFixed(1)}p`)] : [])),
+      h('div', {}, 'cheapest ahead: ', bandDot(s.cheapest.p, opts), h('b', {}, `${round1(s.cheapest.p).toFixed(1)}p`), ` ${s.cheapestIsNow ? 'now' : `at ${s.cheapestLabel}`}`));
   }
+  renderLegend(r, rates, now, opts);
   const box = r.chartBox.getBoundingClientRect();
-  r.chartBox.replaceChildren(svg(renderChart({ rates: rates || [], now, width: box.width || 500, height: box.height || 260, tz, ...opts })));
+  const fs = parseFloat(getComputedStyle(r.chartBox).fontSize) || 12;
+  r.chartBox.replaceChildren(svg(renderChart({ rates: rates || [], now, width: box.width || 500, height: box.height || 260, tz, fs, ...opts })));
 }
 
 function sparkline(points, now, minutes = 60) {
@@ -229,10 +311,13 @@ function sparkline(points, now, minutes = 60) {
   if (pts.length < 2) return null;
   const W = 200, H = 40;
   const max = Math.max(100, ...pts.map((p) => p.w));
-  const xy = pts.map((p) => [((p.t - (now - minutes * 60e3)) / (minutes * 60e3)) * W, H - (p.w / max) * (H - 3) - 1.5]);
+  const xy = pts.map((p) => [((p.t - (now - minutes * 60e3)) / (minutes * 60e3)) * W, H - (p.w / max) * (H - 6) - 3]);
   const line = xy.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
   const area = `${line} L${xy[xy.length - 1][0].toFixed(1)} ${H} L${xy[0][0].toFixed(1)} ${H} Z`;
-  return svg(`<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path class="a" d="${area}"/><path class="l" d="${line}"/></svg>`);
+  const [ex, ey] = xy[xy.length - 1];
+  // The stretched viewBox would squash a circle, so the end dot is a zero-length round-capped
+  // stroke drawn at a fixed screen width (vector-effect, set in the stylesheet).
+  return svg(`<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><path class="a" d="${area}"/><path class="l" d="${line}" vector-effect="non-scaling-stroke"/><path class="e" d="M${ex.toFixed(1)} ${ey.toFixed(1)}h0"/></svg>`);
 }
 
 const fmtKw = (w) => (w >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`);
@@ -264,7 +349,8 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
   if (t && Number.isFinite(t.tempC)) {
     r.tIndoor.value.replaceChildren(`${t.tempC.toFixed(1)}°`, t.setpointC != null ? h('small', {}, `→ ${round1(t.setpointC)}°`) : '');
     const doing = t.hvac === 'HEATING' ? 'Heating' : t.hvac === 'COOLING' ? 'Cooling' : t.eco ? 'Eco' : t.mode === 'OFF' ? 'Off' : 'Idle';
-    r.tIndoor.extra.replaceChildren(h('div', { class: 'muted' }, t.name ? `${doing} · ${t.name}` : doing));
+    const state = t.hvac === 'HEATING' ? h('span', { class: 'heat' }, icon('flame'), doing) : doing;
+    r.tIndoor.extra.replaceChildren(h('div', { class: 'muted state' }, state, t.name ? ` · ${t.name}` : ''));
   } else {
     r.tIndoor.value.textContent = '–';
     r.tIndoor.extra.replaceChildren(h('span', { class: 'muted' }, s.google.projectId ? '' : 'Set up Nest'));
@@ -277,7 +363,7 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
     const bar = h('span');
     bar.style.width = `${Math.max(0, Math.min(100, st.kia.battery))}%`;
     r.tCar.value.replaceChildren(`${Math.round(st.kia.battery)}%`, st.kia.charging ? h('small', {}, 'charging') : st.kia.range ? h('small', {}, `${Math.round(st.kia.range)} mi`) : '');
-    r.tCar.extra.replaceChildren(h('div', { class: 'meter' }, bar), h('div', { class: 'muted' }, st.kia.updated ? `updated ${ago(st.kia.updated, now)}` : ''));
+    r.tCar.extra.replaceChildren(h('div', { class: `meter${st.kia.battery <= 20 ? ' low' : ''}` }, bar), h('div', { class: 'muted' }, st.kia.updated ? `updated ${ago(st.kia.updated, now)}` : ''));
   } else {
     r.tCar.value.textContent = s.kia.url ? '–' : 'Kia app';
     r.tCar.extra.replaceChildren(h('span', { class: 'muted' }, s.kia.url ? '' : 'Tap to open'));

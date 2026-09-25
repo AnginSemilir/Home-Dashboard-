@@ -1,0 +1,299 @@
+/* Wall panel styles. Designed for a 1280×800 browser area (Lenovo Tab M10 at normal display
+   size); everything is sized in em from a base that follows the screen height, so 960×600 is
+   the same layout at three quarters of the size.
+
+   The look: near-black, one typeface, a strong type scale. Things you read sit straight on the
+   background, separated by hairlines; things you tap (tiles, camera, dock) are flat panels.
+   Colour is kept for data: the price bands on the chart and chip, weather, calendar colours. */
+
+@font-face {
+  font-family: Inter; src: url(../fonts/inter-latin-opsz-normal.woff2) format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+
+:root {
+  --bg: #0a0b0d;
+  --card: #131519;      /* flat panels you can tap */
+  --card-2: #1c1f24;    /* pressed panels, tracks, chips */
+  --line: #20242a;      /* hairline rules */
+  --grid: #1a1d22;      /* chart gridlines: one step off the background */
+  --text: #f2f4f6;
+  --muted: #9aa2ac;
+  --faint: #747c87;
+  --accent: #a58bff;
+  --plunge: #3d9bff;
+  --cheap: #2aa87e;
+  --mid: #f0a02c;
+  --high: #e0524a;
+  --on-band: #0a0b0d;
+  --radius: 14px;
+  --gap: 0.8em;
+  --gutter: 1.7em;
+  /* One base size that follows the screen height: 15px at 800 tall, 11.25px at 600. */
+  --fs: clamp(11px, 1.875vh, 16px);
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
+body {
+  font-family: Inter, Roboto, 'Noto Sans', system-ui, sans-serif;
+  font-size: var(--fs);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: inherit; }
+svg { display: block; }
+
+/* ---------- Layout ---------- */
+.panel {
+  height: 100vh;
+  height: 100dvh;
+  padding: 1.25em 1.35em;
+  display: grid;
+  gap: 1.1em var(--gutter);
+  grid-template-columns: minmax(0, 1fr) 30vw;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-areas: "main side" "dock dock";
+}
+.col-main {
+  grid-area: main; min-width: 0; min-height: 0;
+  display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; row-gap: 1.1em;
+}
+.col-side {
+  grid-area: side; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; gap: 1.1em;
+  position: relative;
+}
+/* The column rule sits in the middle of the gutter. */
+.col-side::before {
+  content: ''; position: absolute; top: 0; bottom: 0; left: calc(var(--gutter) / -2); width: 1px; background: var(--line);
+}
+.card { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.label { color: var(--muted); font-size: 0.95em; font-weight: 500; }
+.muted { color: var(--muted); }
+.hidden { display: none !important; }
+
+/* Status dot: amber = old data, red = error. Tap the card to see why. */
+.dot {
+  position: absolute; top: 0.25em; right: 0; width: 9px; height: 9px; border-radius: 50%;
+  background: transparent; pointer-events: none;
+}
+.dot.stale { background: var(--mid); }
+.dot.error { background: var(--high); }
+
+/* ---------- Clock + weather ---------- */
+.clock {
+  display: grid; align-items: start; column-gap: 2.2em;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: 1fr auto;
+  grid-template-areas: "time now days gear" "date now days gear";
+  min-height: 9.1em;
+  padding-bottom: 1.2em; border-bottom: 1px solid var(--line);
+}
+.clock .time {
+  grid-area: time; font-size: 6.4em; font-weight: 300; line-height: 0.82; letter-spacing: -0.045em;
+  margin-left: -0.04em; white-space: nowrap;
+}
+.clock .date { grid-area: date; color: var(--muted); font-size: 1.3em; font-weight: 450; white-space: nowrap; }
+.clock .gear {
+  grid-area: gear; align-self: end; width: 2.4em; height: 2.4em; margin: 0 -0.55em -0.3em 0;
+  display: grid; place-items: center; color: var(--faint); border-radius: 50%;
+}
+.clock .gear svg { width: 1.25em; height: 1.25em; }
+.clock > .dot { right: 0.55em; }
+.wx-now {
+  grid-area: now; align-self: stretch; min-width: 0;
+  display: grid; grid-template-columns: auto auto; grid-template-rows: auto 1fr; align-items: center; column-gap: 0.5em;
+}
+.wx-now .wx-ico { width: 3em; height: 3em; }
+.wx-now .wx-temp { font-size: 3.4em; font-weight: 300; line-height: 0.9; letter-spacing: -0.03em; }
+.wx-now > div:last-child { grid-column: 1 / -1; align-self: end; font-size: 1.05em; line-height: 1.35; font-weight: 500; margin-bottom: 0.05em; }
+.wx-now > div:last-child .muted { font-size: 0.9em; font-weight: 400; }
+.wx-days {
+  grid-area: days; display: grid; align-content: start; gap: 0.12em; overflow: hidden;
+  /* Take the height the clock sets, not more: rows that don't fit are hidden by the panel script. */
+  height: 0; min-height: 100%;
+}
+.wx-day {
+  display: grid; grid-template-columns: 3em 1.6em 2em minmax(1.5em, 1fr) 2em; align-items: center; column-gap: 0.6em;
+  height: 1.85em; font-variant-numeric: tabular-nums;
+}
+.wx-day > span:first-child { color: var(--muted); }
+.wx-day .wx-ico { width: 1.5em; height: 1.5em; }
+.wx-day .min, .wx-day .max { text-align: right; }
+.wx-day .min { color: var(--muted); }
+.wx-day .max { font-weight: 500; }
+.wx-bar { position: relative; height: 0.36em; border-radius: 999px; background: var(--card-2); }
+.wx-bar span { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, #7cc4ff, #ffd36b); }
+
+/* ---------- Price (the one hero figure) ---------- */
+.price {
+  display: grid; align-items: last baseline; column-gap: 0.9em;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-areas: "label label label" "big chip sub";
+}
+.price .label { grid-area: label; margin-bottom: 0.1em; }
+.price .big { grid-area: big; display: flex; align-items: baseline; font-size: 7.2em; font-weight: 650; line-height: 0.95; letter-spacing: -0.035em; white-space: nowrap; }
+.price .big.none { color: var(--faint); font-weight: 300; }
+.price .big small { font-size: 0.24em; font-weight: 500; letter-spacing: 0; color: var(--muted); margin-left: 0.45em; }
+.band-chip {
+  grid-area: chip; justify-self: start; font-size: 1.3em; font-weight: 650; line-height: 1; white-space: nowrap;
+  padding: 0.38em 0.8em 0.4em; border-radius: 999px; color: var(--on-band); background: var(--card-2);
+}
+.price .sub { grid-area: sub; justify-self: end; min-width: 0; color: var(--muted); font-size: 1.1em; line-height: 1.6; }
+.price .sub b { color: var(--text); font-weight: 600; }
+.band-dot { display: inline-block; width: 0.55em; height: 0.55em; border-radius: 50%; margin: 0 0.35em 0.08em 0.05em; vertical-align: middle; }
+.band-chip.band-plunge, .band-dot.band-plunge, .sw.band-plunge { background: var(--plunge); }
+.band-chip.band-cheap, .band-dot.band-cheap, .sw.band-cheap { background: var(--cheap); }
+.band-chip.band-mid, .band-dot.band-mid, .sw.band-mid { background: var(--mid); }
+.band-chip.band-high, .band-dot.band-high, .sw.band-high { background: var(--high); }
+
+/* ---------- Chart ---------- */
+.chart { display: grid; grid-template-rows: auto minmax(0, 1fr); row-gap: 0.5em; }
+.chart-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1em; }
+/* The chart and the price above it share one status, shown once, on the price. */
+.chart > .dot { display: none; }
+.legend { display: flex; gap: 1.1em; color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+.legend .lg { display: inline-flex; align-items: center; gap: 0.4em; }
+.legend .sw { width: 0.7em; height: 0.7em; border-radius: 2px; }
+.chart .chart-box { min-height: 0; position: relative; font-size: 0.82em; }
+.chart .chart-box > svg { position: absolute; inset: 0; }
+.chart-svg text { font-family: inherit; font-size: 1em; fill: var(--faint); font-variant-numeric: tabular-nums; }
+.chart-svg .ch-x { fill: var(--muted); }
+.chart-svg .ch-day { fill: var(--text); font-weight: 650; }
+.chart-svg .ch-grid { stroke: var(--grid); stroke-width: 1; }
+.chart-svg .ch-zero { stroke: #33383f; stroke-width: 1; }
+.chart-svg .ch-midnight { stroke: #2a2e34; stroke-width: 1; }
+.chart-svg .ch-now { stroke: var(--accent); stroke-width: 2; }
+.chart-svg .ch-now-label { fill: var(--accent); font-weight: 650; }
+.chart-svg .ch-val { fill: var(--text); font-weight: 600; }
+.chart-svg .ch-bar.band-plunge { fill: var(--plunge); } .chart-svg .ch-bar.band-cheap { fill: var(--cheap); }
+.chart-svg .ch-bar.band-mid { fill: var(--mid); } .chart-svg .ch-bar.band-high { fill: var(--high); }
+.chart-svg .ch-bar.ch-past { fill: #2a2e35; } /* gone: grey, so the colour is only on what's still to come */
+.chart-svg .ch-empty { fill: var(--faint); font-size: 1.2em; }
+.chart-svg .ch-note { fill: var(--faint); font-size: 1.05em; }
+
+/* ---------- Tiles ---------- */
+.tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap); }
+.tile {
+  background: var(--card); border-radius: var(--radius);
+  padding: 0.85em 1em 0.9em; display: grid; align-content: start;
+  grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto 1fr;
+  column-gap: 0.5em; row-gap: 0.2em; height: 7.4em;
+}
+.tile .ico { width: 1.15em; height: 1.15em; color: var(--faint); align-self: center; }
+.tile .t-label { color: var(--muted); font-size: 0.95em; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 0.8em; }
+.tile .t-value { grid-column: 1 / -1; font-size: 2.15em; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile .t-value small { font-size: 0.48em; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-left: 0.35em; }
+.tile .extra { grid-column: 1 / -1; align-self: end; min-width: 0; font-size: 0.9em; }
+.tile .extra .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile > .dot { top: 0.95em; right: 0.95em; }
+.spark { width: 100%; height: 1.7em; overflow: visible; }
+.spark path { vector-effect: non-scaling-stroke; }
+.spark path.l { stroke: #7d858f; stroke-width: 1.5; fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.spark path.a { fill: #ffffff0a; stroke: none; }
+.spark path.e { stroke: var(--accent); stroke-width: 7; stroke-linecap: round; fill: none; }
+.meter { height: 0.4em; border-radius: 999px; background: var(--card-2); overflow: hidden; margin-bottom: 0.45em; }
+.meter span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+.meter.low span { background: var(--mid); }
+
+/* ---------- Calendar ---------- */
+.cal { flex: 1; display: flex; flex-direction: column; }
+.cal-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1.1em; }
+.cal-day h3 {
+  margin: 0 0 0.55em; font-size: 1.3em; font-weight: 650; letter-spacing: -0.01em;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 0.5em;
+}
+.cal-day h3 span + span { color: var(--muted); font-size: 0.72em; font-weight: 500; letter-spacing: 0; }
+.cal-day h3 { padding-right: 1.2em; } /* room for the status dot, the same on every day */
+.cal-day + .cal-day { border-top: 1px solid var(--line); padding-top: 1em; }
+.ev { display: grid; grid-template-columns: 3.4em minmax(0, 1fr); column-gap: 0.8em; padding: 0.4em 0; }
+.ev .when { color: var(--text); font-size: 0.95em; font-weight: 500; line-height: 1.45; font-variant-numeric: tabular-nums; padding-top: 0.1em; white-space: nowrap; }
+.ev .when .end { color: var(--muted); font-weight: 400; }
+.ev .what { border-left: 3px solid var(--accent); padding-left: 0.75em; min-width: 0; }
+.ev .title { font-weight: 600; font-size: 1.15em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ev .where { color: var(--muted); font-size: 0.92em; line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 0.4em; margin-bottom: 0.35em; }
+.chip {
+  background: var(--card); border-left: 3px solid var(--accent); padding: 0.35em 0.7em; border-radius: 4px 8px 8px 4px;
+  font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cal .empty { color: var(--faint); padding: 0.3em 0; }
+.cal .more { color: var(--muted); font-size: 0.9em; padding: 0.2em 0 0 calc(5.5em + 3px); }
+
+/* ---------- Camera ---------- */
+.cam {
+  flex: none; aspect-ratio: 16 / 9; width: 100%; max-height: 48%;
+  display: grid; place-items: center; background: var(--card); border-radius: var(--radius);
+}
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.cam .cam-idle { display: grid; justify-items: center; gap: 0.3em; text-align: center; padding: 1em; }
+.cam .cam-idle .ico { width: 2.4em; height: 2.4em; color: var(--faint); margin-bottom: 0.1em; }
+.cam .cam-name { font-size: 1.35em; font-weight: 600; }
+.cam .cam-idle > .muted { font-size: 0.85em; color: var(--faint); max-width: 24em; text-wrap: balance; }
+.cam .cam-hint {
+  display: inline-flex; align-items: center; gap: 0.45em; margin-top: 0.45em; padding: 0.55em 1.1em;
+  border-radius: 999px; background: var(--card-2); font-weight: 600;
+}
+.cam .cam-hint svg { width: 1em; height: 1em; }
+.cam .cam-bar {
+  position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 0.8em;
+  padding: 0.7em 0.9em; background: linear-gradient(#000b, #0000); font-weight: 600;
+}
+.cam .cam-bar .live-badge { background: var(--high); color: #fff; border-radius: 5px; padding: 0.12em 0.5em; font-size: 0.8em; letter-spacing: 0.06em; }
+.cam .cam-bar .spacer { flex: 1; }
+.cam .cam-bar .close { width: 2.4em; height: 2.4em; display: grid; place-items: center; border-radius: 50%; background: #0009; }
+.cam .cam-bar .close svg { width: 1.3em; height: 1.3em; }
+.cam > .dot { top: 0.9em; right: 0.9em; }
+.cam.expanded { position: fixed; inset: 0; z-index: 40; border-radius: 0; max-height: none; aspect-ratio: auto; }
+
+/* ---------- Dock ---------- */
+.dock { grid-area: dock; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--gap); }
+.dock button {
+  height: 4.2em; border-radius: var(--radius); background: var(--card);
+  display: flex; align-items: center; justify-content: center; gap: 0.6em; padding: 0 0.8em;
+  font-size: 1.2em; font-weight: 550;
+}
+.dock button span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock button:active, .tile:active, .cam:active { background: var(--card-2); }
+.dock svg { width: 1.3em; height: 1.3em; flex: none; color: var(--muted); }
+
+/* ---------- Overlays ---------- */
+.night {
+  position: fixed; inset: 0; z-index: 60; background: #000; display: grid; place-items: center;
+  color: #33373d; font-size: clamp(60px, 18vh, 160px); font-weight: 250; letter-spacing: -0.04em;
+}
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 80;
+  background: #22262c; color: var(--text); padding: 0.8em 1.2em; border-radius: 12px; max-width: 80vw;
+  box-shadow: 0 6px 20px #0007; font-size: 1.05em; text-align: center;
+}
+
+/* ---------- Settings ---------- */
+.settings { position: fixed; inset: 0; z-index: 70; background: var(--bg); overflow-y: auto; user-select: text; -webkit-user-select: text; }
+.settings .wrap { max-width: 880px; margin: 0 auto; padding: 1.2em 1.2em 5em; font-size: 15px; }
+.settings h1 { font-size: 1.6em; margin: 0.2em 0 0.8em; display: flex; justify-content: space-between; align-items: center; }
+.settings h2 { font-size: 1.15em; margin: 0 0 0.6em; }
+.settings section { background: var(--card); border-radius: var(--radius); padding: 1em 1.1em; margin-bottom: 1em; }
+.settings label { display: grid; gap: 0.3em; margin: 0.7em 0 0.3em; color: var(--muted); }
+.settings label.row { grid-template-columns: auto 1fr; align-items: center; gap: 0.6em; }
+.settings input[type=text], .settings input[type=password], .settings input[type=number], .settings input[type=time], .settings select, .settings textarea {
+  font: inherit; color: var(--text); background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 0.6em 0.7em; width: 100%;
+}
+.settings textarea { min-height: 6em; font-family: monospace; font-size: 12px; }
+.settings .btn { background: var(--accent); color: #04121f; font-weight: 700; padding: 0.65em 1.1em; border-radius: 10px; margin: 0.3em 0.4em 0.3em 0; }
+.settings .btn.secondary { background: var(--card-2); color: var(--text); font-weight: 500; }
+.settings .btn-wrap { display: inline; }
+.settings .btn-status { color: var(--muted); font-size: 0.92em; margin-right: 0.8em; }
+.settings .btn-status.bad { color: var(--high); display: block; margin: 0.2em 0 0.4em; }
+.settings .help { color: var(--faint); font-size: 0.9em; margin: 0.2em 0 0.6em; }
+.settings code, .settings .mono { font-family: monospace; font-size: 0.92em; background: var(--card-2); padding: 0.1em 0.35em; border-radius: 5px; word-break: break-all; }
+.checklist { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35em; }
+.checklist li { display: grid; grid-template-columns: 1.6em minmax(0, 1fr); gap: 0.3em; }
+.checklist .ok { color: var(--cheap); } .checklist .bad { color: var(--high); } .checklist .off { color: var(--faint); }
+.pick { display: grid; gap: 0.3em; }
+.pick label { grid-template-columns: auto 1fr; display: grid; align-items: center; gap: 0.6em; margin: 0.2em 0; color: var(--text); }
