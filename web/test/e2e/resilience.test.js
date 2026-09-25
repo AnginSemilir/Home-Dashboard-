@@ -21,6 +21,15 @@ test('a Home Mini that stops reporting turns amber and says since when', async (
   await ctx.close();
 });
 
+test('a Home Mini that stopped before midnight is still flagged the next morning', async () => {
+  const at = Date.parse('2026-09-26T00:50:00+01:00');
+  const { ctx, page } = await openPanel(env, { now: at, homeMiniStopsAt: Date.parse('2026-09-25T21:00:00+01:00') });
+  await page.locator('.tile.usage .dot.stale').waitFor();
+  await page.locator('.tile.usage').click();
+  await page.locator('.toast', { hasText: /No Home Mini reading yet today|No new Home Mini reading since/ }).waitFor();
+  await ctx.close();
+});
+
 test('a Kia job that has stopped running keeps the last reading but shows a red dot', async () => {
   const { ctx, page } = await openPanel(env, { kiaReading: { battery: 64, range: 150, updated: NOW - 5 * 3600e3, fetched: NOW - 10 * 3600e3 } });
   await page.locator('.tile.car .dot.error').waitFor();
@@ -68,6 +77,29 @@ test('signing out revokes access at Google and clears the calendar and thermosta
   const cache = await page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.cache.v1')));
   assert.equal(cache.events, null);
   assert.equal(cache.thermo, null);
+  await ctx.close();
+});
+
+test("sign out takes effect even if Settings is then cancelled (the revoke can't be undone)", async () => {
+  const { ctx, page } = await openPanel(env);
+  await page.locator('#cal', { hasText: 'Dentist' }).waitFor();
+  await page.locator('#clock .gear').click();
+  const settings = page.locator('#settings');
+  await settings.getByRole('button', { name: 'Sign out of Google' }).click();
+  await settings.getByText(/Signed out of Google/).waitFor();
+  await settings.getByRole('button', { name: 'Cancel' }).click();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.settings.v1')).google);
+  assert.equal(saved.refreshToken, '');
+  await page.reload();
+  await page.locator('#cal', { hasText: 'Sign in to Google' }).waitFor();
+  await ctx.close();
+});
+
+test('signed in but no calendars chosen: says to choose them (not to sign in)', async () => {
+  const s = fullSettings(NOW);
+  s.google.calendars = [];
+  const { ctx, page } = await openPanel(env, { settings: s });
+  await page.locator('#cal', { hasText: 'Choose calendars in Settings' }).waitFor();
   await ctx.close();
 });
 

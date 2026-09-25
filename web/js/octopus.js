@@ -88,12 +88,26 @@ export function costToday(slots, rates, standingChargeP = 0) {
 
 const isRateLimit = (err) => !!err && /KT-CT-1199|too many requests/i.test(`${err.extensions?.errorCode || ''} ${err.message || ''}`);
 
-/** Whether the page's security policy lets it call `origin` (always true outside a browser). */
-function cspAllows(origin) {
-  const meta = globalThis.document?.querySelector?.('meta[http-equiv="Content-Security-Policy"]');
+/**
+ * Whether the page's security policy lets it call `origin` (https://host). Accepts the forms a
+ * browser does: with or without https:// or a trailing slash, any letter case, and *.domain.
+ * Always true outside a browser.
+ */
+export function cspAllows(origin, doc = globalThis.document) {
+  const meta = doc?.querySelector?.('meta[http-equiv="Content-Security-Policy"]');
   if (!meta) return true;
   const m = /connect-src([^;]*)/.exec(meta.getAttribute('content') || '');
-  return !!m && m[1].trim().split(/\s+/).includes(origin);
+  if (!m) return false;
+  const want = origin.toLowerCase().replace(/\/+$/, '');
+  const host = want.replace(/^https:\/\//, '');
+  return m[1].trim().split(/\s+/).some((t) => {
+    let x = t.toLowerCase().replace(/\/+$/, '');
+    if (x.startsWith("'")) return false; // 'self', 'none'
+    if (!/^[a-z][a-z0-9+.-]*:/.test(x)) x = `https://${x}`;
+    if (x === want) return true;
+    const w = /^https:\/\/\*\.(.+)$/.exec(x);
+    return !!w && host.endsWith(`.${w[1]}`);
+  });
 }
 
 export class Octopus {

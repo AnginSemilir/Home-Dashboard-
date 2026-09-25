@@ -195,6 +195,20 @@ test('camera: if no video arrives it gives up after 30 s and says so', async () 
   await ctx.close();
 });
 
+test('camera: when Google refuses the stream, the panel says why and shows a red dot', async () => {
+  const { ctx, page } = await openPanel(env, { initScript: fakeCameraRTC });
+  await ready(page);
+  await page.route(/smartdevicemanagement\.googleapis\.com\/.*:executeCommand/, (route) => (
+    /GenerateWebRtcStream/.test(route.request().postData() || '')
+      ? route.fulfill({ status: 403, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: { code: 403, message: 'The caller does not have permission' } }) })
+      : route.fallback()));
+  await page.locator('#cam').click();
+  await page.locator('.toast', { hasText: /Camera: .*permission/ }).waitFor();
+  await page.locator('#cam .dot.error').waitFor();
+  assert.equal(await page.locator('.cam-bar').isVisible(), false);
+  await ctx.close();
+});
+
 test('camera: closing while it connects is clean, and a new stream is not disturbed by the old one', async () => {
   const { ctx, page, calls, problems } = await openPanel(env, { initScript: fakeCameraRTC });
   await ready(page);
@@ -238,7 +252,6 @@ test('buttons in the kiosk app (Android WebView) open Android apps and screens',
   await page.mouse.up();
   await waitFor(() => nav.length >= 6, 'six navigations');
   assert.match(nav[0], /^intent:#Intent;action=android\.intent\.action\.MAIN;category=android\.intent\.category\.HOME;/);
-  assert.match(nav[1], /^intent:#Intent;action=android\.intent\.action\.VOICE_ASSIST;component=com\.anthropic\.claude\//);
   assert.deepEqual(nav, [
     APPS.home.special,
     APPS.claude.special,

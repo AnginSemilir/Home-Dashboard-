@@ -17,7 +17,8 @@ self.addEventListener('fetch', (e) => {
         cache.put(e.request, res.clone());
       }
       // A GitHub Pages error (404/5xx) during the nightly reload: use the last good copy.
-      if (!res.ok) {
+      // Redirects (e.g. to a new custom domain) are followed as normal.
+      if (res.type !== 'opaqueredirect' && (res.status === 404 || res.status >= 500)) {
         const hit = await caches.match(e.request, { ignoreSearch: true });
         if (hit) return hit;
       }

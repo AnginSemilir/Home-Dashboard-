@@ -44,7 +44,7 @@ If something shows a small amber or red dot, tap the card for the reason, or see
 
 ## What I could and couldn't test
 
-Everything was tested in a browser against **fake** versions of every service: 33 unit tests and 15 browser tests, including clock-change days, midnight, night mode, the camera's 5-minute stop, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
+Everything was tested in a browser against **fake** versions of every service: 42 unit tests and 25 browser tests, including clock-change days, midnight, night mode, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
 
 - that Octopus accepts calls from the page (if not, use the proxy in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked));
 - real Google sign-in and a real camera stream;

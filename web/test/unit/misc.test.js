@@ -45,6 +45,14 @@ test('calendar: the same event on two chosen calendars shows once', () => {
   assert.deepEqual(groupDays(events, now)[0].events.map((e) => e.title), ['Parents evening']);
 });
 
+test('calendar: a recurring event shared by calendars in different time zones shows once', () => {
+  const now = iso('2026-09-25T09:00:00+01:00');
+  const base = { id: 'series_20260925T170000Z', iCalUID: 'series@google.com', summary: 'Swimming', end: { dateTime: '2026-09-25T19:00:00+01:00' } };
+  const utc = normalizeEvent({ ...base, start: { dateTime: '2026-09-25T17:00:00Z' }, originalStartTime: { dateTime: '2026-09-25T17:00:00Z' } }, { id: 'a' });
+  const uk = normalizeEvent({ ...base, start: { dateTime: '2026-09-25T18:00:00+01:00' }, originalStartTime: { dateTime: '2026-09-25T18:00:00+01:00' } }, { id: 'b' });
+  assert.equal(groupDays([utc, uk], now)[0].events.length, 1);
+});
+
 test('calendar: one failing calendar still shows the others and names the failure; all failing throws', async () => {
   const google = { api: async (url) => { if (url.includes('school')) throw new Error('404 Not Found'); return { items: [] }; } };
   const now = iso('2026-09-25T09:00:00+01:00');

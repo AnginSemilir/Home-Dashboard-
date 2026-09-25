@@ -161,7 +161,11 @@ export function openSettings(root, ctx) {
           method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token }),
         }).catch(() => {});
       }
-      Object.assign(draft.google, { refreshToken: '', scopes: '', calendars: [], cameraId: '', thermostatId: '' });
+      // Revoking can't be undone, so this is saved straight away (Cancel won't bring it back).
+      const cleared = { refreshToken: '', scopes: '', calendars: [], cameraId: '', thermostatId: '' };
+      Object.assign(draft.google, cleared);
+      Object.assign(s.google, JSON.parse(JSON.stringify(cleared)));
+      save();
       devicePick.replaceChildren();
       calPick.replaceChildren();
       showGoogle();

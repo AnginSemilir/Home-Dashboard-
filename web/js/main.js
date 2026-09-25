@@ -2,7 +2,7 @@
 
 import { loadSettings, saveSettings, loadCache, saveCache } from './config.js';
 import { backoffMs, describeError, HttpError } from './util.js';
-import { inWindow, partsInTz, hhmm } from './time.js';
+import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort } from './time.js';
 import { Octopus, costToday } from './octopus.js';
 import { Google } from './google.js';
 import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
@@ -23,6 +23,7 @@ export const state = {
   standingP: cache.standingP ?? null,
   tele: cache.tele || null,
   demand: cache.demand || [],
+  lastDemandAt: cache.lastDemandAt ?? null, // newest Home Mini reading ever seen (survives midnight)
   costP: cache.costP ?? null,
   thermo: cache.thermo || null,
   camera: cache.camera || null,
@@ -33,7 +34,7 @@ export const state = {
 };
 
 const persist = () => saveCache({
-  rates: state.rates, standingP: state.standingP, tele: state.tele, demand: state.demand, costP: state.costP,
+  rates: state.rates, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
   thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia,
 });
 
@@ -49,7 +50,7 @@ function renderAll() {
   const now = Date.now();
   ui.renderClock(refs, now, tz);
   ui.renderWeather(refs, state.weather, state.status.weather, tz);
-  ui.renderCalendar(refs, state.events, now, state.status.calendar, tz);
+  ui.renderCalendar(refs, state.events, now, state.status.calendar, tz, 9, google.signedIn);
   ui.renderPrice(refs, state.rates, now, state.status.rates, priceOpts(), tz);
   ui.renderTiles(refs, state, settings, now, tz);
   ui.renderCamera(refs, settings, state, live);
@@ -146,6 +147,7 @@ async function refreshHomeMini() {
   await ensureDiscovered();
   const tele = await octopus.telemetryToday(Date.now(), tz);
   state.tele = tele;
+  if (tele.demandAt) state.lastDemandAt = Math.max(state.lastDemandAt || 0, tele.demandAt);
   if (Number.isFinite(tele.demandW) && Date.now() - tele.demandAt < HOME_MINI_STALE) {
     state.demand.push({ t: Date.now(), w: tele.demandW });
     state.demand = state.demand.filter((p) => p.t > Date.now() - 2 * 3600e3);
@@ -208,12 +210,14 @@ async function openCamera() {
       state.status.camera = { ok: true, at: Date.now() };
     }
   } catch (e) {
+    // Decide before stop(): its 'ended' callback clears `live`. A session the user already
+    // closed (live !== mine) fails quietly; the one on screen reports why.
+    const current = live === mine;
     await stream.stop();
-    if (live === mine) {
-      // Only report errors for the session still on screen, not one the user already closed.
+    if (current) {
       state.status.camera = { error: describeError(e), at: Date.now() };
       ui.toast(refs, `Camera: ${describeError(e)}`);
-      live = null;
+      if (live === mine) live = null;
     }
   }
   ui.renderCamera(refs, settings, state, live);
@@ -239,9 +243,21 @@ function explain(st, staleWhy = 'Not updated recently. The panel keeps retrying 
   if (why) ui.toast(refs, why, 6000);
 }
 
-const homeMiniStaleWhy = () => (state.tele?.demandAt
-  ? `No new Home Mini reading since ${hhmm(state.tele.demandAt, tz)}. Check it's plugged in and on Wi-Fi (the Octopus app shows the same).`
-  : undefined);
+/**
+ * When the Home Mini last reported. After midnight "today" can be empty, so fall back to the
+ * newest reading ever seen, and failing that to midnight (nothing at all today).
+ */
+function homeMiniDataAt() {
+  if (!state.tele) return null;
+  return state.tele.demandAt ?? state.lastDemandAt ?? startOfDay(Date.now(), tz);
+}
+
+function homeMiniStaleWhy() {
+  const t = state.tele?.demandAt ?? state.lastDemandAt;
+  if (!t) return state.tele ? "No Home Mini reading yet today. Check it's plugged in and on Wi-Fi." : undefined;
+  const when = t < startOfDay(Date.now(), tz) ? `${weekdayShort(t, tz)} ${hhmm(t, tz)}` : hhmm(t, tz);
+  return `No new Home Mini reading since ${when}. Check it's plugged in and on Wi-Fi (the Octopus app shows the same).`;
+}
 
 // ---------- Night mode, wake lock, daily reload ----------
 // An automatic nightly reload isn't a touch, so it shouldn't wake the screen.
@@ -307,8 +323,8 @@ async function boot() {
     clear: () => { state.rates = []; state.standingP = null; state.costP = null; },
   })();
   source('homemini', refreshHomeMini, () => (nightNow() ? 300e3 : Math.max(30, settings.octopus.pollSeconds) * 1000), {
-    staleAfter: HOME_MINI_STALE, dataAt: () => state.tele?.demandAt ?? null, enabled: () => !!(settings.octopus.apiKey && settings.octopus.account),
-    clear: () => { state.tele = null; state.demand = []; state.costP = null; },
+    staleAfter: HOME_MINI_STALE, dataAt: homeMiniDataAt, enabled: () => !!(settings.octopus.apiKey && settings.octopus.account),
+    clear: () => { state.tele = null; state.demand = []; state.lastDemandAt = null; state.costP = null; },
   })();
   source('thermostat', refreshNest, minutes(5), {
     staleAfter: 30 * 60e3, enabled: () => !!(google.signedIn && settings.google.thermostatId),

@@ -44,4 +44,9 @@ It's laid out for the M10's 1280×800 screen in landscape, and also tested at 13
 ## Keeping the keys safe
 
 - **Anyone at the wall can open ⚙.** It shows your settings (keys are hidden, but **Copy settings** reveals them). For a family wall that's usually fine. If visitors use the tablet unsupervised, bear it in mind.
-- **Browser storage is shared by every page on `anginsemilir.github.io`.** If you ever publish another GitHub Pages site from this GitHub account, pages on it could read the panel's settings in the same browser. So on the tablet, don't open other `anginsemilir.github.io` pages in the browser that holds the panel's settings (the kiosk app only ever opens the panel). For complete separation, give the panel its own domain (GitHub → Settings → Pages → Custom domain) and update the Google redirect URI to match.
+- **Browser storage is shared by every page on `anginsemilir.github.io`.** If you ever publish another GitHub Pages site from this GitHub account, pages on it could read the panel's settings in the same browser. So on the tablet, don't open other `anginsemilir.github.io` pages in the browser that holds the panel's settings (the kiosk app only ever opens the panel). For complete separation, give the panel its own domain (GitHub → Settings → Pages → Custom domain). That's a new address, so:
+  1. **Before** switching, ⚙ → **Copy settings** (the new address starts with empty settings).
+  2. Switch the domain, set the kiosk app's URL to the new address, then ⚙ → **Paste settings** there.
+  3. Change the Google OAuth client's redirect URI to the new address ([google.md](google.md) step 1.5) and sign in again.
+  4. If you use the Octopus proxy, change `PANEL` in the worker to the new address ([octopus.md](octopus.md#if-octopus-is-blocked)).
+  5. If you use the Kia job, your key comes across with the pasted settings; nothing else changes.

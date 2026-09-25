@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Octopus, parseAccount, parseTelemetry, costToday, productFromTariff, regionFromTariff } from '../../js/octopus.js';
+import { Octopus, parseAccount, parseTelemetry, costToday, productFromTariff, regionFromTariff, cspAllows } from '../../js/octopus.js';
 import { loadSettings } from '../../js/config.js';
 import { HttpError } from '../../js/util.js';
 
@@ -127,4 +127,16 @@ test('Octopus client: a rate limit while getting a token also counts as a rate l
   fakeFetch(() => ({ body: { errors: [{ message: 'Too many requests.', extensions: { errorCode: 'KT-CT-1199' } }] } }));
   await assert.rejects(new Octopus(s).telemetryToday(), (e) => e instanceof HttpError && e.status === 429);
   assert.equal(calls.length, 1, 'no immediate second attempt');
+});
+
+test('cspAllows: accepts the forms a browser accepts, nothing wider', () => {
+  const doc = (list) => ({ querySelector: () => ({ getAttribute: () => `default-src 'self'; connect-src 'self' https://api.octopus.energy ${list}; object-src 'none'` }) });
+  const proxy = 'https://octo.me.workers.dev';
+  for (const ok of ['https://octo.me.workers.dev', 'https://octo.me.workers.dev/', 'octo.me.workers.dev', 'https://OCTO.me.workers.dev', 'https://*.me.workers.dev']) {
+    assert.equal(cspAllows(proxy, doc(ok)), true, ok);
+  }
+  for (const bad of ['', 'https://other.workers.dev', 'https://*.other.dev', "'self'"]) {
+    assert.equal(cspAllows(proxy, doc(bad)), false, bad || '(nothing)');
+  }
+  assert.equal(cspAllows(proxy, undefined), true, 'outside a browser');
 });

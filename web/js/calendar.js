@@ -22,7 +22,7 @@ export function normalizeEvent(e, cal = {}, tz = DEFAULT_TZ) {
   return {
     id: `${cal.id || ''}/${e.id || start}`,
     // The same meeting on two chosen calendars (e.g. family + your own) has the same iCalUID.
-    key: `${e.iCalUID || e.id || ''}|${e.originalStartTime?.dateTime || e.originalStartTime?.date || start}`,
+    key: `${e.iCalUID || e.id || ''}|${e.originalStartTime?.dateTime ? Date.parse(e.originalStartTime.dateTime) : e.originalStartTime?.date || start}`,
     title: e.summary || '(no title)',
     location: e.location || '',
     start,

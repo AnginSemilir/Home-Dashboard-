@@ -170,10 +170,12 @@ export function fitRows(container) {
   for (const row of rows) if (row.getBoundingClientRect().bottom > bottom + 1) row.classList.add('hidden');
 }
 
-export function renderCalendar(r, events, now, st, tz = DEFAULT_TZ, maxRows = 9) {
+export function renderCalendar(r, events, now, st, tz = DEFAULT_TZ, maxRows = 9, signedIn = false) {
   setDot(r.calDot, st);
   if (!events) {
-    r.calBody.replaceChildren(h('div', { class: 'empty' }, st?.error ? 'Calendar unavailable' : 'Sign in to Google in Settings to show your calendar'));
+    const why = st?.error ? 'Calendar unavailable'
+      : signedIn ? 'Choose calendars in Settings to show them here' : 'Sign in to Google in Settings to show your calendar';
+    r.calBody.replaceChildren(h('div', { class: 'empty' }, why));
     return;
   }
   let rows = 0;
