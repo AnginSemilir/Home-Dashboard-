@@ -22,7 +22,15 @@ You need a computer (easier) or the tablet, and the Google account that owns you
    - **Create**, then copy the **Client ID** and the **Client secret**.
 
      **Save the client secret somewhere now.** Google only shows it in full once.
-6. **Publish the app**: **Audience → Publish app → Confirm**.
+6. **Fill in Branding** (Google won't publish without it): **Google Auth Platform → Branding**:
+   - **App name**: `Home panel`. **User support email**: your email.
+   - **App logo**: leave empty. Adding a logo makes Google insist on a full review.
+   - **Application home page**: `https://anginsemilir.github.io/Home-Dashboard-/`
+   - **Application privacy policy link**: `https://anginsemilir.github.io/Home-Dashboard-/privacy.html` (included with the panel)
+   - **Terms of service**: leave empty.
+   - **Authorised domains**: `anginsemilir.github.io`
+   - **Developer contact information**: your email. Then **Save**.
+7. **Publish the app**: **Audience → Publish app → Confirm**.
 
    While an app is in "Testing", Google signs you out of it every 7 days, so the panel would stop after a week. When published, you'll see a "Google hasn't verified this app" warning when you sign in. That's expected for a personal app: click **Advanced → Go to Home panel (unsafe)**. It's your own app; nobody else uses it.
 
@@ -70,7 +78,7 @@ To sign out, use ⚙ → **Sign out of Google**. It also cancels the panel's acc
 
 ## If Google stops working
 
-- **"Google sign-in expired or was revoked: sign in again"**: the app is still in Testing (step 1.6), or you removed access. Publish it, then Sign in again (in Chrome, then Copy/Paste settings).
+- **"Google sign-in expired or was revoked: sign in again"**: the app is still in Testing (step 1.7), or you removed access. Publish it, then Sign in again (in Chrome, then Copy/Paste settings).
 - **`redirect_uri_mismatch`**: the redirect URI in the OAuth client must match what the panel's Settings screen shows, character for character.
 - **`disallowed_useragent`**: you tried to sign in inside the kiosk app. Use Chrome (step 3).
 - **Thermostat or camera missing from "Choose camera & thermostat"**: you didn't switch them on in the partner connection page. Sign in again and switch them on, or change it at <https://nestservices.google.com/partnerconnections>.

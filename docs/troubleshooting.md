@@ -22,7 +22,7 @@ The panel retries by itself, waiting longer each time (30 seconds up to 15 minut
 | Home Mini "not found" after Connect | Home Mini not paired, or on a different account | Check the Octopus app shows live usage |
 | Using now: amber dot, "No new Home Mini reading since …" | The Home Mini has stopped reporting | Check it's plugged in and on Wi-Fi; the Octopus app will show the same gap |
 | Home Mini red dot, "Octopus rate limit reached" | Too many Octopus requests this hour | It backs off by itself. Raise ⚙ → Octopus → Home Mini refresh to 90–120 s |
-| Google ✗ "sign in again" | The Google app is still in *Testing* (7-day limit), or access was removed | [google.md](google.md) step 1.6, then sign in again in Chrome and Copy/Paste settings |
+| Google ✗ "sign in again" | The Google app is still in *Testing* (7-day limit), or access was removed | [google.md](google.md) step 1.7, then sign in again in Chrome and Copy/Paste settings |
 | `disallowed_useragent` when signing in | Google blocks sign-in inside kiosk apps | Sign in in Chrome, then copy settings across ([google.md](google.md), step 3) |
 | `redirect_uri_mismatch` | OAuth client's redirect URI differs | Must be exactly `https://anginsemilir.github.io/Home-Dashboard-/` |
 | Camera: "The camera didn't send any video" | Battery camera asleep or offline, or poor Wi-Fi at the camera | Tap again; check it in the Google Home app |

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <title>Home panel: privacy policy</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/panel.css">
+</head>
+<body>
+  <main class="settings">
+    <div class="wrap">
+      <h1>Home panel: privacy policy</h1>
+
+      <section>
+        <h2>What this is</h2>
+        <p>Home panel is a personal wall display for one household. It runs entirely in the web browser of the household's own tablet or computer. It has no server, no user accounts and no analytics, and it sets no cookies.</p>
+      </section>
+
+      <section>
+        <h2>What it reads, and why</h2>
+        <ul>
+          <li><b>Google Nest</b> (Smart Device Management API): the thermostat's temperature and heating state, and a live camera view when you tap the camera card.</li>
+          <li><b>Google Calendar</b> (read-only): today's and tomorrow's events from the calendars you choose.</li>
+          <li><b>Octopus Energy</b>: your tariff, electricity prices and smart-meter (Home Mini) readings.</li>
+          <li><b>Weather</b>: the forecast for the location you enter (Open-Meteo, postcodes.io).</li>
+          <li><b>Kia</b> (optional): a battery reading that you publish yourself, encrypted, from your own GitHub repository.</li>
+        </ul>
+        <p>This data is only shown on your screen. It is never changed: the panel can't adjust your heating, edit your calendar or change your Octopus account.</p>
+      </section>
+
+      <section>
+        <h2>Where your data is kept</h2>
+        <p>Your keys, sign-in tokens and settings are stored only in your own browser on your own device. The panel sends each one only to the service it belongs to: Google tokens to Google, the Octopus key to Octopus. Nothing is sent to the author of this panel or to anyone else, and nothing is sold or shared.</p>
+        <p>The use of information received from Google APIs follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including its Limited Use requirements.</p>
+      </section>
+
+      <section>
+        <h2>Removing access</h2>
+        <ul>
+          <li>Google: in the panel, Settings → <b>Sign out of Google</b>, or remove "Home panel" at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</li>
+          <li>Octopus: regenerate your API key on the Octopus website. The old key stops working.</li>
+          <li>Everything: clear this site's data in your browser settings.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Contact</h2>
+        <p>Questions: open an issue on the project's <a href="https://github.com/AnginSemilir/Home-Dashboard-">GitHub repository</a>.</p>
+      </section>
+
+      <p class="help"><a href="./">Back to the panel</a></p>
+    </div>
+  </main>
+</body>
+</html>
