@@ -251,11 +251,16 @@ export function openSettings(root, ctx) {
   });
   const cancel = btn('Cancel', async () => { overlay.remove(); ctx.onClose?.(); }, true);
 
+  // Which published version this is (written by the publish workflow), to check an update arrived.
+  const version = h('div', { class: 'help' });
+  fetch('version.txt', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).then((v) => {
+    version.textContent = `Panel version: ${v.trim() || 'unknown'}`;
+  }).catch(() => {});
   const overlay = h('div', { class: 'settings', id: 'settings' }, h('div', { class: 'wrap' },
     h('h1', {}, 'Panel settings', h('span', {}, cancel, close)),
     h('section', {}, h('h2', {}, 'Setup checklist'), list, msg),
     weather, octo, google_, kia, panel, move,
-    h('div', { class: 'help' }, 'Everything here is stored only in this browser on this tablet.')));
+    h('div', { class: 'help' }, 'Everything here is stored only in this browser on this tablet.'), version));
   root.append(overlay);
   return overlay;
 }

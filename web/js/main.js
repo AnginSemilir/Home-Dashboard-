@@ -354,4 +354,8 @@ async function boot() {
   }
 }
 
+// A wall tablet has no console to look at, so unexpected errors are shown on screen.
+addEventListener('error', (e) => { if (refs) ui.toast(refs, `Something went wrong: ${e.message}`, 8000); });
+addEventListener('unhandledrejection', (e) => { if (refs) ui.toast(refs, `Something went wrong: ${describeError(e.reason)}`, 8000); });
+
 boot();

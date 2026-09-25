@@ -66,6 +66,7 @@ test('Cancel throws away changes', async () => {
   const { ctx, page } = await openPanel(env);
   await page.locator('.tile.car .t-value', { hasText: '%' }).waitFor();
   await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText('Panel version: dev (not published)').waitFor();
   await page.getByLabel('API key').fill('something-else');
   await page.locator('#settings').getByRole('button', { name: 'Cancel' }).click();
   assert.equal(await page.locator('#settings').count(), 0);
