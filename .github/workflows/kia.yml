@@ -1,0 +1,81 @@
+# OPTIONAL: Kia e-Niro battery for the panel. Does nothing until you add the three secrets
+# (repo Settings → Secrets and variables → Actions): KIA_USERNAME, KIA_PASSWORD, KIA_PANEL_KEY.
+# Optional secret: KIA_PIN. Optional variable: KIA_VIN (if the account has more than one car).
+#
+# Once an hour it reads the battery level the car last reported to Kia (it never wakes the
+# car), encrypts it with KIA_PANEL_KEY and publishes the encrypted file on the "kia-data"
+# branch. The file is public but useless without the key, which only the tablet has.
+# Nothing about the car is printed in the (public) logs. See docs/kia.md.
+name: Kia battery (optional)
+
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kia
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the Kia secrets are set
+        id: check
+        env:
+          U: ${{ secrets.KIA_USERNAME }}
+          P: ${{ secrets.KIA_PASSWORD }}
+          K: ${{ secrets.KIA_PANEL_KEY }}
+        run: |
+          if [ -n "$U" ] && [ -n "$P" ] && [ -n "$K" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Kia secrets are not set, so there is nothing to do."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.check.outputs.ok == 'true'
+        with:
+          sparse-checkout: tools
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.ok == 'true'
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: tools/requirements-kia.txt
+
+      - name: Install
+        if: steps.check.outputs.ok == 'true'
+        run: pip install -r tools/requirements-kia.txt
+
+      - name: Read the last reported battery level and encrypt it
+        if: steps.check.outputs.ok == 'true'
+        env:
+          KIA_USERNAME: ${{ secrets.KIA_USERNAME }}
+          KIA_PASSWORD: ${{ secrets.KIA_PASSWORD }}
+          KIA_PIN: ${{ secrets.KIA_PIN }}
+          KIA_PANEL_KEY: ${{ secrets.KIA_PANEL_KEY }}
+          KIA_VIN: ${{ vars.KIA_VIN }}
+        run: python tools/kia_fetch.py out/kia.json
+
+      - name: Publish the encrypted file to the kia-data branch
+        if: steps.check.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: out
+        run: |
+          # A single-commit branch, replaced each time, so history doesn't grow.
+          git init -q -b kia-data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add kia.json
+          git commit -qm "Kia reading (encrypted)"
+          git push -qf "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" kia-data

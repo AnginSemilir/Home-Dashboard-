@@ -1,93 +1,66 @@
-# Lenovo Tab M10 wall panel
+# Home panel for a Lenovo Tab M10
 
-A wall-mounted home panel for a Lenovo Tab M10. It shows the Nest camera, live electricity
-use from the Octopus Home Mini, Agile prices for the rest of the day, indoor temperature,
-today's calendar, the weather and the Kia's battery. It also has one-tap buttons for the
-shopping list, Spotify, Claude, Gemini and the Android home screen. Voice is handled by
-Gemini ("Hey Google…"), which is already on the tablet.
+A wall panel for a Lenovo Tab M10 (3rd gen, TB328), built as **one web page on GitHub Pages**. There's no Home Assistant, no server and nothing else to leave switched on. The tablet's browser talks straight to Google, Octopus and the weather service.
 
-![The panel, rendered at the M10's 1920×1200 resolution with sample data](docs/img/panel-preview.jpg)
+**Your panel:** `https://anginsemilir.github.io/Home-Dashboard-/` (after the one-off setup below)
 
-*Rendered by a real Home Assistant 2026.9 from the dashboard file in this repo, using
-sample data. The camera picture is a placeholder.*
+![The panel at 1280×800, with made-up data](docs/img/panel.jpg)
 
-## Why it's built this way
+## What's on it
 
-**Home Assistant does the data. The tablet shows the dashboard. Gemini does the voice.**
+| | Status | How |
+|---|---|---|
+| **Nest camera** (battery) | ✅ | Card says "Front door · Tap for live view". A tap starts a live WebRTC stream straight from Google. A battery camera stops after 5 minutes to save its battery; ✕ stops it sooner. |
+| **Nest thermostat** temperature | ✅ | Nest (Smart Device Management) API, every 5 min. Shows the target temperature and Heating/Idle/Eco. |
+| **Google Calendar**, today and tomorrow | ✅ | Calendar API, same Google sign-in. Finished events drop off; all-day events show as chips. |
+| **Weather** now + 4 days | ✅ | Open-Meteo (free, no key). |
+| **Agile price now**, rest of today, tomorrow after ~4pm | ✅ ⚠️ | Octopus's public prices API. The panel finds your tariff and region from your account. Colours: green < 15p, amber, red ≥ 25p, blue at or below 0p (you can change these). |
+| **Home Mini live usage** + £ so far today | ✅ ⚠️ | Octopus's API (`smartMeterTelemetry`), every 60 s. |
+| **Buttons:** Shopping (Keep), Spotify, Claude voice, Gemini voice, Home | ✅ | Android `intent:` links. All five work in the free **WebView Kiosk** app; in Chrome, Home can't work (use the swipe). See [docs/voice-and-apps.md](docs/voice-and-apps.md). |
+| **Kia e-Niro battery** (optional) | 🧪 | A free GitHub Action reads the car's last-reported battery once an hour and publishes it **encrypted**. It's an experiment: Kia may block it. See [docs/kia.md](docs/kia.md). |
+| Night dimming, screen always on, offline start | ✅ | Near-black screen 22:30–06:30 when nobody's touched it for 90 s (tap to wake); Wake Lock; cached data if the internet drops. |
 
-- **Home Assistant** (free, open source, running on a small box on your network) already
-  has maintained, free integrations for every data source you listed: Nest camera and
-  thermostat, Octopus Home Mini and Agile, Google Calendar, weather, and Kia. Building
-  those from scratch would mean writing and maintaining five API clients, including Google's
-  camera streaming. Here, the whole panel is **one dashboard file**.
-- **Voice** is left to the assistants you already have. Gemini on the tablet (and on any Nest
-  speakers) already adds to a Google Keep shopping list, plays Spotify and opens apps.
-  Claude's app has its own voice mode. The panel just gives each of these a big button.
-- The tablet runs **Fully Kiosk Browser**. It keeps the dashboard on screen, wakes when
-  someone walks up, dims at night, and lets the buttons open other apps.
+⚠️ = expected to work from the browser, but **the first thing to check on the tablet**: some sites say Octopus blocks direct browser calls, others work fine. If yours is blocked, a free 5-minute fix is in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked).
 
-| You asked for | How the panel does it |
-|---|---|
-| Google Home camera | Live view through Home Assistant's Nest integration (one-time US$5 Google fee) |
-| Octopus live usage (Home Mini) | "Using now" in watts plus a 6-hour sparkline, and today's cost so far |
-| Agile price now + rest of day | Big colour-coded price, next slot and cheapest slot ahead, plus a 24-hour bar chart that includes tomorrow once Octopus publishes it (~4pm). Agile is priced in **30-minute** slots |
-| House temperature | "Indoor" tile from the Nest thermostat ("best thermostat" is assumed to mean Nest) |
-| Today's Google Calendar | Today and tomorrow, finished events hidden |
-| Weather | Clock, current conditions and a 4-day forecast (Met.no, no sign-up) |
-| Kia e-Niro battery (optional) | Battery tile with a gauge (free integration; see [caveats](docs/integrations/kia.md)) |
-| Shopping list + voice | **Shopping** button opens Google Keep. "Hey Google, add milk to my shopping list" |
-| Spotify + voice | **Spotify** button. "Hey Google, play … on Spotify" |
-| Claude voice mode | **Claude** button opens Claude's voice screen. "Hey Google, open Claude" |
-| Gemini, button + voice | **Gemini** button. "Hey Google…" works anywhere |
-| Back to the home screen | **Home** button |
+**Cost:** £0, plus Google's one-off **US$5** Device Access fee (every app that reads Nest devices needs it). GitHub Pages, Open-Meteo and the Octopus API are free.
 
-## What it costs
+## Your keys stay on the tablet
 
-| Item | Cost |
-|---|---|
-| Home Assistant box: [Home Assistant Green](https://www.home-assistant.io/green) (or a Raspberry Pi / old PC you already have) | ~£160–190 (or £0) |
-| Google Device Access (needed for the Nest camera and thermostat) | US$5 once |
-| Fully Kiosk Browser PLUS licence (recommended) | €7.90 once |
-| Everything else: Home Assistant, HACS, all integrations and cards, Met.no, Octopus API, Kia Connect | free |
+The site is public, so it contains **no keys and no personal data**. Anyone else who opens the URL sees an empty "set me up" screen. You type your Octopus API key and Google details once, into the panel's own Settings screen on the tablet. They're stored only in that browser's storage and only ever sent to the service they belong to.
 
-## Set-up order (about an afternoon)
+The one exception is the optional Kia job: your Kia login goes into GitHub's encrypted **Actions secrets**, never into the code.
 
-1. **[Home Assistant](docs/home-assistant.md)**: install it and HACS, and add a user for the tablet. *(30–60 min)*
-2. **Integrations**, in any order:
-   - [Nest camera + thermostat](docs/integrations/nest.md) *(30 min, the fiddliest step)*
-   - [Octopus Energy](docs/integrations/octopus.md) *(10 min)*
-   - [Google Calendar](docs/integrations/google-calendar.md) *(15 min; reuses the Nest Google project)*
-   - [Weather](docs/integrations/weather.md) *(nothing to do)*
-   - [Kia (optional)](docs/integrations/kia.md) *(10 min)*
-3. **[Dashboard](docs/dashboard.md)**: install six cards from HACS, fill in your entity IDs, paste one file. *(20 min)*
-4. **[Tablet](docs/tablet.md)**: Fully Kiosk settings, wall mounting and battery care. *(30 min)*
-5. **[Voice and apps](docs/voice-and-apps.md)**: Gemini, the Keep shopping list, Spotify, Claude. *(15 min)*
-6. Optional: **[extras package](homeassistant/packages/wall_panel.yaml)**. Nightly refresh, doorbell wake-up, and a battery-saving charger automation.
+## Set it up (about an hour)
 
-Stuck? [Troubleshooting](docs/troubleshooting.md).
+1. **Turn on GitHub Pages:** in this repository, Settings → Pages → Source: **GitHub Actions**. Then Actions → "Test and publish" → Re-run. After a minute the URL above works.
+2. **Tablet:** install WebView Kiosk and point it at the URL: [docs/tablet.md](docs/tablet.md). The first time, the panel opens its Settings screen with a setup checklist.
+3. **Weather:** type your postcode → Find.
+4. **Octopus:** account number + API key → Connect ([docs/octopus.md](docs/octopus.md)). The checklist turns ✓ for prices and Home Mini, **or tells you if Octopus is blocked**.
+5. **Google (Nest + Calendar):** the longest step, about 30 minutes, done once. [docs/google.md](docs/google.md). You'll sign in **in Chrome on the tablet**, then copy the settings into the kiosk app (Google doesn't allow sign-in inside kiosk apps).
+6. **Voice:** "Hey Google", the Keep shopping list and Spotify: [docs/voice-and-apps.md](docs/voice-and-apps.md).
+7. Optional: **Kia battery**: [docs/kia.md](docs/kia.md).
 
-## What's in this repo
+If something shows a small amber or red dot, tap the card for the reason, or see [docs/troubleshooting.md](docs/troubleshooting.md). To change colours, layout or add something, see [docs/customising.md](docs/customising.md).
 
-```
-homeassistant/
-  dashboard/wall-panel.yaml   ← the panel (paste into Home Assistant)
-  packages/wall_panel.yaml    ← optional automations (tablet wake/refresh/charging)
-docs/                         ← step-by-step guides (start with home-assistant.md)
-dev/preview/                  ← a throwaway Home Assistant with fake devices, used to
-                                 render and test the dashboard (not needed to use it)
+## What I could and couldn't test
+
+Everything was tested in a browser against **fake** versions of every service: 33 unit tests and 15 browser tests, including clock-change days, midnight, night mode, the camera's 5-minute stop, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
+
+- that Octopus accepts calls from the page (if not, use the proxy in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked));
+- real Google sign-in and a real camera stream;
+- exactly what the Claude, Gemini and Home buttons open inside WebView Kiosk;
+- whether Kia lets GitHub's servers log in.
+
+## How it's built
+
+Plain HTML, CSS and JavaScript modules in [`web/`](web/), with no build step and no libraries, so you (or Claude) can edit it directly. [`web/js/`](web/js/) has one file per service (`octopus.js`, `google.js`, `nest.js`, `calendar.js`, `weather.js`, `kia.js`), plus `launcher.js` for the buttons and `ui.js` for the layout. `.github/workflows/pages.yml` runs the tests and publishes `web/` on every push.
+
+```sh
+npm install          # Playwright, for the browser tests
+npm test             # unit tests
+npm run test:e2e     # browser tests (all services faked)
+npm run preview      # screenshots in shots/ at three tablet sizes
+npm run serve        # http://127.0.0.1:8080/Home-Dashboard-/
 ```
 
-## Things that can only be checked on your devices
-
-These were researched and tested as far as possible without the hardware:
-
-- **Your exact Nest camera model.** Battery-powered cams can't stream continuously, and the
-  2025 "Nest Cam Indoor (3rd gen)" was reported as not supported by Google's API.
-  [Check before paying the $5](docs/integrations/nest.md#check-your-devices-first-before-paying-5).
-- **The Claude button** uses an entry point inside the Claude app (its assistant/voice screen).
-  Anthropic doesn't document this, so an app update could change it. The fallback is one line;
-  see [voice and apps](docs/voice-and-apps.md#4-claude).
-- **Whether "Hey Google" works with the tablet's screen fully off.** Budget tablets often
-  need the screen on. The tablet guide keeps it dimmed instead.
-- **Which M10 you have.** The layout is designed for 1280×800 CSS pixels (M10 FHD Plus,
-  Gen 3, Plus Gen 3) and has a compact fallback for 960×600. [Tablet guide](docs/tablet.md).
+**The earlier Home Assistant version** (commit [`46756f4`](https://github.com/AnginSemilir/Home-Dashboard-/tree/46756f4)) is still in the history if you ever want it. It needed an always-on computer; this version doesn't.

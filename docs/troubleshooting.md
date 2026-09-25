@@ -1,58 +1,45 @@
 # Troubleshooting
 
-## The dashboard
+## The dots
 
-| Symptom | Fix |
-|---|---|
-| A card says **"Custom element doesn't exist: …"** | The card isn't installed. Download it in HACS. Or the tablet has the old files cached: clear Fully's browser cache (Fully's settings, or the **Clear browser cache** button on the Fully device in Home Assistant), then reload. |
-| Home Assistant's header/sidebar still show | Install **Kiosk Mode** from HACS and reload. Kiosk Mode needs updating alongside Home Assistant (e.g. HA 2026.6+ needs Kiosk Mode 14+). |
-| Layout is cut off or scrolls | The browser area is smaller than 1280×800. Android Settings → Display → **Display size** → one step smaller. Also check Fully isn't showing Android's status/navigation bars: turn on Fully's fullscreen option. |
-| Layout broke after a Home Assistant update | Update all six HACS cards first. **layout-card** hasn't had an update since Oct 2025. If a future HA release breaks it, the rest of the panel's cards still work in HA's standard "Sections" view, so ask your favourite LLM to convert the file. |
-| Chart or price says "Waiting for prices…" | Octopus rates haven't loaded. Settings → Entities → search `current_day_rates`. If the entity is **disabled**, enable it. Otherwise wait 15 minutes after setting up the integration. |
-| Chart has no bars after midnight | Normal before about 4pm. Tomorrow's Agile prices aren't published until 4–8pm. |
-| Tablet gets sluggish after days on | Install the [extras package](../homeassistant/packages/wall_panel.yaml): its nightly refresh clears memory that slowly builds up in the chart card. |
+Each card has a small dot in its corner when something's wrong:
 
-## Camera
+- **Amber:** the data is older than it should be (for example, no new Home Mini reading for 15 minutes). The card still shows the last good values.
+- **Red:** the last attempt failed. **Tap the card** to see why.
 
-| Symptom | Fix |
-|---|---|
-| Grey placeholder picture | The card needs `camera_view: live` (the dashboard already has it). Tap the tile: if the live view works there but not on the tile, update **Android System WebView**. |
-| Freezes after about 5 minutes | Battery-powered Nest camera. Google won't keep battery streams alive, so use the "tap for live" tile (see the comment in the dashboard file). |
-| Black after hours of running | Nightly refresh (extras package), or Fully menu → Reload. |
-| No camera entity at all | Check your model is supported ([Nest guide](integrations/nest.md#check-your-devices-first-before-paying-5)) and that you ticked the camera permissions when linking Google. |
+The panel retries by itself, waiting longer each time (30 seconds up to 15 minutes), so a short internet or service outage fixes itself. The ⚙ Settings screen's **setup checklist** shows ✓ (working), ✗ (failing, with the reason), … (set up, checked after Save & close) or ○ (not set up) for every part.
 
-## Buttons
+## Common problems
 
-| Symptom | Fix |
-|---|---|
-| No button opens anything (Fully) | Fully → Settings → Advanced Web Settings → **Enable JavaScript Interface** (needs PLUS). If you set a URL whitelist, it must include your Home Assistant address. |
-| No button opens anything (Companion app) | Update the Home Assistant app. On first use Android may ask to allow **Display over other apps**. Allow it. |
-| **Claude** does nothing or opens the wrong screen | A Claude update may have renamed its voice screen. **Press and hold** the button to open Claude normally, then tap the sound-wave icon. To make that the tap behaviour, delete the `intent:` line under the Claude button in the dashboard file. |
-| **Gemini** opens the wrong thing | Press and hold to open the Gemini app. Or change the Gemini button's `intent:` to `intent:#Intent;action=android.intent.action.VOICE_COMMAND;launchFlags=0x10000000;end` (see the ADB test below). |
-| **Home** just reloads the panel | Fully (or the HA app) has been set as Android's Home app. Settings → Apps → Default apps → **Home app** → Lenovo's launcher. |
-| An app button says the app isn't installed | Install it from the Play Store on the tablet: Google Keep, Spotify, Claude, Gemini. |
+| What you see | Why | Fix |
+|---|---|---|
+| The URL shows a GitHub 404 page | GitHub Pages isn't on yet | Settings → Pages → Source: **GitHub Actions**, then Actions → Test and publish → Re-run |
+| Octopus ✗ "Network error (… blocked a browser request)", weather ✓ | Octopus blocks this browser | The proxy in [octopus.md](octopus.md#if-octopus-is-blocked) |
+| Octopus ✗ "Octopus rejected the API key" | Key or account number mistyped | Copy them again from the Octopus website |
+| Home Mini "not found" after Connect | Home Mini not paired, or on a different account | Check the Octopus app shows live usage |
+| Home Mini red dot, "Octopus rate limit reached" | Too many Octopus requests this hour | It backs off by itself. Raise ⚙ → Octopus → Home Mini refresh to 90–120 s |
+| Google ✗ "sign in again" | The Google app is still in *Testing* (7-day limit), or access was removed | [google.md](google.md) step 1.6, then sign in again in Chrome and Copy/Paste settings |
+| `disallowed_useragent` when signing in | Google blocks sign-in inside kiosk apps | Sign in in Chrome, then copy settings across ([google.md](google.md), step 3) |
+| `redirect_uri_mismatch` | OAuth client's redirect URI differs | Must be exactly `https://anginsemilir.github.io/Home-Dashboard-/` |
+| Camera: "The camera didn't send any video" | Battery camera asleep or offline, or poor Wi-Fi at the camera | Tap again; check it in the Google Home app |
+| Camera card says "Set up Nest in Settings" | No camera chosen | ⚙ → Choose camera & thermostat |
+| Chart says "prices from ~4pm" | Tomorrow's Agile prices aren't published yet | Normal; they appear after about 4pm |
+| A button does nothing | Its app isn't installed, or Chrome restrictions | See [voice-and-apps.md](voice-and-apps.md); in Chrome, Home can't work |
+| Screen turns off | Wake lock lost when another app was in front | Kiosk app's keep-screen-on setting; longest Android screen timeout |
+| Kia ✗ | See [kia.md](kia.md#if-it-fails) | |
 
-Test what an intent opens on your tablet (USB debugging on):
+## Starting again
 
-```bash
-adb shell cmd package resolve-activity --brief -a android.intent.action.VOICE_ASSIST -p com.google.android.googlequicksearchbox
-adb shell cmd package resolve-activity --brief -a android.intent.action.VOICE_COMMAND
-adb shell am start -a android.intent.action.VOICE_ASSIST -n com.anthropic.claude/.mainactivity.AssistantOverlayActivity
+- **Reload:** ⚙ → Save & close (or the kiosk app's reload). The panel also reloads itself every night at 03:30.
+- **Clear everything on this tablet:** Android Settings → Apps → WebView Kiosk (or Chrome) → Storage → Clear data. Or in Chrome, the site's settings → Clear & reset. You'll need to type the settings in again, or paste them from another browser with **Copy/Paste settings**.
+- **Revoke Google access:** <https://myaccount.google.com/permissions>.
+- **Revoke the Octopus key:** regenerate it on the Octopus API access page (the old one stops working).
+
+## Checking a change on a computer
+
+```sh
+npm install
+npm run serve     # then open http://127.0.0.1:8080/Home-Dashboard-/
 ```
 
-## Voice
-
-| Symptom | Fix |
-|---|---|
-| "Hey Google" doesn't respond | Gemini → Settings → Hey Google & Voice Match: on and trained. Screen lock set to **None**. Turn off Fully's *acoustic* motion detection. Test with the screen on: many budget tablets don't listen with the screen fully off. |
-| "Add … to my shopping list" goes to the wrong list | Keep exactly **one** Keep note called "Shopping list". Or say "…to my shopping list in Google Keep". |
-| Spotify: "I can't play that" | Connect Spotify in Gemini's apps settings. A specific song needs Spotify Premium. |
-
-## Integrations
-
-| Symptom | Fix |
-|---|---|
-| Octopus: `Too many requests` in the log | Too many API calls per hour. Raise the gas Home Mini refresh interval (Integration → Reconfigure). |
-| Octopus: "Using now" stuck | Check live usage in the Octopus app. If that's stuck too, unplug the Home Mini for 10 seconds. |
-| Nest/Calendar stopped after a week | Your Google OAuth app is still in "Testing". Google Auth Platform → Audience → **Publish app**, then re-link. |
-| Kia: unavailable or login failed | Kia changed something. HACS → update **Kia Uvo** → restart → integration → Reconfigure → re-authenticate. |
+The page works on a computer too, but Google sign-in only accepts the redirect address you registered (your GitHub Pages URL). Buttons just say what they'd open on the tablet.

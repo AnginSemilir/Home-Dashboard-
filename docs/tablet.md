@@ -1,114 +1,45 @@
-# The tablet: Lenovo Tab M10 + Fully Kiosk Browser
+# The tablet: Lenovo Tab M10 (3rd gen, TB328)
 
-## 1. Which M10 do you have?
+The panel is a web page, so the tablet only needs something that shows it full screen and keeps the screen on.
 
-Settings → About tablet shows the model (TB-…). It matters for the Android version and
-for how many screen pixels the browser has, which sets how the dashboard fits.
+## Recommended: WebView Kiosk (free, open source)
 
-| Model | Screen | Latest Android | Panel layout |
-|---|---|---|---|
-| Tab M10 Plus (3rd gen) TB125FU / TB128FU | 2000×1200 | 13 | Full layout ✅ |
-| Tab M10 5G TB360ZU | 2000×1200 | 13–14 | Full layout ✅ |
-| Tab M10 (3rd gen) TB328FU | 1920×1200 | 12 | Full layout ✅ |
-| Tab M10 FHD Plus (2nd gen) TB-X606F | 1920×1200 | 10 | Full layout ✅ (old Android, see note) |
-| Tab M10 HD (2nd gen) TB-X306F | 1280×800 | 10–11 | Compact layout (automatic) |
+It's on **F-Droid** and the **Play Store** (search "WebView Kiosk"; developer nktnet1). Of the free options, it's the one that passes the panel's `intent:` links through to Android, so **all five buttons work**, including **Home** and Claude's voice screen.
 
-> **Older models on Android 10/11** still run Home Assistant and Fully Kiosk. However,
-> the current Claude app may need Android 12 or newer (reports conflict). Try installing
-> Claude from the Play Store before relying on the Claude button.
+1. Install it and open it.
+2. Set the **URL / home page** to `https://anginsemilir.github.io/Home-Dashboard-/`
+3. In its settings, turn on **keep screen on** and full screen / immersive mode if offered.
 
-The dashboard is laid out for a browser area of **1280×800** (what a 1920×1200 or 2000×1200
-tablet gives at normal display size). Below 700 px high, it switches automatically to a
-compact version of the tiles. If something is cut off on your tablet, go to Android
-Settings → Display → **Display size** and choose one step smaller.
+   Leave "set as default launcher / home app" **off**. Otherwise the panel's Home button would bring you straight back to the panel.
+4. The panel opens its Settings screen with a checklist. Set up weather and Octopus there. Do Google in Chrome ([google.md](google.md), step 3), then copy the settings across.
 
-## 2. Android settings
+Menu names differ between versions of the app. If a setting described here isn't there, look for the nearest equivalent.
 
-- **System updates**: install everything, and update **Android System WebView** and
-  **Chrome** in the Play Store (the dashboard runs in WebView).
-- **Screen lock**: *None* (Settings → Security). It's a wall panel, and Gemini won't read
-  your list or calendar from a locked screen.
-- **Battery protection** (Settings → Battery, on newer M10s under *Battery optimization*):
-  **ON**. This holds the battery at about 40–60% instead of 100%, 24/7. A permanently full
-  lithium battery in a warm wall mount can swell. If your model doesn't have this, see
-  [the smart-plug option](#6-battery-care-if-your-m10-has-no-battery-protection) below.
-- **Display**: landscape, auto-rotate off. Dark theme on (easier on the eyes at night).
-- **Default apps** → Digital assistant app: **Google / Gemini**. See [voice](voice-and-apps.md).
-- **Home app**: leave it as Lenovo's launcher. Don't make Fully Kiosk the home app,
-  otherwise the panel's **Home** button can't take you to your apps.
+## Fallback: Chrome as an app
 
-## 3. Fully Kiosk Browser (recommended)
+In Chrome, open the URL → ⋮ → **Add to Home screen → Install**. It opens full screen with its own icon.
 
-Install **Fully Kiosk Browser** from the Play Store and buy **PLUS** (€7.90 once, from
-Fully's menu). The free version works but shows a watermark on PLUS features, and the
-buttons, motion wake and Home Assistant integration all need PLUS.
+What's different in Chrome:
+- **Home** can't be done by a web page in Chrome. The button shows a reminder to swipe up from the bottom edge instead.
+- **Claude** opens the Claude app on a new chat (tap its voice button); press-and-hold does the same.
+- **Gemini**, **Spotify** and **Shopping** open their apps.
+- Keep-screen-on uses the browser's Wake Lock, which works while the panel is in front.
 
-In Fully's **Settings** (names are from Fully 1.6x; the section a setting sits in can
-differ slightly between versions):
+The panel detects where it's running and picks the right kind of link. You can force it in ⚙ → Panel → **App buttons mode**.
 
-| Section | Setting | Value |
-|---|---|---|
-| Web Content | **Start URL** | `http://homeassistant.local:8123/wall-panel/home`. If that name doesn't resolve on your network, use the HA box's IP, e.g. `http://192.168.1.20:8123/wall-panel/home` |
-| Web Content | Autoplay videos | ON (for the camera) |
-| Advanced Web Settings | **Enable JavaScript Interface** | ON (the app buttons use it) |
-| Web Content | URL whitelist | `http://homeassistant.local:8123/*` (so only your HA can use the JavaScript interface) |
-| Device Management | **Launch on boot** | ON |
-| Device Management | **Keep screen on** | ON |
-| Device Management | Unlock screen | ON |
-| Screensaver | Screensaver timer | 120 s |
-| Screensaver | Screensaver wallpaper URL | `fully://color#000000` (black) |
-| Screensaver | Screensaver brightness | 0–5 |
-| Motion Detection | **Enable visual motion detection** | ON (uses the front camera) |
-| Motion Detection | Exit screensaver on motion | ON |
-| Motion Detection | Acoustic motion detection | **OFF** (leave the microphone to "Hey Google") |
-| Remote Administration | Enable remote admin (from local network) | ON, with a password (needed for the HA integration) |
-| Kiosk Mode | Enable kiosk mode | **OFF** (it would block the buttons from opening other apps) |
+## Android settings for a wall tablet
 
-Log in to Home Assistant **once** in Fully with the `panel` user from
-[the Home Assistant guide](home-assistant.md#5-a-user-for-the-tablet). Fully remembers the login.
+- **Display → Screen timeout**: the longest available. The kiosk app or Wake Lock keeps it on while the panel is showing. This setting matters when you're in another app.
+- **Battery**: turn on Lenovo's **battery protection** (Settings → Battery; it may be called *Protection mode* or *Conservation mode*). It stops charging at about 60% so a tablet that's always plugged in lasts for years.
+- **Security → Screen lock: None**, so tapping the wall panel doesn't ask for a PIN.
+- **Google account**: for a shared wall panel, you can make the tablet's own Android account a household one, separate from your personal phone account. The panel's Google sign-in (Nest/Calendar) is separate from the tablet's Android account either way.
+- **Start after a power cut** (optional): the free app **MacroDroid** can do "Device boot → Launch app: WebView Kiosk".
+- **Brightness**: the panel dims itself to near-black from 22:30 to 06:30 (tap to wake for 5 minutes). Adaptive brightness helps too.
 
-**Why a screensaver instead of screen-off?** A black screensaver at near-zero brightness
-looks off. But the camera-based motion wake keeps working, and "Hey Google" keeps
-listening (on many budget tablets it doesn't with the screen truly off).
+## Screen sizes
 
-### Connect Fully to Home Assistant (for the optional automations)
+It's laid out for the M10's 1280×800 screen in landscape, and also tested at 1333×800 and 960×600.
 
-Settings → Devices & services → **Add integration → Fully Kiosk Browser**. Enter the tablet's
-IP address and the remote admin password. Then open the new device and **rename it to
-`Wall panel`**, and say yes to renaming its entities too. The
-[extras package](../homeassistant/packages/wall_panel.yaml) expects entity IDs like
-`button.wall_panel_load_start_url`.
+## Anyone at the wall can open ⚙
 
-## 4. Getting around
-
-- **Leave the panel:** tap **Home**. You're on the normal Android home screen with your apps.
-- **Back to the panel:** tap the Fully Kiosk icon. With the extras package installed, the
-  panel also comes back by itself after 10 minutes in another app. Music keeps playing.
-- **Edit the dashboard on the tablet:** open the start URL with `?disable_km` on the end to
-  show Home Assistant's menus.
-- **Fully's own settings:** swipe in from the left edge of the screen to open Fully's menu, then Settings.
-
-## 5. Free alternative: the Home Assistant Companion app
-
-If you'd rather not buy Fully PLUS, install the **Home Assistant** app, log in as `panel`,
-and open the dashboard in it (Settings → Companion app → Other settings → **Keep screen
-on**). The app buttons work: the Companion app hands the buttons' `intent:` links to
-Android. You lose motion wake, the screensaver and the Fully automations. The screen stays
-at full brightness unless you add a brightness automation (the Companion app's
-`command_screen_brightness_level` notification).
-
-## 6. Battery care if your M10 has no battery protection
-
-Plug the charger into a **smart plug** that Home Assistant can switch. Name the plug's
-switch `switch.wall_panel_charger`. The extras package then keeps the battery between 30%
-and 80%, using the battery level Fully Kiosk reports. If the plug is missing, the
-automation does nothing.
-
-## 7. Mounting
-
-- A landscape wall bracket or recessed mount with a **right-angle USB-C** cable. Run power
-  to a socket or a USB wall plate, and use a good 10 W+ adapter.
-- Put it where someone standing in front of it is within 1–2 m of the front camera (motion
-  wake) and away from direct sun (heat and glare).
-- The M10 has an IPS LCD, so permanent burn-in isn't a real risk. The night screensaver
-  also avoids temporary image retention.
+The ⚙ button shows your settings (keys are hidden, but **Copy settings** reveals them). For a family wall that's usually fine. If visitors use the tablet unsupervised, bear it in mind.
