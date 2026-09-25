@@ -203,6 +203,9 @@ svg { display: block; }
 .settings textarea { min-height: 6em; font-family: monospace; font-size: 12px; }
 .settings .btn { background: var(--accent); color: #04121f; font-weight: 700; padding: 0.65em 1.1em; border-radius: 10px; margin: 0.3em 0.4em 0.3em 0; }
 .settings .btn.secondary { background: var(--card-2); color: var(--text); font-weight: 500; }
+.settings .btn-wrap { display: inline; }
+.settings .btn-status { color: var(--muted); font-size: 0.92em; margin-right: 0.8em; }
+.settings .btn-status.bad { color: var(--high); display: block; margin: 0.2em 0 0.4em; }
 .settings .help { color: var(--faint); font-size: 0.9em; margin: 0.2em 0 0.6em; }
 .settings code, .settings .mono { font-family: monospace; font-size: 0.92em; background: var(--card-2); padding: 0.1em 0.35em; border-radius: 5px; word-break: break-all; }
 .checklist { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35em; }

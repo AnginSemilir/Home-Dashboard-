@@ -102,3 +102,22 @@ test('settings copied from one browser can be pasted into another', async () => 
   assert.equal(await b.page.locator('#settings').count(), 0);
   await b.ctx.close();
 });
+
+test('button results show next to the button: Octopus blocked, Google details missing', async () => {
+  const { ctx, page } = await openPanel(env, { settings: null });
+  const settings = page.locator('#settings');
+  await settings.waitFor();
+  // A browser-blocked (CORS) request looks like a network failure to the page.
+  await page.route(/^https:\/\/api\.octopus\.energy\//, (route) => route.abort('failed'));
+  await page.getByLabel('Account number').fill('A-1234ABCD');
+  await page.getByLabel('API key').fill('sk_test_key');
+  const connect = settings.locator('.btn-wrap', { has: page.getByRole('button', { name: 'Connect' }) });
+  await connect.getByRole('button').click();
+  await connect.locator('.btn-status.bad', { hasText: /Octopus didn't answer this browser[\s\S]*docs\/octopus\.md/ }).waitFor();
+  assert.equal(await connect.locator('.btn-status').isVisible(), true);
+
+  const signIn = settings.locator('.btn-wrap', { has: page.getByRole('button', { name: 'Sign in with Google' }) });
+  await signIn.getByRole('button').click();
+  await signIn.locator('.btn-status.bad', { hasText: 'Enter the client ID and secret first' }).waitFor();
+  await ctx.close();
+});

@@ -45,7 +45,13 @@ export function openSettings(root, ctx) {
   // Test buttons use clients bound to the unsaved draft, so Cancel really discards it.
   const draftGoogle = () => new Google(draft, () => {});
   const msg = h('div', { class: 'help' });
-  const say = (t) => { msg.textContent = t; };
+  // Results and errors appear right next to the button that was pressed.
+  let active = null;
+  const say = (t, bad = false) => {
+    const el = active || msg;
+    el.textContent = t;
+    el.classList.toggle('bad', bad);
+  };
 
   const input = (obj, key, { type = 'text', placeholder = '', step } = {}) => {
     const el = h('input', { type, placeholder, step, value: obj[key] ?? '', autocomplete: 'off', spellcheck: 'false' });
@@ -55,11 +61,22 @@ export function openSettings(root, ctx) {
   const field = (label, el, help) => h('div', {}, h('label', {}, label, el), help ? h('div', { class: 'help' }, help) : null);
   const btn = (text, fn, secondary = false) => {
     const b = h('button', { class: `btn${secondary ? ' secondary' : ''}` }, text);
+    const status = h('span', { class: 'btn-status', role: 'status' });
     b.addEventListener('click', async () => {
       b.disabled = true;
-      try { await fn(); } catch (e) { say(describeError(e)); } finally { b.disabled = false; }
+      active = status;
+      say('Working…');
+      try {
+        await fn();
+        if (status.textContent === 'Working…') say('');
+      } catch (e) {
+        say(describeError(e), true);
+      } finally {
+        b.disabled = false;
+        active = null;
+      }
     });
-    return b;
+    return h('span', { class: 'btn-wrap' }, b, status);
   };
 
   // Checklist
@@ -95,7 +112,12 @@ export function openSettings(root, ctx) {
       'From octopus.energy → Account → Personal details → API access. Stays on this tablet.'),
     octoInfo,
     btn('Connect', async () => {
-      draft.octopus.discovered = await new Octopus(draft).discover();
+      try {
+        draft.octopus.discovered = await new Octopus(draft).discover();
+      } catch (e) {
+        if (e instanceof TypeError) throw new Error("Octopus didn't answer this browser. If the weather works, Octopus is blocking browser requests: see \"If Octopus is blocked\" in docs/octopus.md.");
+        throw e;
+      }
       showOcto();
       say('Octopus connected');
     }),
@@ -124,6 +146,7 @@ export function openSettings(root, ctx) {
       // Any Android WebView (WebView Kiosk, Fully Kiosk…) gets Google's disallowed_useragent page.
       if (/; wv\)/.test(navigator.userAgent) || ['webview', 'fully'].includes(detectEnv())) throw new Error('Google blocks sign-in inside kiosk apps. Sign in using Chrome on this tablet, then use "Copy settings" below and paste them here.');
       Object.assign(s, draft); save();
+      say('Opening Google…');
       google.signIn();
     }),
     btn('Choose camera & thermostat', async () => {
