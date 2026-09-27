@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
 import { startBrowser, openPanel, recordNavigations, text, NOW, UA } from '../support/browser.js';
-import { agilePrice } from '../support/mocks.js';
+import { agilePrice, fullSettings } from '../support/mocks.js';
 import { APPS, launchIntent } from '../../js/launcher.js';
 
 let env;
@@ -245,7 +245,7 @@ test('buttons in the kiosk app (Android WebView) open Android apps and screens',
   await ready(page);
   const nav = await recordNavigations(page);
   assert.equal(await page.locator('.dock [data-app="shopping"]').count(), 0, 'shopping is a card now, not a button');
-  for (const app of ['home', 'claude', 'gemini', 'spotify']) await page.locator(`.dock [data-app="${app}"]`).click();
+  for (const app of ['home', 'claude', 'gemini', 'music']) await page.locator(`.dock [data-app="${app}"]`).click();
   const box = await page.locator('.dock [data-app="claude"]').boundingBox();
   await page.mouse.move(box.x + 10, box.y + 10);
   await page.mouse.down();
@@ -270,12 +270,31 @@ test('buttons in Chrome use links Chrome allows, and Home explains the gesture',
   await page.locator('.dock [data-app="home"]').click();
   await page.locator('.toast', { hasText: /swipe up/i }).waitFor();
   await page.locator('.dock [data-app="claude"]').click();
-  await page.locator('.dock [data-app="spotify"]').click();
+  await page.locator('.dock [data-app="music"]').click();
   await waitFor(() => nav.length >= 2, 'two navigations');
   assert.deepEqual(nav, [
     'intent://claude.ai/new#Intent;scheme=https;package=com.anthropic.claude;end',
     'intent://open.spotify.com/#Intent;scheme=https;package=com.spotify.music;end',
   ]);
+  await ctx.close();
+});
+
+test('the music button opens Spotify or Amazon Music, as chosen in Settings', async () => {
+  const s = fullSettings(NOW);
+  s.panel.music = 'amazonmusic';
+  const { ctx, page } = await openPanel(env, { settings: s, userAgent: UA.webview });
+  await ready(page);
+  const btn = page.locator('.dock [data-app="music"]');
+  assert.equal(await btn.innerText(), 'Amazon Music');
+  const nav = await recordNavigations(page);
+  await btn.click();
+  await waitFor(() => nav.length >= 1, 'a navigation');
+  assert.deepEqual(nav, [launchIntent('com.amazon.mp3')]);
+  // Switch back in Settings: the button follows.
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByLabel('Music button').selectOption('spotify');
+  await page.locator('#settings').getByRole('button', { name: 'Save & close' }).click();
+  await page.locator('.dock [data-app="music"]', { hasText: 'Spotify' }).waitFor();
   await ctx.close();
 });
 

@@ -38,6 +38,7 @@ export const DEFAULTS = Object.freeze({
     launcher: 'auto',      // auto | webview | chrome | fully
     carApp: 'com.kia.oneapp.eu',
     carName: 'e-Niro',
+    music: 'spotify',      // spotify | amazonmusic: what the music button opens
     style: 'bold',         // bold | ambient (two looks; see Settings → Panel)
     theme: 'auto',         // auto (light from sunrise to sunset) | dark | light
   },

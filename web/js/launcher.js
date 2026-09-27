@@ -9,6 +9,7 @@
 export const APPS = {
   shopping: { pkg: 'com.google.android.keep', web: 'https://keep.google.com/' },
   spotify: { pkg: 'com.spotify.music', web: 'https://open.spotify.com/' },
+  amazonmusic: { pkg: 'com.amazon.mp3', web: 'https://music.amazon.co.uk/' },
   claude: {
     pkg: 'com.anthropic.claude',
     web: 'https://claude.ai/new',
@@ -24,6 +25,10 @@ export const APPS = {
     special: 'intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.HOME;launchFlags=0x10000000;end',
   },
 };
+
+/** The apps the music button can open (⚙ → Panel → Music button). */
+export const MUSIC_APPS = { spotify: 'Spotify', amazonmusic: 'Amazon Music' };
+export const musicApp = (s) => (Object.hasOwn(MUSIC_APPS, s?.panel?.music) ? s.panel.music : 'spotify');
 
 export function detectEnv(win = globalThis) {
   if (win.fully && typeof win.fully.startApplication === 'function') return 'fully';

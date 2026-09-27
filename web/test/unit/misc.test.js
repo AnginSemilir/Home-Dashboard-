@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { normalizeEvent, groupDays, dateToMs, fetchEvents } from '../../js/calendar.js';
 import { describe, lookupPlace } from '../../js/weather.js';
 import { encryptReading, decryptReading, newKey } from '../../js/kia.js';
-import { detectEnv, actionFor, appLink, launchIntent, APPS } from '../../js/launcher.js';
+import { detectEnv, actionFor, appLink, launchIntent, APPS, musicApp } from '../../js/launcher.js';
 import { renderChart } from '../../js/chart.js';
 import { loadSettings, saveSettings, importSettings, exportSettings, DEFAULTS } from '../../js/config.js';
 
@@ -109,6 +109,11 @@ test('launcher: what each button does in each environment', () => {
   assert.deepEqual(actionFor('claude', 'webview'), { kind: 'navigate', value: APPS.claude.special });
   assert.deepEqual(actionFor('claude', 'webview', { hold: true }), { kind: 'navigate', value: launchIntent('com.anthropic.claude') });
   assert.deepEqual(actionFor('spotify', 'fully'), { kind: 'fully-app', value: 'com.spotify.music' });
+  assert.deepEqual(actionFor('amazonmusic', 'webview'), { kind: 'navigate', value: launchIntent('com.amazon.mp3') });
+  assert.equal(actionFor('amazonmusic', 'chrome').value, 'intent://music.amazon.co.uk/#Intent;scheme=https;package=com.amazon.mp3;end');
+  assert.equal(musicApp({ panel: { music: 'amazonmusic' } }), 'amazonmusic');
+  assert.equal(musicApp({ panel: { music: 'toString' } }), 'spotify', 'only known apps');
+  assert.equal(musicApp({}), 'spotify');
   assert.deepEqual(actionFor('gemini', 'fully'), { kind: 'fully-intent', value: APPS.gemini.special });
   assert.equal(actionFor('home', 'chrome').kind, 'message');
   assert.deepEqual(actionFor('claude', 'chrome'), { kind: 'navigate', value: 'intent://claude.ai/new#Intent;scheme=https;package=com.anthropic.claude;end' });

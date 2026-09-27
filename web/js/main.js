@@ -9,7 +9,7 @@ import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
 import { fetchEvents } from './calendar.js';
 import { fetchWeather } from './weather.js';
 import { fetchKia } from './kia.js';
-import { actionFor, detectEnv, perform } from './launcher.js';
+import { actionFor, detectEnv, perform, musicApp } from './launcher.js';
 import * as ui from './ui.js';
 import { sunToday, themeFor } from './sun.js';
 import { fetchItems, setDone, addItem } from './tasks.js';
@@ -57,6 +57,7 @@ function renderAll() {
   ui.renderPrice(refs, state.rates, now, state.status.rates, priceOpts(), tz);
   ui.renderTiles(refs, state, settings, now, tz);
   ui.renderCamera(refs, settings, state, live);
+  ui.renderDock(refs, settings);
   ui.renderShopping(refs, state.shopping, state.status.shopping, shoppingInfo());
 }
 
@@ -274,7 +275,8 @@ async function closeCamera() {
 }
 
 // ---------- Buttons ----------
-function launch(name, hold) {
+function launch(button, hold) {
+  const name = button === 'music' ? musicApp(settings) : button;
   const env = settings.panel.launcher === 'auto' ? detectEnv() : settings.panel.launcher;
   const pkg = name === 'car' ? settings.panel.carApp : undefined;
   perform(actionFor(name, env, { hold, pkg }), window, (t) => ui.toast(refs, t));

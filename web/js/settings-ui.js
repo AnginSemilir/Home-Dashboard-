@@ -9,7 +9,7 @@ import { listCalendars } from './calendar.js';
 import { listTaskLists, createTaskList } from './tasks.js';
 import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
-import { detectEnv } from './launcher.js';
+import { detectEnv, MUSIC_APPS } from './launcher.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 import { hhmm } from './time.js';
 
@@ -264,6 +264,7 @@ export function openSettings(root, ctx) {
     field('Night mode from', input(draft.panel, 'nightFrom', { type: 'time' })),
     field('Night mode until', input(draft.panel, 'nightTo', { type: 'time' })),
     field('Reload the page daily at', input(draft.panel, 'reloadAt', { type: 'time' })),
+    field('Music button', select(draft.panel, 'music', Object.entries(MUSIC_APPS)), 'Which app the music button opens.'),
     field('Car name', input(draft.panel, 'carName')),
     field('Car app (Android app ID)', input(draft.panel, 'carApp', { placeholder: 'com.kia.oneapp.eu' }),
       'What the car tile opens when there is no battery data. The ID is the id=… part of the app\'s Play Store link.'),

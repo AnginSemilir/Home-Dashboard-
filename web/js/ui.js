@@ -8,6 +8,7 @@ import { priceSummary, band, round1 } from './agile.js';
 import { renderChart } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
+import { MUSIC_APPS, musicApp } from './launcher.js';
 
 const icon = (name, set = UI) => svg(set[name] || UI.camera);
 
@@ -23,7 +24,7 @@ export function timeOfDay(hour) {
 }
 
 const DOCK = [
-  { id: 'spotify', label: 'Spotify', icon: 'music' },
+  { id: 'music', label: 'Spotify', icon: 'music' }, // Spotify or Amazon Music: see renderDock
   { id: 'claude', label: 'Claude', icon: 'spark' },
   { id: 'gemini', label: 'Gemini', icon: 'mic' },
   { id: 'home', label: 'Home', icon: 'home' },
@@ -136,8 +137,10 @@ export function buildPanel(root, on) {
 
   // The camera sits in the dock as the first button; its live view still fills the screen.
   r.dock = h('nav', { class: 'dock', id: 'dock' }, r.cam);
+  r.dockBtn = {};
   for (const b of DOCK) {
-    const btn = h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon)), h('span', {}, b.label));
+    const btn = h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon)), h('span', { class: 'd-label' }, b.label));
+    r.dockBtn[b.id] = btn;
     pressable(btn, () => on.launch?.(b.id, false), () => on.launch?.(b.id, true));
     r.dock.append(btn);
   }
@@ -414,6 +417,16 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
     r.tCar.value.textContent = s.kia.url ? '–' : 'Kia app';
     r.tCar.extra.replaceChildren(h('span', { class: 'muted' }, s.kia.url ? '' : 'Tap to open'));
   }
+}
+
+/** The music button says which app it opens (and takes that app's colour in the Ambient style). */
+export function renderDock(r, s) {
+  const app = musicApp(s);
+  const btn = r.dockBtn.music;
+  if (btn.dataset.service === app) return;
+  btn.dataset.service = app;
+  btn.className = `b-music b-${app}`;
+  btn.querySelector('.d-label').textContent = MUSIC_APPS[app];
 }
 
 export function renderCamera(r, s, st, live) {

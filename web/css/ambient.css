@@ -60,6 +60,7 @@
   --heat: #f28a4e;
   --i-camera: #c3a6f5;
   --i-spotify: #4fcf85;
+  --i-amazonmusic: #5cc9e6;
   --i-claude: #e08a68;
   --i-gemini: #8fb2f7;
   --i-mix: 14%;
@@ -133,6 +134,7 @@
   --heat: #e0622a;
   --i-camera: #7c52d4;
   --i-spotify: #1c9a55;
+  --i-amazonmusic: #0f7f9e;
   --i-claude: #c8623f;
   --i-gemini: #3e6fd6;
   --i-mix: 12%;
@@ -523,6 +525,7 @@ svg { display: block; }
 }
 .dock .d-ico svg { width: 1.2em; height: 1.2em; }
 .dock .b-spotify .d-ico { --ic: var(--i-spotify); }
+.dock .b-amazonmusic .d-ico { --ic: var(--i-amazonmusic); }
 .dock .b-claude .d-ico { --ic: var(--i-claude); }
 .dock .b-gemini .d-ico { --ic: var(--i-gemini); }
 .dock button > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
