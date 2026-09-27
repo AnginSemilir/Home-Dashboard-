@@ -101,7 +101,7 @@ export function camera() {
 export function fullSettings(now) {
   return {
     octopus: { account: ACCOUNT, apiKey: 'sk_test_key', pollSeconds: 60, discovered: { tariff: TARIFF, product: 'AGILE-24-10-01', mpan: '1900026354329', serial: '22L4132637', deviceId: '00-11-22-33-44-55-66-77', at: now } },
-    google: { clientId: 'cid.apps.googleusercontent.com', clientSecret: 'secret', projectId: 'proj-123', refreshToken: 'rt-123', scopes: 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly', calendars: [{ id: 'family@group.calendar.google.com', name: 'Family', color: '#4f9cff' }], cameraId: CAMERA_ID, thermostatId: THERMO_ID },
+    google: { clientId: 'cid.apps.googleusercontent.com', clientSecret: 'secret', projectId: 'proj-123', refreshToken: 'rt-123', scopes: 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks', calendars: [{ id: 'family@group.calendar.google.com', name: 'Family', color: '#4f9cff' }], shoppingList: { id: 'shop', name: 'Shopping' }, cameraId: CAMERA_ID, thermostatId: THERMO_ID },
     weather: { lat: 51.5, lon: -0.12, place: 'Westminster' },
     kia: { url: KIA_URL, key: KIA_KEY },
     panel: { cameraName: 'Front door', cameraBattery: true, launcher: 'auto' },
@@ -153,7 +153,7 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     const body = new URLSearchParams(route.request().postData() || '');
     calls.push({ service: 'google-token', url: route.request().url(), grant: body.get('grant_type'), body: Object.fromEntries(body) });
     if (fail.has('google')) return json(route, { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400);
-    if (body.get('grant_type') === 'authorization_code') return json(route, { access_token: 'at-new', refresh_token: 'rt-new', expires_in: 3599, scope: 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly', token_type: 'Bearer' });
+    if (body.get('grant_type') === 'authorization_code') return json(route, { access_token: 'at-new', refresh_token: 'rt-new', expires_in: 3599, scope: 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks', token_type: 'Bearer' });
     return json(route, { access_token: 'at-refreshed', expires_in: 3599, token_type: 'Bearer' });
   });
 
@@ -174,6 +174,30 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     if (url.pathname.endsWith('/devices')) return json(route, { devices: [camera(), thermostat()] });
     if (url.pathname.endsWith('THERMO1')) return json(route, thermostat());
     if (url.pathname.endsWith('CAM1')) return json(route, camera());
+    return json(route, { error: { message: 'not found' } }, 404);
+  });
+
+  // Google Tasks: the shopping list.
+  const shopping = [
+    { id: 't1', title: 'Milk', status: 'needsAction', position: '00000000000000000001' },
+    { id: 't2', title: 'Bread', status: 'needsAction', position: '00000000000000000002' },
+    { id: 't3', title: 'Bananas', status: 'needsAction', position: '00000000000000000003' },
+    { id: 't4', title: 'Washing-up liquid', status: 'needsAction', position: '00000000000000000004' },
+  ];
+  await page.route(/^https:\/\/www\.googleapis\.com\/tasks\/v1\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const body = req.postData() ? JSON.parse(req.postData()) : null;
+    calls.push({ service: 'tasks', method: req.method(), url: req.url(), body });
+    if (fail.has('tasks')) return json(route, { error: { code: 403, message: 'Request had insufficient authentication scopes.' } }, 403);
+    if (url.pathname.endsWith('/users/@me/lists')) {
+      if (req.method() === 'POST') return json(route, { id: 'shop', title: body.title });
+      return json(route, { items: [{ id: 'mine', title: 'My Tasks' }, { id: 'shop', title: 'Shopping' }] });
+    }
+    const m = /\/lists\/([^/]+)\/tasks(?:\/([^/?]+))?/.exec(url.pathname);
+    if (m && req.method() === 'GET') return json(route, { items: shopping.filter((t) => t.status !== 'completed') });
+    if (m && req.method() === 'POST') { const t = { id: `t${shopping.length + 1}`, title: body.title, status: 'needsAction', position: '0' }; shopping.unshift(t); return json(route, t); }
+    if (m && req.method() === 'PATCH') { const t = shopping.find((x) => x.id === decodeURIComponent(m[2])); Object.assign(t, body); return json(route, t); }
     return json(route, { error: { message: 'not found' } }, 404);
   });
 

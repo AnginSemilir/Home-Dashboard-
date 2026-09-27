@@ -1,6 +1,6 @@
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { Google, authUrl, redirectUri, TOKEN_URLS, SCOPE_CAL, SCOPE_SDM } from '../../js/google.js';
+import { Google, authUrl, redirectUri, TOKEN_URLS, SCOPE_CAL, SCOPE_SDM, SCOPE_TASKS } from '../../js/google.js';
 import { parseThermostat, parseCamera, deviceName, LiveStream, isCamera, isThermostat } from '../../js/nest.js';
 import { loadSettings } from '../../js/config.js';
 
@@ -11,12 +11,12 @@ test('redirectUri and authUrl', () => {
   assert.equal(redirectUri(loc('https://me.github.io/Home-Dashboard-/index.html?code=1#x')), 'https://me.github.io/Home-Dashboard-/');
   const withNest = new URL(authUrl({ clientId: 'c', projectId: 'p-1' }, 'https://r/', 'st'));
   assert.equal(withNest.origin + withNest.pathname, 'https://nestservices.google.com/partnerconnections/p-1/auth');
-  assert.equal(withNest.searchParams.get('scope'), `${SCOPE_SDM} ${SCOPE_CAL}`);
+  assert.equal(withNest.searchParams.get('scope'), `${SCOPE_SDM} ${SCOPE_CAL} ${SCOPE_TASKS}`);
   assert.equal(withNest.searchParams.get('access_type'), 'offline');
   assert.equal(withNest.searchParams.get('prompt'), 'consent');
   const calOnly = new URL(authUrl({ clientId: 'c', projectId: '' }, 'https://r/', 'st'));
   assert.equal(calOnly.host, 'accounts.google.com');
-  assert.equal(calOnly.searchParams.get('scope'), SCOPE_CAL);
+  assert.equal(calOnly.searchParams.get('scope'), `${SCOPE_CAL} ${SCOPE_TASKS}`);
 });
 
 function fakeFetch(handler) {

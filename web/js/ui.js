@@ -23,7 +23,6 @@ export function timeOfDay(hour) {
 }
 
 const DOCK = [
-  { id: 'shopping', label: 'Shopping', icon: 'cart' },
   { id: 'spotify', label: 'Spotify', icon: 'music' },
   { id: 'claude', label: 'Claude', icon: 'spark' },
   { id: 'gemini', label: 'Gemini', icon: 'mic' },
@@ -77,10 +76,17 @@ export function buildPanel(root, on) {
   r.cal = h('section', { class: 'card cal', id: 'cal' }, r.calBody, (r.calDot = dot()));
 
   r.chartBox = h('div', { class: 'chart-box' });
+  r.chartTip = h('div', { class: 'chart-tip hidden', role: 'status' });
+  r.chartBox.addEventListener('click', (e) => {
+    const hit = e.target.closest?.('.ch-hit');
+    if (!hit) return;
+    e.stopPropagation(); // a bar tap isn't a tap on the card (which explains a red dot)
+    on.chartTap?.(hit);
+  });
   r.legend = h('div', { class: 'legend' });
   r.chart = h('section', { class: 'card chart', id: 'chart' },
     h('div', { class: 'chart-head' }, h('div', { class: 'label' }, 'Agile price ', h('span', { class: 'unit' }, 'p/kWh')), r.legend),
-    r.chartBox, (r.chartDot = dot()));
+    r.chartBox, r.chartTip, (r.chartDot = dot()));
 
   r.priceBig = h('div', { class: 'big' });
   r.priceBand = h('span', { class: 'band-chip hidden' });
@@ -102,22 +108,47 @@ export function buildPanel(root, on) {
     t.el.addEventListener('click', () => on.tile?.(key));
   }
 
-  r.dock = h('nav', { class: 'dock', id: 'dock' });
+  // Shopping list (Google Tasks): tap an item to tick it off, + to add one.
+  r.shopList = h('ul', { class: 'shop-items' });
+  r.shopInput = h('input', { type: 'text', placeholder: 'Add an item', enterkeyhint: 'done', autocomplete: 'off', maxlength: '200' });
+  r.shopForm = h('form', { class: 'shop-add hidden' }, r.shopInput, h('button', { type: 'submit', class: 'shop-go' }, 'Add'));
+  r.shopForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = r.shopInput.value.trim();
+    if (text) on.shopAdd?.(text);
+    r.shopInput.value = '';
+    r.shopForm.classList.add('hidden');
+    r.shopInput.blur();
+  });
+  const plus = h('button', { class: 'shop-plus', 'aria-label': 'Add to the shopping list' }, icon('plus'));
+  plus.addEventListener('click', () => {
+    r.shopForm.classList.toggle('hidden');
+    if (!r.shopForm.classList.contains('hidden')) r.shopInput.focus();
+  });
+  r.shopList.addEventListener('click', (e) => {
+    const li = e.target.closest('li[data-id]');
+    if (li) on.shopTick?.(li.dataset.id, li.dataset.title);
+  });
+  r.shop = h('section', { class: 'card shop', id: 'shop' },
+    h('div', { class: 'shop-head' }, h('h3', {}, 'Shopping'), plus), r.shopForm, r.shopList, (r.shopDot = dot()));
+
+  // The camera sits in the dock as the first button; its live view still fills the screen.
+  r.dock = h('nav', { class: 'dock', id: 'dock' }, r.cam);
   for (const b of DOCK) {
     const btn = h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon)), h('span', {}, b.label));
     pressable(btn, () => on.launch?.(b.id, false), () => on.launch?.(b.id, true));
     r.dock.append(btn);
   }
 
-  for (const [el, key] of [[r.clock, 'weather'], [r.cal, 'calendar'], [r.chart, 'rates'], [r.price, 'rates']]) {
-    el.addEventListener('click', (e) => { if (!e.target.closest('button')) on.status?.(key); });
+  for (const [el, key] of [[r.clock, 'weather'], [r.cal, 'calendar'], [r.chart, 'rates'], [r.price, 'rates'], [r.shop, 'shopping']]) {
+    el.addEventListener('click', (e) => { if (!e.target.closest('button, li[data-id], form')) on.status?.(key); });
   }
 
   // Two columns for the Bold style; the Ambient style lays the cards out on one grid
   // (its stylesheet makes these wrappers transparent with display: contents).
   r.panel = h('main', { class: 'panel' },
     h('div', { class: 'col-main' }, r.clock, r.price, r.chart, r.tiles),
-    h('div', { class: 'col-side' }, r.cal, r.cam),
+    h('div', { class: 'col-side' }, r.cal, r.shop),
     r.dock);
   r.nightTime = h('div');
   r.night = h('div', { class: 'night hidden', id: 'night' }, r.nightTime);
@@ -128,8 +159,14 @@ export function buildPanel(root, on) {
 }
 
 let toastTimer = null;
-export function toast(r, text, ms = 3500) {
-  r.toast.textContent = text;
+/** A short message at the bottom. `action` adds a button to it, e.g. { label: 'Undo', fn }. */
+export function toast(r, text, ms = 3500, action = null) {
+  r.toast.replaceChildren(text);
+  if (action) {
+    const b = h('button', { class: 'toast-action' }, action.label);
+    b.addEventListener('click', () => { r.toast.classList.add('hidden'); action.fn(); });
+    r.toast.append(b);
+  }
   r.toast.classList.remove('hidden');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => r.toast.classList.add('hidden'), ms);
@@ -391,4 +428,52 @@ export function renderCamTimer(r, live, now) {
   if (!live.endsAt) { r.camTimer.textContent = ''; return; }
   const s = Math.max(0, Math.round((live.endsAt - now) / 1000));
   r.camTimer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** The pop-up over a tapped bar: "18:00–18:30 · 35.8p · Peak". */
+export function showChartTip(r, hit, opts, tz = DEFAULT_TZ) {
+  const start = Number(hit.dataset.start), end = Number(hit.dataset.end), p = Number(hit.dataset.p);
+  const b = band(p, opts);
+  r.chartTip.replaceChildren(
+    h('span', { class: `band-dot band-${b}` }),
+    h('b', {}, `${round1(p).toFixed(1)}p`),
+    ` ${hhmm(start, tz)}–${hhmm(end, tz)}`,
+    h('span', { class: 'tip-band' }, ` · ${BAND_WORD[b] || ''}`));
+  const box = r.chart.getBoundingClientRect(), bar = hit.getBoundingClientRect();
+  r.chartTip.classList.remove('hidden');
+  const w = r.chartTip.offsetWidth;
+  const left = Math.min(Math.max(8, bar.left - box.left + bar.width / 2 - w / 2), box.width - w - 8);
+  r.chartTip.style.left = `${Math.round(left)}px`;
+  r.chartTip.style.top = `${Math.round(Math.max(4, bar.top - box.top + 4))}px`;
+  clearTimeout(r.chartTipTimer);
+  r.chartTipTimer = setTimeout(() => r.chartTip.classList.add('hidden'), 4000);
+}
+
+/** Shopping list card. `items` null = not loaded yet. */
+export function renderShopping(r, items, st, { listName, ready, why }) {
+  setDot(r.shopDot, st);
+  r.shop.classList.toggle('off', !ready);
+  if (!ready) {
+    r.shopList.replaceChildren(h('li', { class: 'empty' }, why));
+    return;
+  }
+  if (!items) { r.shopList.replaceChildren(h('li', { class: 'empty' }, 'Loading…')); return; }
+  if (!items.length) { r.shopList.replaceChildren(h('li', { class: 'empty' }, `Nothing on ${listName || 'the list'}`)); return; }
+  r.shopList.replaceChildren(...items.map((it) => h('li', { 'data-id': it.id, 'data-title': it.title },
+    h('span', { class: 'tick' }, icon('check')), h('span', { class: 'what' }, it.title))));
+  fitList(r.shopList);
+}
+
+/** Hide items that don't fit, with a "+N more" line (the full list is in Google Tasks). */
+function fitList(ul) {
+  if (!ul.clientHeight) return;
+  const items = [...ul.querySelectorAll('li[data-id]')];
+  let hidden = 0;
+  const more = h('li', { class: 'more' });
+  while (ul.scrollHeight > ul.clientHeight + 1 && items.length > 1) {
+    items.pop().classList.add('hidden');
+    hidden++;
+    more.textContent = `+${hidden} more in Google Tasks`;
+    if (!more.isConnected) ul.append(more);
+  }
 }

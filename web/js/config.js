@@ -21,6 +21,7 @@ export const DEFAULTS = Object.freeze({
     refreshToken: '',
     scopes: '',
     calendars: [],      // [{ id, name, color }]
+    shoppingList: null, // { id, name }: a Google Tasks list shown as the shopping list
     cameraId: '',       // enterprises/…/devices/…
     thermostatId: '',
   },

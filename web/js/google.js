@@ -6,6 +6,7 @@ import { fetchJSON, HttpError } from './util.js';
 
 export const SCOPE_SDM = 'https://www.googleapis.com/auth/sdm.service';
 export const SCOPE_CAL = 'https://www.googleapis.com/auth/calendar.readonly';
+export const SCOPE_TASKS = 'https://www.googleapis.com/auth/tasks'; // the shopping list (Google Tasks)
 // oauth2.googleapis.com is the documented endpoint; the second is the one Google's sample uses.
 export const TOKEN_URLS = ['https://oauth2.googleapis.com/token', 'https://www.googleapis.com/oauth2/v4/token'];
 
@@ -16,7 +17,7 @@ export function redirectUri(loc = globalThis.location) {
 
 /** Where to send the user to sign in. With a Nest project ID, Google's device picker is shown too. */
 export function authUrl(g, redirect, state) {
-  const scopes = [g.projectId ? SCOPE_SDM : null, SCOPE_CAL].filter(Boolean).join(' ');
+  const scopes = [g.projectId ? SCOPE_SDM : null, SCOPE_CAL, SCOPE_TASKS].filter(Boolean).join(' ');
   const base = g.projectId
     ? `https://nestservices.google.com/partnerconnections/${encodeURIComponent(g.projectId)}/auth`
     : 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -70,6 +71,9 @@ export class Google {
   }
 
   get signedIn() { return !!this.s.google.refreshToken; }
+  /** Signed in with permission for Google Tasks (older sign-ins need to sign in again). */
+  get hasTasks() { return !!(this.s.google.refreshToken && this.s.google.scopes.includes('/auth/tasks')); }
+
   get hasNest() { return !!(this.s.google.projectId && this.s.google.scopes.includes('sdm.service')); }
 
   /** Start sign-in (navigates away to Google). */

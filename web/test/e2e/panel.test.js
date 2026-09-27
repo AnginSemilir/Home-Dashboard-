@@ -244,20 +244,20 @@ test('buttons in the kiosk app (Android WebView) open Android apps and screens',
   const { ctx, page } = await openPanel(env, { userAgent: UA.webview });
   await ready(page);
   const nav = await recordNavigations(page);
-  for (const app of ['home', 'claude', 'gemini', 'spotify', 'shopping']) await page.locator(`.dock [data-app="${app}"]`).click();
+  assert.equal(await page.locator('.dock [data-app="shopping"]').count(), 0, 'shopping is a card now, not a button');
+  for (const app of ['home', 'claude', 'gemini', 'spotify']) await page.locator(`.dock [data-app="${app}"]`).click();
   const box = await page.locator('.dock [data-app="claude"]').boundingBox();
   await page.mouse.move(box.x + 10, box.y + 10);
   await page.mouse.down();
   await page.waitForTimeout(800);
   await page.mouse.up();
-  await waitFor(() => nav.length >= 6, 'six navigations');
+  await waitFor(() => nav.length >= 5, 'five navigations');
   assert.match(nav[0], /^intent:#Intent;action=android\.intent\.action\.MAIN;category=android\.intent\.category\.HOME;/);
   assert.deepEqual(nav, [
     APPS.home.special,
     APPS.claude.special,
     APPS.gemini.special,
     launchIntent('com.spotify.music'),
-    launchIntent('com.google.android.keep'),
     launchIntent('com.anthropic.claude'), // press and hold: the normal Claude app
   ]);
   await ctx.close();

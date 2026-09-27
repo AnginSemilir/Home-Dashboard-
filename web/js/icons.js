@@ -30,6 +30,8 @@ export const UI = {
   thermo: S('<path d="M14 14.8V5a2 2 0 0 0-4 0v9.8a4 4 0 1 0 4 0z"/>'),
   flame: S('<path d="M12 22a6 6 0 0 0 6-6c0-3.5-3-6-3.5-9.5C12 8 10.5 10 10 11.5 9.2 10.6 9 9.5 9 8.5 7 10.4 6 12.8 6 16a6 6 0 0 0 6 6z" fill="currentColor"/>'),
   car: S('<path d="M5 16.5V12l2-5h10l2 5v4.5M5 16.5h14M5 16.5v2M19 16.5v2"/><circle cx="8" cy="13.8" r=".8" fill="currentColor"/><circle cx="16" cy="13.8" r=".8" fill="currentColor"/>'),
+  plus: S('<path d="M12 5v14M5 12h14"/>'),
+  check: S('<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
   cart: S('<path d="M3 4h2.5l2.2 11h10.6l2-8H7"/><circle cx="9.5" cy="19.5" r="1.3"/><circle cx="17" cy="19.5" r="1.3"/>'),
   music: S('<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>'),
   spark: S('<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/>'),

@@ -30,14 +30,21 @@ function barPath(x, w, yTop, yBot, down) {
  * @param {number} o.width  pixels
  * @param {number} o.height pixels
  * @param {number} [o.fs] label font size in pixels (the chart's padding scales with it)
+ * @param {number} [o.minHours] shortest window when later prices aren't published yet
  */
-export function renderChart({ rates, now, width, height, tz = DEFAULT_TZ, cheap = 15, pricey = 25, hoursBefore = 1, hours = 24, fs = 12 }) {
+export function renderChart({ rates, now, width, height, tz = DEFAULT_TZ, cheap = 15, pricey = 25, hoursBefore = 1, hours = 24, fs = 12, minHours = 6 }) {
   const W = Math.max(120, Math.round(width));
   const H = Math.max(80, Math.round(height));
   const padL = Math.round(fs * 2.4), padR = 2, padT = Math.round(fs * 1.9), padB = Math.round(fs * 2);
   const plotW = W - padL - padR, plotH = H - padT - padB;
   const from = Math.floor(now / 1800e3) * 1800e3 - hoursBefore * 3600e3;
-  const to = from + hours * 3600e3;
+  // Normally 24 hours ahead. Until tomorrow's prices are published (about 4pm), stretch the
+  // prices we do have across the width rather than leaving most of the chart empty.
+  const full = from + hours * 3600e3;
+  const known = rates.filter((r) => r.end > from);
+  const lastKnown = known.length ? Math.max(...known.map((r) => r.end)) : full;
+  const short = lastKnown < full - 3600e3;
+  const to = short ? Math.max(lastKnown, from + minHours * 3600e3) : full;
   const shown = rates.filter((r) => r.end > from && r.start < to);
   const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg" role="img" aria-label="Agile prices">`];
 
@@ -119,6 +126,8 @@ export function renderChart({ rates, now, width, height, tz = DEFAULT_TZ, cheap 
       out.push(`<text x="${cx}" y="${f1(cy)}" text-anchor="middle" class="ch-note">Next prices</text>`);
       out.push(`<text x="${cx}" y="${f1(cy + fs * 1.3)}" text-anchor="middle" class="ch-note">due ~4pm</text>`);
     }
+  } else if (short) {
+    out.push(`<text x="${W - padR}" y="${f1(padT - fs * 0.85)}" text-anchor="end" class="ch-note ch-soon">Tomorrow's prices from ~4pm</text>`);
   }
 
   // Now marker: a solid accent line with its label above the plot.
@@ -146,6 +155,11 @@ export function renderChart({ rates, now, width, height, tz = DEFAULT_TZ, cheap 
     }
     placed.push(m.cx);
     out.push(`<text x="${f1(m.cx)}" y="${f1(ty)}" text-anchor="middle" class="ch-val">${(Math.round(m.r.p * 10) / 10).toFixed(1)}</text>`);
+  }
+  // Invisible, full-height tap targets: tapping a half hour shows its time and price.
+  for (const r of shown) {
+    const x0 = Math.max(padL, x(r.start)), x1 = Math.min(W - padR, x(r.end));
+    out.push(`<rect x="${f1(x0)}" y="${padT}" width="${f1(x1 - x0)}" height="${f1(base - padT)}" fill="transparent" class="ch-hit" data-start="${r.start}" data-end="${r.end}" data-p="${r.p}"/>`);
   }
   out.push('</svg>');
   return out.join('');

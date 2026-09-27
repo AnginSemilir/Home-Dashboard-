@@ -12,6 +12,7 @@ import { fetchKia } from './kia.js';
 import { actionFor, detectEnv, perform } from './launcher.js';
 import * as ui from './ui.js';
 import { sunToday, themeFor } from './sun.js';
+import { fetchItems, setDone, addItem } from './tasks.js';
 import { openSettings } from './settings-ui.js';
 
 const settings = loadSettings();
@@ -31,12 +32,13 @@ export const state = {
   events: cache.events || null,
   weather: cache.weather || null,
   kia: cache.kia || null,
+  shopping: cache.shopping || null,
   status: {},
 };
 
 const persist = () => saveCache({
   rates: state.rates, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
-  thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia,
+  thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia, shopping: state.shopping,
 });
 
 const google = new Google(settings, save);
@@ -55,6 +57,15 @@ function renderAll() {
   ui.renderPrice(refs, state.rates, now, state.status.rates, priceOpts(), tz);
   ui.renderTiles(refs, state, settings, now, tz);
   ui.renderCamera(refs, settings, state, live);
+  ui.renderShopping(refs, state.shopping, state.status.shopping, shoppingInfo());
+}
+
+function shoppingInfo() {
+  const list = settings.google.shoppingList;
+  const why = !google.signedIn ? 'Sign in to Google in Settings to show your shopping list'
+    : !google.hasTasks ? 'Sign in to Google again (⚙ → Sign in with Google) to show your shopping list'
+      : !list?.id ? 'Choose your Google Tasks shopping list in Settings' : '';
+  return { listName: list?.name, ready: !why, why };
 }
 
 // ---------- Data sources ----------
@@ -174,6 +185,36 @@ async function refreshCalendar() {
 async function refreshWeather() {
   state.weather = await fetchWeather(settings.weather, tz);
   applyTheme(); // today's exact sunrise/sunset for this place
+}
+
+async function refreshShopping() {
+  state.shopping = await fetchItems(google, settings.google.shoppingList.id);
+}
+
+async function tickShopping(id, title) {
+  const list = settings.google.shoppingList?.id;
+  if (!list || !state.shopping) return;
+  state.shopping = state.shopping.filter((x) => x.id !== id); // straight off the screen
+  renderAll();
+  try {
+    await setDone(google, list, id, true);
+    ui.toast(refs, `Ticked off ${title}`, 6000, { label: 'Undo', fn: async () => {
+      try { await setDone(google, list, id, false); } catch (e) { ui.toast(refs, `Couldn't undo: ${describeError(e)}`); }
+      sources.shopping?.run();
+    } });
+  } catch (e) {
+    ui.toast(refs, `Couldn't tick off ${title}: ${describeError(e)}`, 6000);
+    sources.shopping?.run();
+  }
+}
+
+async function addShopping(text) {
+  const list = settings.google.shoppingList?.id;
+  if (!list) return;
+  state.shopping = [{ id: `new-${Date.now()}`, title: text }, ...(state.shopping || [])];
+  renderAll();
+  try { await addItem(google, list, text); } catch (e) { ui.toast(refs, `Couldn't add ${text}: ${describeError(e)}`, 6000); }
+  sources.shopping?.run();
 }
 
 async function refreshKia() {
@@ -341,6 +382,9 @@ async function boot() {
       explain(state.status[{ indoor: 'thermostat', car: 'kia' }[key]]);
     },
     status: (key) => explain(state.status[key]),
+    chartTap: (hit) => ui.showChartTip(refs, hit, priceOpts(), tz),
+    shopTick: tickShopping,
+    shopAdd: addShopping,
     nightTap: () => { nightSnoozeUntil = Date.now() + 5 * 60e3; updateNight(); },
   });
   document.addEventListener('pointerdown', () => { lastTouch = Date.now(); }, true);
@@ -370,6 +414,9 @@ async function boot() {
     staleAfter: 60 * 60e3, enabled: () => !!(google.signedIn && settings.google.calendars.length), clear: () => { state.events = null; },
   })();
   source('weather', refreshWeather, minutes(30), { staleAfter: 3 * 3600e3, enabled: () => settings.weather.lat != null, clear: () => { state.weather = null; } })();
+  source('shopping', refreshShopping, minutes(2), {
+    staleAfter: 30 * 60e3, enabled: () => !!(google.hasTasks && settings.google.shoppingList?.id), clear: () => { state.shopping = null; },
+  })();
   source('kia', refreshKia, minutes(15), { staleAfter: 6 * 3600e3, enabled: () => !!(settings.kia.url && settings.kia.key), clear: () => { state.kia = null; } })();
 
   // Every second: clock + camera countdown. Every 30 s: price/chart (slot changes), staleness, night.

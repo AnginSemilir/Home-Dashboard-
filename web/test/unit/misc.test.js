@@ -144,3 +144,26 @@ test('config: defaults, merge, import/export', () => {
   assert.equal('unknownKey' in imported, false);
   assert.throws(() => importSettings('{"hello":1}'), /doesn't look like/);
 });
+
+test('shopping: Google Tasks items still to buy, in list order', async () => {
+  const { parseItems } = await import('../../js/tasks.js');
+  assert.deepEqual(parseItems([
+    { id: 'b', title: 'Bread ', status: 'needsAction', position: '2' },
+    { id: 'a', title: 'Milk', status: 'needsAction', position: '1' },
+    { id: 'c', title: 'Done', status: 'completed', position: '0' },
+    { id: 'd', title: '   ', status: 'needsAction', position: '3' },
+    { id: 'e', title: 'Gone', status: 'needsAction', deleted: true },
+  ]), [{ id: 'a', title: 'Milk' }, { id: 'b', title: 'Bread' }]);
+});
+
+test('chart: tap targets carry each half hour; short window before tomorrow is published', () => {
+  const now = iso('2026-09-25T09:41:00+01:00');
+  const dayStart = iso('2026-09-24T23:00:00Z');
+  const rates = [...Array(48)].map((_, i) => ({ start: dayStart + i * 1800e3, end: dayStart + (i + 1) * 1800e3, p: 10 + (i % 20) }));
+  const out = renderChart({ rates, now, width: 530, height: 400 });
+  const hits = [...out.matchAll(/class="ch-hit" data-start="(\d+)" data-end="(\d+)" data-p="([\d.-]+)"/g)];
+  assert.equal(hits.length, 31);
+  assert.equal(Number(hits[0][1]), iso('2026-09-25T08:30:00+01:00'));
+  assert.match(out, /Tomorrow's prices from ~4pm/);
+  assert.doesNotMatch(out, /ch-pending/);
+});

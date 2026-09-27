@@ -6,6 +6,7 @@ import { exportSettings, importSettings } from './config.js';
 import { Google, redirectUri } from './google.js';
 import { Nest, isCamera, isThermostat, deviceName } from './nest.js';
 import { listCalendars } from './calendar.js';
+import { listTaskLists, createTaskList } from './tasks.js';
 import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
 import { detectEnv } from './launcher.js';
@@ -36,6 +37,8 @@ export function checklist(s, st) {
     item(s.google.thermostatId ? res('thermostat') : s.google.projectId ? 'todo' : 'off', 'Nest thermostat', '', 'thermostat'),
     item(s.google.cameraId ? 'ok' : s.google.projectId ? 'todo' : 'off', 'Nest camera (tap for live view)', st.status.camera?.error || ''),
     item(s.google.calendars.length ? res('calendar') : signed ? 'todo' : 'off', 'Google Calendar', s.google.calendars.map((c) => c.name).join(', '), 'calendar'),
+    item(s.google.shoppingList?.id ? (s.google.scopes.includes('/auth/tasks') ? res('shopping') : 'bad') : signed ? 'todo' : 'off',
+      'Shopping list (Google Tasks)', s.google.shoppingList?.id && !s.google.scopes.includes('/auth/tasks') ? 'sign in to Google again to allow it' : s.google.shoppingList?.name || '', 'shopping'),
     item(s.kia.url ? res('kia') : 'off', 'Kia battery (optional)', '', 'kia'),
   ];
 }
@@ -134,6 +137,7 @@ export function openSettings(root, ctx) {
   const googleState = h('div', { class: 'help' });
   const devicePick = h('div', { class: 'pick' });
   const calPick = h('div', { class: 'pick' });
+  const shopPick = h('div', { class: 'pick' });
   const showGoogle = () => { googleState.textContent = draft.google.refreshToken ? 'Signed in.' : 'Not signed in.'; };
   showGoogle();
   const google_ = h('section', {}, h('h2', {}, 'Google (Nest camera, thermostat and Calendar)'),
@@ -177,6 +181,26 @@ export function openSettings(root, ctx) {
       }));
     }, true),
     calPick,
+    btn('Choose shopping list', async () => {
+      const g = draftGoogle();
+      let lists = await listTaskLists(g);
+      const pick = () => shopPick.replaceChildren(
+        h('div', { class: 'help' }, 'A Google Tasks list. Add to it by voice ("Hey Google, add milk to my shopping list in Google Tasks") or with + on the panel.'),
+        ...lists.map((l) => {
+          const r = h('input', { type: 'radio', name: 'shopList', checked: draft.google.shoppingList?.id === l.id });
+          r.addEventListener('change', () => { draft.google.shoppingList = { id: l.id, name: l.name }; renderList(); });
+          return h('label', {}, r, l.name);
+        }),
+        lists.some((l) => /shopping/i.test(l.name)) ? null : btn('Create a "Shopping" list', async () => {
+          const made = await createTaskList(g, 'Shopping');
+          lists = [...lists, made];
+          draft.google.shoppingList = made;
+          pick();
+          renderList();
+        }, true));
+      pick();
+    }, true),
+    shopPick,
     btn('Sign out of Google', async () => {
       // Revoke the token at Google too (a form post: no CORS preflight), then forget the choices.
       const token = draft.google.refreshToken;
@@ -186,7 +210,7 @@ export function openSettings(root, ctx) {
         }).catch(() => {});
       }
       // Revoking can't be undone, so this is saved straight away (Cancel won't bring it back).
-      const cleared = { refreshToken: '', scopes: '', calendars: [], cameraId: '', thermostatId: '' };
+      const cleared = { refreshToken: '', scopes: '', calendars: [], shoppingList: null, cameraId: '', thermostatId: '' };
       Object.assign(draft.google, cleared);
       Object.assign(s.google, JSON.parse(JSON.stringify(cleared)));
       save();
