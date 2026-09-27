@@ -32,3 +32,4 @@ Everything researched while building the panel, saved here so it outlives the cl
 | [Google API 403 errors: formats, causes, what to tell the owner](2026-09-27-google-403-errors.md) | Current (web app) |
 | [Music controls: Spotify, Amazon Music and tablet media keys](2026-09-27-music-controls.md) | Current (web app) |
 | [Review: music/AI/Assistant buttons and location-based day and night (incl. WebView Kiosk and Chrome location behaviour)](2026-09-27-review-buttons-location.md) | Current |
+| [Review: Spotify controls (security, runtime, docs)](2026-09-27-review-spotify.md) | Current |
