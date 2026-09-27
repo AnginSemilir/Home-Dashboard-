@@ -451,6 +451,78 @@ svg { display: block; }
 .dock .d-ico { flex: none; display: grid; place-items: center; }
 .dock button:active, .tile:active, .cam:active { background: var(--card-2); }
 .dock svg { width: 1.3em; height: 1.3em; flex: none; color: var(--muted); }
+/* The music button while Spotify plays: artwork, title and artist. */
+.dock .d-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.dock .d-label, .dock .d-sub { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock .d-sub { color: var(--muted); font-size: 0.72em; font-weight: 450; }
+.dock .d-sub:empty { display: none; }
+.dock .b-music.np { justify-content: flex-start; text-align: left; }
+.dock .b-music.np:not(.playing) .d-sub::before { content: 'Paused · '; }
+.dock .np-art { display: none; width: 2.3em; height: 2.3em; border-radius: 6px; object-fit: cover; }
+.dock .b-music.has-art .np-art { display: block; }
+.dock .b-music.has-art .d-ico svg { display: none; }
+
+/* ---------- Spotify controls: a pop-up from the music button ---------- */
+.music-sheet { position: fixed; inset: 0; z-index: 65; display: grid; place-items: center; padding: 1.5em; background: rgb(0 0 0 / 0.55); }
+.ms-card {
+  position: relative; width: min(46em, 94vw); max-height: 94vh; overflow: auto;
+  padding: 1.6em 1.7em 1.4em; border-radius: 20px; color: var(--text);
+}
+.ms-close { position: absolute; top: 0.8em; right: 0.8em; width: 2.6em; height: 2.6em; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.ms-close svg { width: 1.3em; height: 1.3em; }
+.ms-main { display: grid; grid-template-columns: 13em minmax(0, 1fr); gap: 1.6em; align-items: center; }
+.ms-art { position: relative; width: 13em; aspect-ratio: 1; border-radius: 12px; display: grid; place-items: center; overflow: hidden; color: var(--faint); }
+.ms-art svg { width: 3.5em; height: 3.5em; }
+.ms-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: none; }
+.ms-art.has-art img { display: block; }
+.ms-info { min-width: 0; display: grid; gap: 0.35em; }
+.ms-title {
+  font-size: 1.7em; font-weight: 650; line-height: 1.2; letter-spacing: -0.01em; padding-right: 1.6em;
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.ms-artist { color: var(--muted); font-size: 1.15em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-device { display: flex; align-items: center; gap: 0.4em; min-height: 1.3em; color: var(--muted); font-size: 0.95em; }
+.ms-device svg { width: 1.1em; height: 1.1em; flex: none; }
+.ms-progress { display: grid; grid-template-columns: 2.6em minmax(0, 1fr) 2.6em; align-items: center; gap: 0.6em; margin-top: 0.6em; color: var(--muted); font-size: 0.9em; font-variant-numeric: tabular-nums; }
+.ms-progress .ms-time:last-child { text-align: right; }
+.ms-bar { height: 0.35em; border-radius: 999px; overflow: hidden; }
+.ms-bar span { display: block; height: 100%; border-radius: 999px; }
+.ms-controls { display: flex; align-items: center; gap: 1.2em; margin-top: 0.5em; }
+.ms-controls button { width: 3.2em; height: 3.2em; border-radius: 50%; display: grid; place-items: center; color: var(--text); }
+.ms-controls button svg { width: 1.5em; height: 1.5em; }
+.ms-controls .ms-play { width: 4.4em; height: 4.4em; }
+.ms-controls .ms-play svg { width: 1.8em; height: 1.8em; }
+.ms-controls button:disabled { opacity: 0.35; }
+.ms-vol { display: flex; align-items: center; gap: 0.7em; margin-top: 0.4em; color: var(--muted); }
+.ms-vol svg { width: 1.3em; height: 1.3em; flex: none; }
+.ms-vol input { flex: 1; height: 2.2em; }
+.ms-msg { min-height: 1.3em; margin-top: 0.9em; color: var(--muted); }
+.ms-devices-head { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin: 0.6em 0 0.6em; padding-top: 0.9em; border-top: 1px solid var(--line); font-weight: 600; }
+.ms-app { display: inline-flex; align-items: center; gap: 0.45em; padding: 0.5em 0.95em; border-radius: 999px; font-weight: 550; }
+.ms-app svg { width: 1.1em; height: 1.1em; }
+.ms-devices { display: flex; flex-wrap: wrap; gap: 0.5em; }
+.ms-dev { display: inline-flex; align-items: center; gap: 0.45em; max-width: 100%; padding: 0.6em 1em; border-radius: 999px; font-weight: 500; }
+.ms-dev span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ms-dev svg { width: 1.1em; height: 1.1em; flex: none; color: var(--muted); }
+.ms-dev:disabled { opacity: 0.45; }
+.ms-none { color: var(--muted); font-size: 0.95em; }
+@media (max-height: 640px) {
+  .ms-main { grid-template-columns: 10em minmax(0, 1fr); }
+  .ms-art { width: 10em; }
+}
+.ms-card { background: var(--card); box-shadow: var(--card-shadow), 0 20px 60px rgb(0 0 0 / 0.45); }
+.ms-close:active, .ms-controls button:active { background: var(--card-2); }
+.ms-art { background: var(--card-2); }
+.ms-bar { background: var(--card-2); }
+.ms-bar span { background: var(--text); }
+.ms-controls .ms-play { background: var(--text); color: var(--bg); }
+.ms-controls .ms-play:active { background: var(--text); opacity: 0.85; }
+.ms-vol input { accent-color: var(--text); }
+.ms-msg.bad { color: var(--bad-ink); }
+.ms-app, .ms-dev { background: var(--card-2); }
+.ms-dev.on { background: var(--text); color: var(--bg); }
+.ms-dev.on svg { color: var(--bg); }
+
 
 /* ---------- Overlays ---------- */
 /* Night: near-black in both themes. */

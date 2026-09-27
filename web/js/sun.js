@@ -47,25 +47,39 @@ export function sunToday(now, { weather, lat, lon, tz = DEFAULT_TZ } = {}) {
 /**
  * Where the tablet is, from the browser's location service (Wi-Fi or GPS), rounded to about
  * 1 km: plenty for sunrise and sunset, and all that's kept. It never leaves the tablet.
- * Resolves null if location is off, refused or doesn't answer.
+ * Resolves { place } or { error: 'denied' | 'unavailable' | 'timeout' | 'noanswer' | 'unsupported' }.
+ * 'noanswer' means nothing came back in time (a permission prompt still on screen, or a WebView
+ * that never answers); if a position arrives after all, it goes to `onLate`.
  */
-export function locate(geo = globalThis.navigator?.geolocation, { timeout = 30e3, maximumAge = 12 * 3600e3, now = () => Date.now() } = {}) {
+export function locate(geo = globalThis.navigator?.geolocation, { timeout = 30e3, maximumAge = 12 * 3600e3, wait = timeout + 5e3, now = () => Date.now(), onLate } = {}) {
   return new Promise((resolve) => {
-    if (typeof geo?.getCurrentPosition !== 'function') { resolve(null); return; }
+    if (typeof geo?.getCurrentPosition !== 'function') { resolve({ error: 'unsupported' }); return; }
     let done = false;
     const finish = (v) => { if (!done) { done = true; clearTimeout(guard); resolve(v); } };
-    const guard = setTimeout(() => finish(null), timeout + 5e3); // some WebViews never answer
+    const guard = setTimeout(() => finish({ error: 'noanswer' }), wait);
     const r2 = (n) => Math.round(n * 100) / 100;
     try {
       geo.getCurrentPosition((p) => {
         const lat = p?.coords?.latitude, lon = p?.coords?.longitude;
-        finish(Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat: r2(lat), lon: r2(lon), at: now() } : null);
-      }, () => finish(null), { enableHighAccuracy: false, timeout, maximumAge });
+        const ok = Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
+        const res = ok ? { place: { lat: r2(lat), lon: r2(lon), at: now() } } : { error: 'unavailable' };
+        if (done) { if (ok) onLate?.(res.place); } else finish(res);
+      }, (err) => finish({ error: ({ 1: 'denied', 2: 'unavailable', 3: 'timeout' })[err?.code] || 'unavailable' }),
+      { enableHighAccuracy: false, timeout, maximumAge });
     } catch {
-      finish(null);
+      finish({ error: 'unavailable' });
     }
   });
 }
+
+/** Where the tablet's location stands, in words (for Settings). */
+export const LOCATION_WHY = {
+  denied: 'location access is off for the panel',
+  unavailable: 'the tablet couldn\'t find its location',
+  timeout: 'the tablet couldn\'t find its location in time',
+  noanswer: 'the location request wasn\'t answered',
+  unsupported: 'this browser can\'t share location',
+};
 
 /** 'light' or 'dark' for a Theme setting of 'auto' (follows the sun) | 'light' | 'dark'. */
 export function themeFor(mode, now, sun) {

@@ -20,7 +20,7 @@ test('first run: settings open, then weather, Octopus and Google sign-in all set
 
   await page.getByLabel('Account number').fill(ACCOUNT);
   await page.getByLabel('API key').fill('sk_test_key');
-  await settings.getByRole('button', { name: 'Connect' }).click();
+  await settings.getByRole('button', { name: 'Connect', exact: true }).click();
   await settings.getByText('Octopus connected').waitFor();
   assert.match(await text(page, '#settings'), /tariff E-1R-AGILE-24-10-01-C \(region C\)[\s\S]*Home Mini yes/);
 
@@ -112,7 +112,7 @@ test('button results show next to the button: Octopus blocked, Google details mi
   await page.route(/^https:\/\/api\.octopus\.energy\//, (route) => route.abort('failed'));
   await page.getByLabel('Account number').fill('A-1234ABCD');
   await page.getByLabel('API key').fill('sk_test_key');
-  const connect = settings.locator('.btn-wrap', { has: page.getByRole('button', { name: 'Connect' }) });
+  const connect = settings.locator('.btn-wrap', { has: page.getByRole('button', { name: 'Connect', exact: true }) });
   await connect.getByRole('button').click();
   await connect.locator('.btn-status.bad', { hasText: /Octopus didn't answer this browser[\s\S]*docs\/octopus\.md/ }).waitFor();
   assert.equal(await connect.locator('.btn-status').isVisible(), true);

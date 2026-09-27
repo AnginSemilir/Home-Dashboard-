@@ -11,6 +11,8 @@ import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
 import { detectEnv, MUSIC_APPS, ASSISTANTS } from './launcher.js';
 import { hhmm } from './time.js';
+import { exportSpotify, importSpotify } from './spotify.js';
+import { LOCATION_WHY } from './sun.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 
 const ENV_LABEL = {
@@ -39,6 +41,8 @@ export function checklist(s, st) {
     item(s.google.calendars.length ? res('calendar') : signed ? 'todo' : 'off', 'Google Calendar', s.google.calendars.map((c) => c.name).join(', '), 'calendar'),
     item(s.google.shoppingList?.id ? (s.google.scopes.includes('/auth/tasks') ? res('shopping') : 'bad') : signed ? 'todo' : 'off',
       'Shopping list (Google Tasks)', signed && !s.google.scopes.includes('/auth/tasks') ? 'sign in to Google again to allow it' : s.google.shoppingList?.name || '', 'shopping'),
+    item(exportSpotify() && s.spotify.clientId ? (s.panel.music === 'amazonmusic' ? 'off' : res('spotify')) : s.spotify.clientId ? 'todo' : 'off',
+      'Spotify controls (optional, needs Premium)', s.panel.music === 'amazonmusic' ? 'the music button is set to Amazon Music' : s.spotify.clientId && !exportSpotify() ? 'tap Connect Spotify' : '', 'spotify'),
     item(s.kia.url ? res('kia') : 'off', 'Kia battery (optional)', '', 'kia'),
   ];
 }
@@ -228,6 +232,26 @@ export function openSettings(root, ctx) {
 
   // Kia
   const keyOut = h('div', { class: 'help' });
+  // Spotify
+  const spState = h('div', { class: 'help' });
+  const showSpotify = () => { spState.textContent = exportSpotify() ? 'Connected.' : 'Not connected.'; };
+  showSpotify();
+  const spotify_ = h('section', {}, h('h2', {}, 'Spotify (music controls, optional)'),
+    h('div', { class: 'help' }, "With Spotify Premium, the music button shows what's playing, and a tap opens controls: play/pause, skip, volume and which speaker. One-off setup in docs/spotify.md. Redirect URI for your Spotify app: ", h('span', { class: 'mono' }, redirect)),
+    field('Spotify Client ID', input(draft.spotify, 'clientId', { placeholder: 'from developer.spotify.com/dashboard' })),
+    spState,
+    btn('Connect Spotify', async () => {
+      if (!draft.spotify.clientId) throw new Error('Enter the Client ID first');
+      Object.assign(s, draft); save();
+      say('Opening Spotify…');
+      location.assign(await ctx.spotify.authUrl(redirect));
+    }),
+    btn('Disconnect Spotify', async () => {
+      ctx.spotify?.disconnect();
+      showSpotify(); renderList();
+      say('Disconnected. Save & close to hide the controls.');
+    }, true));
+
   const kia = h('section', {}, h('h2', {}, 'Kia battery (optional)'),
     h('div', { class: 'help' }, 'Needs the GitHub Action described in docs/kia.md.'),
     field('Data URL', input(draft.kia, 'url', { placeholder: 'https://raw.githubusercontent.com/<you>/<repo>/kia-data/kia.json' })),
@@ -248,11 +272,24 @@ export function openSettings(root, ctx) {
     el.addEventListener('change', () => { obj[key] = el.value; });
     return el;
   };
-  const today = ctx.sun?.();
-  const sunText = `${today ? `Today: light from ${hhmm(today.rise)} (sunrise) to ${hhmm(today.set)} (sunset)` : 'Sunrise and sunset'} ${ctx.state?.place ? 'where the tablet is' : 'at the weather location (allow location access for the tablet\'s own)'}.`;
+  const sunLine = h('div', { class: 'help' });
+  const showSun = () => {
+    const today = ctx.sun?.();
+    const why = LOCATION_WHY[ctx.locateStatus?.()?.outcome];
+    sunLine.textContent = `${today ? `Today: light from ${hhmm(today.rise)} (sunrise) to ${hhmm(today.set)} (sunset)` : 'Sunrise and sunset'} ${ctx.place?.() ? 'where the tablet is.' : `at the weather location${why ? ` (${why}: see docs/tablet.md)` : ''}.`}`;
+  };
+  showSun();
   const look = [
     field('Style', select(draft.panel, 'style', [['bold', 'Bold: big and clear, readable across the room'], ['ambient', 'Ambient: softer cards, tint follows the time of day']])),
-    field('Theme', select(draft.panel, 'theme', [['auto', 'Auto: light from sunrise to sunset'], ['light', 'Always light'], ['dark', 'Always dark']]), sunText),
+    field('Theme', select(draft.panel, 'theme', [['auto', 'Auto: light from sunrise to sunset'], ['light', 'Always light'], ['dark', 'Always dark']])),
+    sunLine,
+    ctx.locateNow && !ctx.place?.() ? btn('Use this tablet\'s location', async () => {
+      say('Asking the tablet…');
+      const r = await ctx.locateNow();
+      showSun();
+      if (r !== 'ok') throw new Error(`No location: ${LOCATION_WHY[r] || r}. See docs/tablet.md.`);
+      say('Done: sunrise and sunset are now for where the tablet is.');
+    }, true) : null,
   ];
   const launcherSel = h('select', {}, ...['auto', 'webview', 'chrome', 'fully'].map((v) => h('option', { value: v, selected: draft.panel.launcher === v }, v)));
   launcherSel.addEventListener('change', () => { draft.panel.launcher = launcherSel.value; });
@@ -276,12 +313,18 @@ export function openSettings(root, ctx) {
   const move = h('section', {}, h('h2', {}, 'Copy settings to another browser'),
     h('div', { class: 'help' }, 'Use this to sign in to Google in Chrome, then move everything into the kiosk app. The text contains your keys, so paste it straight into the other app and nowhere else.'),
     btn('Copy settings', async () => {
-      const text = exportSettings(draft);
-      try { await navigator.clipboard.writeText(text); say('Copied. Now open the panel in the other app → Settings → Paste.'); } catch { box.value = text; say('Copy the text in the box below.'); }
+      // Spotify's sign-in changes each time it's used, so only one browser can keep it: it
+      // moves with the copy, and this browser lets go of it.
+      const sp = exportSpotify();
+      const text = sp ? JSON.stringify({ ...JSON.parse(exportSettings(draft)), spotifyToken: sp }) : exportSettings(draft);
+      const moved = sp ? ' Spotify moves with the settings, so this browser is now disconnected from it (Connect Spotify again here if you only wanted a copy).' : '';
+      try { await navigator.clipboard.writeText(text); say(`Copied. Now open the panel in the other app → Settings → Paste.${moved}`); } catch { box.value = text; say(`Copy the text in the box below.${moved}`); }
+      if (sp) { ctx.spotify?.disconnect(); showSpotify(); renderList(); }
     }, true),
     btn('Paste settings', async () => {
       const text = box.value.trim() || (await navigator.clipboard.readText());
       const imported = importSettings(text);
+      try { importSpotify(JSON.parse(text).spotifyToken); } catch { /* no Spotify sign-in in it */ }
       Object.assign(s, imported); save();
       say('Imported. Reloading…');
       setTimeout(() => location.reload(), 600);
@@ -302,7 +345,7 @@ export function openSettings(root, ctx) {
   const overlay = h('div', { class: 'settings', id: 'settings' }, h('div', { class: 'wrap' },
     h('h1', {}, 'Panel settings', h('span', {}, cancel, close)),
     h('section', {}, h('h2', {}, 'Setup checklist'), list, msg),
-    weather, octo, google_, kia, panel, move,
+    weather, octo, google_, spotify_, kia, panel, move,
     h('div', { class: 'help' }, 'Everything here is stored only in this browser on this tablet.'), version));
   root.append(overlay);
   return overlay;

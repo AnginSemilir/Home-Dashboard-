@@ -11,7 +11,12 @@ It's on **F-Droid** and the **Play Store** (search "WebView Kiosk"; developer nk
 3. In its settings, turn on **keep screen on** and full screen / immersive mode if offered.
 
    Leave "set as default launcher / home app" **off**. Otherwise the panel's Home button would bring you straight back to the panel.
-4. If it asks to use your location, allow it: the panel uses it only for sunrise and sunset times, so the Auto theme goes light and dark at the right times where the tablet is (nothing is sent anywhere). If the kiosk app can't share location, the panel uses the weather location instead.
+4. **Location** (optional: only for the Auto theme's sunrise and sunset times; nothing is sent anywhere). WebView Kiosk has it **off** by default:
+   1. In WebView Kiosk's settings → **Device** → turn on **Allow Location**.
+   2. Tap **Request Coarse Location Permission** and allow it. Approximate is plenty.
+   3. Back on the panel, ⚙ → Panel → **Use this tablet's location**. When WebView Kiosk shows **Permission request**, tick **Remember my choice**, then **Allow**. Without the tick it would ask at every start.
+
+   Without location, the panel uses the weather location's sunrise and sunset, which is the same for a tablet at home. Keep Android's **Settings → Location** on: this Wi-Fi tablet finds itself from Wi-Fi, not GPS.
 5. The panel opens its Settings screen with a checklist. Set up weather and Octopus there. Do Google in Chrome ([google.md](google.md), step 3), then copy the settings across.
 
 Menu names differ between versions of the app. If a setting described here isn't there, look for the nearest equivalent.
@@ -36,6 +41,7 @@ What's different in Chrome:
 - **Assistant**, **Gemini** and the music button open their apps (the assistant doesn't start listening by itself: tap its microphone).
 - The **car** tile (without Kia data) opens the Kia app's Play Store page; tap **Open** there.
 - Keep-screen-on uses the browser's Wake Lock, which works while the panel is in front.
+- Location: when Chrome asks, tap **Allow while visiting the site**, not *Allow this time* (that lapses and would ask again). If you chose *Never allow*, reset it in Chrome → ⋮ → Settings → Site settings → Location.
 
 The panel detects where it's running and picks the right kind of link. You can force it in ⚙ → Panel → **App buttons mode**.
 

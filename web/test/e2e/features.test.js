@@ -143,12 +143,42 @@ test('Auto theme: light and dark follow sunrise and sunset where the tablet is; 
   await b.page.locator('#clock .gear').click();
   await b.page.locator('#settings').getByText(/Today: light from 08:\d\d \(sunrise\) to 20:\d\d \(sunset\) where the tablet is/).waitFor();
   await b.page.locator('#settings').getByRole('button', { name: 'Cancel' }).click();
-  // The place is remembered: after a reload with location off, still Reykjavik's sun.
-  await b.ctx.setGeolocation(null).catch(() => {});
+  // Location access taken away: the saved position is forgotten; the weather location decides.
   await b.ctx.clearPermissions();
   await b.page.reload();
+  await b.page.waitForFunction(() => document.documentElement.dataset.theme === 'light');
+  assert.equal(await b.page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.cache.v1')).place), null);
+  await b.ctx.close();
+});
+
+test('location: asked once, not at the nightly reload, and on request from Settings', async () => {
+  const at = Date.parse('2026-09-25T07:10:00+01:00');
+  const asks = (page) => page.evaluate(() => window.__asks);
+  const counting = () => {
+    window.__asks = 0;
+    const real = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation);
+    navigator.geolocation.getCurrentPosition = (...a) => { window.__asks++; return real(...a); };
+  };
+  // Refused (no permission): asked once, then not again by itself.
+  const a = await openPanel(env, { now: at, theme: 'auto', initScript: counting });
+  await a.page.waitForFunction(() => localStorage.getItem('wallpanel.location.v1'));
+  assert.equal(JSON.parse(await a.page.evaluate(() => localStorage.getItem('wallpanel.location.v1'))).outcome, 'denied');
+  await a.page.reload();
+  await a.page.locator('#price .big').waitFor();
+  await a.page.waitForTimeout(300);
+  assert.equal(await asks(a.page), 0, 'not asked again after a refusal');
+  await a.page.locator('#clock .gear').click();
+  const set = a.page.locator('#settings');
+  await set.getByText(/at the weather location \(location access is off for the panel/).waitFor();
+  await set.getByRole('button', { name: 'Use this tablet\'s location' }).click();
+  await set.locator('.btn-status.bad', { hasText: 'No location: location access is off for the panel' }).waitFor();
+  assert.equal(await asks(a.page), 1, 'asked when the button was pressed');
+  await a.ctx.close();
+  // The automatic 03:30 reload never asks (a prompt could sit on screen all night).
+  const b = await openPanel(env, { now: at, theme: 'auto', initScript: () => { sessionStorage.setItem('wallpanel.autoreload', '1'); window.__asks = 0; const real = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation); navigator.geolocation.getCurrentPosition = (...x) => { window.__asks++; return real(...x); }; } });
   await b.page.locator('#price .big').waitFor();
-  assert.equal(await b.page.evaluate(() => document.documentElement.dataset.theme), 'dark');
+  await b.page.waitForTimeout(300);
+  assert.equal(await asks(b.page), 0);
   await b.ctx.close();
 });
 

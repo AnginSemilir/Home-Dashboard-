@@ -104,6 +104,7 @@ export function fullSettings(now) {
     google: { clientId: 'cid.apps.googleusercontent.com', clientSecret: 'secret', projectId: 'proj-123', refreshToken: 'rt-123', scopes: 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks', calendars: [{ id: 'family@group.calendar.google.com', name: 'Family', color: '#4f9cff' }], shoppingList: { id: 'shop', name: 'Shopping' }, cameraId: CAMERA_ID, thermostatId: THERMO_ID },
     weather: { lat: 51.5, lon: -0.12, place: 'Westminster' },
     kia: { url: KIA_URL, key: KIA_KEY },
+    spotify: { clientId: 'sp-client' }, // connected only when a test also seeds the sign-in (openPanel spotify: true)
     panel: { cameraName: 'Front door', cameraBattery: true, launcher: 'auto' },
   };
 }
@@ -222,6 +223,59 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     calls.push({ service: 'kia', url: route.request().url() });
     return fail.has('kia') ? json(route, {}, 404) : json(route, kiaPayload);
   });
+  // Spotify: sign-in (PKCE), tokens that rotate, and a player on a kitchen speaker.
+  const track = (name, artist) => ({ name, duration_ms: 185000, artists: [{ name: artist }], album: { images: [{ url: 'https://i.scdn.co/image/big', width: 640 }, { url: 'https://i.scdn.co/image/mid', width: 300 }, { url: 'https://i.scdn.co/image/small', width: 64 }] } });
+  const sp = {
+    playing: true, item: track('Here Comes the Sun', 'The Beatles'), progress: 61000, active: 'kitchen', volume: 40,
+    devices: [
+      { id: 'kitchen', name: 'Kitchen speaker', type: 'Speaker', supports_volume: true },
+      { id: 'tablet', name: 'Lenovo TB328FU', type: 'Tablet', supports_volume: false },
+    ],
+  };
+  let spTokens = 0;
+  await page.route(/^https:\/\/accounts\.spotify\.com\/authorize/, (route) => {
+    const u = new URL(route.request().url());
+    calls.push({ service: 'spotify-auth', url: route.request().url() });
+    const back = `${u.searchParams.get('redirect_uri')}?code=sp-code&state=${encodeURIComponent(u.searchParams.get('state'))}`;
+    return route.fulfill({ status: 302, headers: { location: back } });
+  });
+  await page.route(/^https:\/\/accounts\.spotify\.com\/api\/token/, (route) => {
+    const body = new URLSearchParams(route.request().postData() || '');
+    calls.push({ service: 'spotify-token', grant: body.get('grant_type'), body: Object.fromEntries(body) });
+    if (fail.has('spotify-expired')) return json(route, { error: 'invalid_grant', error_description: 'Refresh token revoked' }, 400);
+    spTokens++;
+    return json(route, { access_token: `sp-at-${spTokens}`, token_type: 'Bearer', expires_in: 3600, refresh_token: `sp-rt-${spTokens}`, scope: 'user-read-playback-state user-modify-playback-state' });
+  });
+  await page.route(/^https:\/\/api\.spotify\.com\/v1\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const p = url.pathname.replace('/v1', '');
+    const body = req.postData() ? JSON.parse(req.postData()) : null;
+    calls.push({ service: 'spotify', method: req.method(), path: p, query: url.search, body, auth: req.headers().authorization });
+    const done = () => route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*' } });
+    const dev = () => sp.devices.find((d) => d.id === sp.active);
+    if (fail.has('spotify-idle') && !sp.active) {
+      if (req.method() === 'GET' && p === '/me/player') return done();
+      if (p.startsWith('/me/player/play')) return json(route, { error: { status: 404, message: 'Player command failed: No active device found', reason: 'NO_ACTIVE_DEVICE' } }, 404);
+    }
+    if (req.method() !== 'GET' && fail.has('spotify-premium')) return json(route, { error: { status: 403, message: 'Player command failed: Premium required', reason: 'PREMIUM_REQUIRED' } }, 403);
+    if (req.method() === 'GET' && p === '/me/player') {
+      const d = dev();
+      return json(route, { is_playing: sp.playing, progress_ms: sp.progress, shuffle_state: false, currently_playing_type: 'track', item: sp.item, device: d && { id: d.id, name: d.name, type: d.type, is_active: true, is_restricted: false, supports_volume: d.supports_volume, volume_percent: d.supports_volume ? sp.volume : null } });
+    }
+    if (req.method() === 'GET' && p === '/me/player/devices') return json(route, { devices: sp.devices.map((d) => ({ ...d, is_active: d.id === sp.active, is_restricted: false, volume_percent: d.supports_volume ? sp.volume : null })) });
+    if (p === '/me/player/pause') { sp.playing = false; return done(); }
+    if (p === '/me/player/play') { sp.playing = true; return done(); }
+    if (p === '/me/player/next') { sp.item = track('Something', 'The Beatles'); sp.progress = 0; return done(); }
+    if (p === '/me/player/previous') { sp.progress = 0; return done(); }
+    if (p === '/me/player/volume') { sp.volume = Number(url.searchParams.get('volume_percent')); return done(); }
+    if (p === '/me/player' && req.method() === 'PUT') { sp.active = body.device_ids[0]; sp.playing = body.play !== false; if (!sp.item) sp.item = track('Here Comes the Sun', 'The Beatles'); return done(); }
+    return json(route, { error: { status: 404, message: 'not found' } }, 404);
+  });
+  if (fail.has('spotify-idle')) { sp.active = null; sp.playing = false; sp.item = null; }
+  await page.route(/^https:\/\/i\.scdn\.co\//, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64') }));
+  calls.spotify = sp;
+
   // Google's sign-in page: pretend the user approved and bounce back with a code.
   await page.route(/^https:\/\/(nestservices\.google\.com|accounts\.google\.com)\//, (route) => {
     const u = new URL(route.request().url());

@@ -3,7 +3,7 @@
 ## Without touching code (⚙ → Panel)
 
 - **Style:** *Bold* (big and clear, readable across the room; the default) or *Ambient* (softer cards, a background tint that follows the time of day).
-- **Theme:** *Auto* goes light at sunrise and dark at sunset where the tablet is (today's times are shown under the setting). It uses the tablet's location (the browser asks once: tap **Allow**); if location is off or refused, it uses the weather location. Only a rounded position (about 1 km) is kept, on the tablet. Or *Always light* / *Always dark*. Night dimming (below) works the same in every theme.
+- **Theme:** *Auto* goes light at sunrise and dark at sunset where the tablet is (today's times are shown under the setting). It uses the tablet's location if the panel may have it (setting it up: [tablet.md](tablet.md), step 4); otherwise the weather location. The line under the setting says which, and why. The panel never asks for location during the night-time reload, and after a refusal it only asks again when you tap **Use this tablet's location**. Only a rounded position (about 1 km) is kept, on the tablet. Or *Always light* / *Always dark*. Night dimming (below) works the same in every theme.
 - **Music button:** Spotify or Amazon Music. **AI button:** Claude or Gemini. The **Assistant** button next to it always starts the tablet's own voice assistant.
 - **Green below / Red from (p/kWh):** the price colours. Blue is always at or below 0p.
 - **Night mode from/until:** when the panel dims itself (it only dims after 90 seconds without a touch, and never while the camera is live).
@@ -21,6 +21,7 @@ Everything is plain HTML/CSS/JavaScript in `web/`, with no build step. Push a ch
 | Sunrise/sunset and the light/dark switch | `web/js/sun.js` (`locate`, `sunToday`) and `applyTheme()` / `refreshPlace()` in `web/js/main.js`. For screenshots, `?theme=light` or `?theme=dark` on the address overrides the setting. |
 | What each card shows | `web/js/ui.js` (`renderPrice`, `renderTiles`, `renderCalendar`, `renderShopping`, `renderWeather`, `renderCamera`, and `showChartTip` for the pop-up when you tap a bar) |
 | The shopping list (Google Tasks) | `web/js/tasks.js`; choose the list in ⚙ → Choose shopping list |
+| Spotify controls | `web/js/spotify.js` (sign-in, player), `renderMusic` / `buildMusic` in `web/js/ui.js`, `musicCmd` / `musicInterval` in `web/js/main.js` |
 | The price chart | `web/js/chart.js` |
 | The buttons: which apps, which intents | `web/js/launcher.js` (`APPS`) and the `DOCK` list at the top of `web/js/ui.js` (the camera button is always first) |
 | How often things refresh | the `source(…)` lines near the end of `web/js/main.js` |

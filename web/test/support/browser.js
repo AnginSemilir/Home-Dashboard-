@@ -24,7 +24,7 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
-  style, theme, geolocation,
+  style, theme, geolocation, spotify,
 } = {}) {
   // `geolocation`: { latitude, longitude } the tablet reports (location allowed); by default it's refused.
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block',
@@ -44,6 +44,10 @@ export async function openPanel(env, {
   if (s) {
     // Only on the first load, so tests can reload and keep what the page saved.
     await page.addInitScript((json) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('wallpanel.settings.v1', json); sessionStorage.setItem('seeded', '1'); } }, JSON.stringify(s));
+  }
+  // spotify: true = already connected to Spotify (a sign-in waiting to be refreshed).
+  if (spotify) {
+    await page.addInitScript(() => { if (!sessionStorage.getItem('seeded-sp')) { localStorage.setItem('wallpanel.spotify.v1', JSON.stringify({ refreshToken: 'sp-rt-0' })); sessionStorage.setItem('seeded-sp', '1'); } });
   }
   if (initScript) await page.addInitScript(initScript);
   await page.goto(env.url);

@@ -5,7 +5,7 @@
 | Button | Tap | Press and hold |
 |---|---|---|
 | **Camera** ("Front door") | Live view, full screen. Tap the picture to shrink it to a corner; ✕ to stop | – |
-| **Music**: Spotify or Amazon Music (⚙ → Panel → **Music button**) | Opens the app | the same |
+| **Music**: Spotify or Amazon Music (⚙ → Panel → **Music button**) | Opens the app. With Spotify connected ([spotify.md](spotify.md)): shows what's playing, and a tap opens the controls | Opens the app |
 | **AI**: Claude (default) or Gemini (⚙ → Panel → **AI button**) | Claude: its voice/assistant screen. Gemini: the Gemini app (Live is one tap away; there's no way to open Live directly) | Opens the app normally |
 | **Assistant** | Starts the tablet's own voice assistant as a pop-up, already listening (Gemini/Google on most tablets), like saying "Hey Google" | Opens the Gemini app |
 | **Home** | Goes to the Android home screen | – |
@@ -21,7 +21,7 @@ The table is for **WebView Kiosk** (see [tablet.md](tablet.md)). In Chrome, web 
 The tablet's own assistant does the voice side. The panel doesn't listen.
 
 1. Install/update the **Gemini** app from the Play Store and open it once. On current Android it replaces Google Assistant as the tablet's assistant.
-2. Gemini → your profile picture → **Settings → Google Assistant/"Hey Google" & Voice Match** (the wording changes between versions) → turn on **Hey Google** and train your voice. Voice Match on tablets depends on the device; if the M10 doesn't offer it, use the panel's Gemini button instead.
+2. Gemini → your profile picture → **Settings → Google Assistant/"Hey Google" & Voice Match** (the wording changes between versions) → turn on **Hey Google** and train your voice. Voice Match on tablets depends on the device; if the M10 doesn't offer it, use the panel's **Assistant** button instead.
 3. Leave the tablet's **Settings → Apps → Default apps → Digital assistant app** set to Google/Gemini.
 
 ### The shopping list
@@ -39,12 +39,12 @@ In Gemini → Settings → **Apps**, turn on **Spotify** and link your account. 
 ### Claude by voice
 
 - "Hey Google, **open Claude**" opens the Claude app. Tap its voice button for a spoken conversation.
-- The panel's **Claude** button tries to jump straight to Claude's voice/assistant screen (see above).
+- The panel's **AI** button (set to Claude, the default) tries to jump straight to Claude's voice/assistant screen (see above).
 - You *could* make Claude the tablet's default assistant (Settings → Apps → Default apps → Digital assistant app), if the Claude app offers that on your version. Then "Hey Google" would no longer start Gemini, so it isn't recommended here. There's currently no separate hands-free wake word for Claude on Android.
 
 ### Gemini by voice
 
-"Hey Google, …" works anywhere, including over the panel. The Gemini button does the same without speaking first.
+"Hey Google, …" works anywhere, including over the panel. The **Assistant** button does the same without speaking first. (The AI button set to Gemini opens the Gemini app instead: there's no way to open Gemini Live directly.)
 
 ## The car tile
 

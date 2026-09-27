@@ -139,7 +139,11 @@ export function buildPanel(root, on) {
   r.dock = h('nav', { class: 'dock', id: 'dock' }, r.cam);
   r.dockBtn = {};
   for (const b of DOCK) {
-    const btn = h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon)), h('span', { class: 'd-label' }, b.label));
+    // The music button can also show what's playing: artwork, title and artist.
+    const btn = b.id === 'music'
+      ? h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon), h('img', { class: 'np-art', alt: '' })),
+        h('span', { class: 'd-text' }, h('span', { class: 'd-label' }, b.label), h('span', { class: 'd-sub' })))
+      : h('button', { class: `b-${b.id}`, 'data-app': b.id }, h('span', { class: 'd-ico' }, icon(b.icon)), h('span', { class: 'd-label' }, b.label));
     r.dockBtn[b.id] = btn;
     pressable(btn, () => on.launch?.(b.id, false), () => on.launch?.(b.id, true));
     r.dock.append(btn);
@@ -159,8 +163,140 @@ export function buildPanel(root, on) {
   r.night = h('div', { class: 'night hidden', id: 'night' }, r.nightTime);
   r.night.addEventListener('click', () => on.nightTap?.());
   r.toast = h('div', { class: 'toast hidden', role: 'status' });
-  root.replaceChildren(r.panel, r.night, r.toast);
+  r.music = buildMusic(on);
+  root.replaceChildren(r.panel, r.music.sheet, r.night, r.toast);
   return r;
+}
+
+/** The Spotify controls: a pop-up over the panel, opened from the music button. */
+function buildMusic(on) {
+  const m = {};
+  const cmd = (name, arg) => { m.touched = Date.now(); on.musicCmd?.(name, arg); };
+  m.img = h('img', { alt: '' });
+  m.art = h('div', { class: 'ms-art' }, icon('music'), m.img);
+  m.title = h('div', { class: 'ms-title' });
+  m.artist = h('div', { class: 'ms-artist' });
+  m.device = h('div', { class: 'ms-device' });
+  m.bar = h('span');
+  m.pos = h('span', { class: 'ms-time' });
+  m.dur = h('span', { class: 'ms-time' });
+  const btn = (cls, ico, label, fn) => {
+    const b = h('button', { class: cls, 'aria-label': label }, icon(ico));
+    b.addEventListener('click', fn);
+    return b;
+  };
+  m.play = btn('ms-play', 'play', 'Play', () => cmd('toggle'));
+  m.prev = btn('ms-prev', 'prev', 'Previous', () => cmd('previous'));
+  m.next = btn('ms-next', 'next', 'Next', () => cmd('next'));
+  m.vol = h('input', { type: 'range', min: '0', max: '100', step: '1', 'aria-label': 'Volume' });
+  let volTimer = null;
+  m.vol.addEventListener('input', () => {
+    m.touched = Date.now();
+    clearTimeout(volTimer);
+    volTimer = setTimeout(() => cmd('volume', Number(m.vol.value)), 250);
+  });
+  m.volRow = h('label', { class: 'ms-vol' }, icon('volume'), m.vol);
+  m.msg = h('div', { class: 'ms-msg', role: 'status' });
+  m.devices = h('div', { class: 'ms-devices' });
+  m.devices.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-id]');
+    if (b) cmd('device', b.dataset.id);
+  });
+  const close = btn('ms-close', 'close', 'Close', () => on.musicClose?.());
+  const app = h('button', { class: 'ms-app' }, icon('music'), h('span', {}, 'Open Spotify'));
+  app.addEventListener('click', () => cmd('app'));
+  m.card = h('div', { class: 'ms-card' }, close,
+    h('div', { class: 'ms-main' }, m.art,
+      h('div', { class: 'ms-info' }, m.title, m.artist, m.device,
+        h('div', { class: 'ms-progress' }, m.pos, h('div', { class: 'ms-bar' }, m.bar), m.dur),
+        h('div', { class: 'ms-controls' }, m.prev, m.play, m.next), m.volRow)),
+    m.msg,
+    h('div', { class: 'ms-devices-head' }, h('span', {}, 'Play on'), app),
+    m.devices);
+  m.sheet = h('div', { class: 'music-sheet hidden', id: 'music', role: 'dialog', 'aria-label': 'Spotify' }, m.card);
+  // A tap outside the card closes it.
+  m.sheet.addEventListener('click', (e) => { if (e.target === m.sheet) on.musicClose?.(); });
+  m.card.addEventListener('pointerdown', () => { m.touched = Date.now(); });
+  return m;
+}
+
+export const musicIsOpen = (r) => !r.music.sheet.classList.contains('hidden');
+
+export function openMusic(r) {
+  r.music.sheet.classList.remove('hidden');
+  r.music.touched = Date.now();
+  r.music.msg.textContent = '';
+}
+
+export function closeMusic(r) { r.music.sheet.classList.add('hidden'); }
+
+/** A line in the pop-up: what went wrong, or what's happening. */
+export function musicSay(r, text, bad = false) {
+  r.music.msg.textContent = text || '';
+  r.music.msg.classList.toggle('bad', !!bad);
+}
+
+const safeImg = (url) => (/^https:\/\/[\w.-]+\.(scdn\.co|spotifycdn\.com)\//.test(url || '') ? url : '');
+const mmss = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+/** How far into the track we are now, moving on from the last reading while it plays. */
+export function musicPosition(m, now = Date.now()) {
+  if (!m) return 0;
+  const p = m.playing ? m.progress + (now - m.at) : m.progress;
+  return m.duration ? Math.min(m.duration, Math.max(0, p)) : Math.max(0, p);
+}
+
+/**
+ * The music button (what's playing) and the pop-up. `m` is the player state (null = nothing
+ * loaded); `ready` = Spotify is chosen and connected.
+ */
+export function renderMusic(r, m, st, { ready, label = 'Spotify' } = {}) {
+  const btn = r.dockBtn.music;
+  const np = !!(ready && m?.title);
+  btn.classList.toggle('np', np);
+  btn.classList.toggle('playing', np && m.playing);
+  btn.querySelector('.d-label').textContent = np ? m.title : label;
+  btn.querySelector('.d-sub').textContent = np ? m.artist : '';
+  const art = safeImg(np ? m.art : '');
+  const img = btn.querySelector('.np-art');
+  if (img.getAttribute('src') !== art) { if (art) img.setAttribute('src', art); else img.removeAttribute('src'); }
+  btn.classList.toggle('has-art', !!art);
+  if (!ready) return;
+
+  const M = r.music;
+  M.sheet.classList.toggle('idle', !m);
+  M.title.textContent = m?.title || 'Nothing playing';
+  M.artist.textContent = m?.artist || (m ? '' : 'Choose where to play below, or open Spotify');
+  M.device.replaceChildren(...(m?.device ? [icon('speaker'), h('span', {}, `${m.playing ? 'Playing on' : 'On'} ${m.device.name}`)] : []));
+  const big = safeImg(m?.art);
+  if (M.img.getAttribute('src') !== big) { if (big) M.img.setAttribute('src', big); else M.img.removeAttribute('src'); }
+  M.art.classList.toggle('has-art', !!big);
+  M.play.replaceChildren(icon(m?.playing ? 'pause' : 'play'));
+  M.play.setAttribute('aria-label', m?.playing ? 'Pause' : 'Play');
+  const vol = m?.device?.supportsVolume && !m.device.restricted;
+  M.volRow.classList.toggle('hidden', !vol);
+  // Don't move the slider under a finger that's using it.
+  if (vol && document.activeElement !== M.vol && Date.now() - (M.touched || 0) > 1500) M.vol.value = String(m.device.volume ?? 50);
+  for (const b of [M.play, M.prev, M.next]) b.disabled = !!m?.device?.restricted;
+  if (st?.error && !M.msg.textContent) musicSay(r, st.error, true);
+  renderMusicProgress(r, m);
+}
+
+export function renderMusicProgress(r, m, now = Date.now()) {
+  const M = r.music;
+  const pos = musicPosition(m, now);
+  M.pos.textContent = m?.duration ? mmss(pos) : '';
+  M.dur.textContent = m?.duration ? mmss(m.duration) : '';
+  M.bar.style.width = m?.duration ? `${(pos / m.duration) * 100}%` : '0%';
+}
+
+/** Where Spotify can play: the speakers, phones and apps it can see right now. */
+export function renderMusicDevices(r, devices, activeId) {
+  const M = r.music;
+  M.devices.replaceChildren(...devices.map((d) => {
+    const b = h('button', { class: `ms-dev${d.id === activeId || d.active ? ' on' : ''}`, 'data-id': d.id, disabled: d.restricted }, icon('speaker'), h('span', {}, d.name));
+    return b;
+  }), devices.length ? '' : h('div', { class: 'ms-none' }, 'No speakers or apps are showing. Open Spotify on the tablet (or cast from a phone) and they\'ll appear here.'));
 }
 
 let toastTimer = null;

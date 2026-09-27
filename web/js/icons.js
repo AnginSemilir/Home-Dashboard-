@@ -24,6 +24,11 @@ export const WEATHER = {
 export const UI = {
   camera: S('<path d="M3 7.5h3l1.8-2.5h8.4L18 7.5h3v11H3z"/><circle cx="12" cy="13" r="3.6"/>'),
   play: S('<path d="M8 5.5v13l11-6.5z" fill="currentColor"/>'),
+  pause: S('<path d="M8 5.5v13M16 5.5v13" stroke-width="3.2"/>'),
+  prev: S('<path d="M18 6v12l-9-6zM6 6v12" fill="currentColor" stroke-width="2"/>'),
+  next: S('<path d="M6 6v12l9-6zM18 6v12" fill="currentColor" stroke-width="2"/>'),
+  speaker: S('<rect x="6" y="3" width="12" height="18" rx="2.5"/><circle cx="12" cy="14.5" r="3"/><circle cx="12" cy="7.5" r=".8" fill="currentColor"/>'),
+  volume: S('<path d="M4 9.5v5h3.5L12 19V5L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>'),
   close: S('<path d="M6 6l12 12M18 6L6 18"/>'),
   bolt: S('<path d="M13 2.5L4.5 13.5H11l-1 8 8.5-11H12z" fill="currentColor"/>'),
   pound: S('<path d="M16.5 6.5A4 4 0 0 0 9 8.5v9.5M6 12.5h7M6 18.5h12"/>'),

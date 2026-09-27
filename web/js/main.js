@@ -4,12 +4,13 @@ import { loadSettings, saveSettings, loadCache, saveCache } from './config.js';
 import { backoffMs, describeError, HttpError } from './util.js';
 import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort } from './time.js';
 import { Octopus, costToday } from './octopus.js';
-import { Google } from './google.js';
+import { Google, redirectUri } from './google.js';
+import { Spotify } from './spotify.js';
 import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
 import { fetchEvents } from './calendar.js';
 import { fetchWeather } from './weather.js';
 import { fetchKia } from './kia.js';
-import { actionFor, detectEnv, perform, musicApp, assistantApp } from './launcher.js';
+import { actionFor, detectEnv, perform, musicApp, assistantApp, MUSIC_APPS } from './launcher.js';
 import * as ui from './ui.js';
 import { sunToday, themeFor, locate } from './sun.js';
 import { fetchItems, setDone, addItem } from './tasks.js';
@@ -34,6 +35,7 @@ export const state = {
   kia: cache.kia || null,
   shopping: cache.shopping || null,
   status: {},
+  music: null, // what Spotify is playing (not kept: it's out of date within seconds)
   place: cache.place || null, // { lat, lon, at }: where the tablet is, for sunrise and sunset
 };
 
@@ -44,6 +46,7 @@ const persist = () => saveCache({
 });
 
 const google = new Google(settings, save);
+const spotify = new Spotify(settings);
 const octopus = new Octopus(settings);
 const nest = new Nest(google, settings);
 let refs;
@@ -60,6 +63,7 @@ function renderAll() {
   ui.renderTiles(refs, state, settings, now, tz);
   ui.renderCamera(refs, settings, state, live);
   ui.renderDock(refs, settings);
+  renderMusic();
   ui.renderShopping(refs, state.shopping, state.status.shopping, shoppingInfo());
 }
 
@@ -280,8 +284,84 @@ async function closeCamera() {
 function launch(button, hold) {
   const name = button === 'music' ? musicApp(settings) : button === 'ai' ? assistantApp(settings) : button;
   const env = settings.panel.launcher === 'auto' ? detectEnv() : settings.panel.launcher;
+  // With Spotify connected, a tap on the music button opens the controls (hold opens the app).
+  if (button === 'music' && !hold && spotifyReady()) { openMusic(); return; }
   const pkg = name === 'car' ? settings.panel.carApp : undefined;
   perform(actionFor(name, env, { hold, pkg }), window, (t) => ui.toast(refs, t));
+}
+
+// ---------- Spotify controls ----------
+const spotifyReady = () => musicApp(settings) === 'spotify' && spotify.connected;
+const renderMusic = () => ui.renderMusic(refs, state.music, state.status.spotify, { ready: spotifyReady(), label: MUSIC_APPS[musicApp(settings)] });
+
+async function refreshMusic() {
+  state.music = await spotify.player();
+}
+
+/**
+ * How often to ask Spotify what's playing: often while the controls are open, at the end of each
+ * track while something plays, rarely otherwise (Spotify limits how many calls an app makes).
+ */
+function musicInterval() {
+  if (document.visibilityState !== 'visible' || (nightNow() && Date.now() - lastTouch > 90e3)) return 5 * 60e3;
+  if (ui.musicIsOpen(refs)) return 4e3;
+  const m = state.music;
+  if (m?.playing) {
+    const left = m.duration ? m.duration - ui.musicPosition(m) : Infinity;
+    return Math.max(3e3, Math.min(20e3, left + 1500));
+  }
+  return 60e3;
+}
+
+async function loadMusicDevices() {
+  try {
+    ui.renderMusicDevices(refs, await spotify.devices(), state.music?.device?.id);
+  } catch (e) {
+    ui.musicSay(refs, describeError(e), true);
+  }
+}
+
+function openMusic() {
+  ui.openMusic(refs);
+  renderMusic();
+  sources.spotify?.run();
+  loadMusicDevices();
+}
+
+function closeMusic() { ui.closeMusic(refs); }
+
+/** A button in the controls. The panel shows the change straight away, then checks with Spotify. */
+async function musicCmd(cmd, arg) {
+  if (cmd === 'app') { closeMusic(); launch('music', true); return; }
+  const m = state.music;
+  const now = Date.now();
+  try {
+    ui.musicSay(refs, '');
+    if (cmd === 'toggle') {
+      if (m?.playing) {
+        await spotify.pause();
+        Object.assign(m, { playing: false, progress: ui.musicPosition(m, now), at: now });
+      } else {
+        await spotify.play();
+        if (m) Object.assign(m, { playing: true, progress: ui.musicPosition(m, now), at: now });
+      }
+    } else if (cmd === 'next') await spotify.next();
+    else if (cmd === 'previous') await spotify.previous();
+    else if (cmd === 'volume') {
+      await spotify.volume(arg);
+      if (m?.device) m.device.volume = arg;
+    } else if (cmd === 'device') {
+      ui.musicSay(refs, 'Moving the music…');
+      await spotify.transfer(arg, true);
+      ui.musicSay(refs, '');
+    }
+  } catch (e) {
+    ui.musicSay(refs, describeError(e), true);
+    if (e?.reason === 'NO_ACTIVE_DEVICE') loadMusicDevices();
+  }
+  renderMusic();
+  // Spotify applies commands in its own time: look again shortly.
+  setTimeout(() => { sources.spotify?.run(); if (cmd === 'device') loadMusicDevices(); }, 800);
 }
 
 /** Tapping a card with a red or amber dot says why. */
@@ -325,10 +405,14 @@ function applyStyle() {
   });
 }
 
-// Sunrise and sunset where the tablet is (its own location), else at the weather location.
-const sun = (now = Date.now()) => (state.place
-  ? sunToday(now, { lat: state.place.lat, lon: state.place.lon, tz })
-  : sunToday(now, { weather: state.weather, lat: settings.weather.lat, lon: settings.weather.lon, tz }));
+// Sunrise and sunset where the tablet is (its own location, if known in the last 30 days),
+// else at the weather location.
+const PLACE_KEEP = 30 * 864e5;
+const placeNow = (now = Date.now()) => (state.place && now - state.place.at < PLACE_KEEP ? state.place : null);
+const sun = (now = Date.now()) => {
+  const p = placeNow(now);
+  return p ? sunToday(now, { lat: p.lat, lon: p.lon, tz }) : sunToday(now, { weather: state.weather, lat: settings.weather.lat, lon: settings.weather.lon, tz });
+};
 
 // ?theme=light|dark|auto overrides the setting for this page, for screenshots and tests.
 const THEME_PIN = (() => {
@@ -336,16 +420,40 @@ const THEME_PIN = (() => {
 })();
 
 /**
- * Where the tablet is, for sunrise and sunset. Asked at each start (the page reloads every
- * night). The browser asks permission the first time; if location is off or refused, the
- * weather location is used instead. Only a rounded position is kept, on this tablet.
+ * Where the tablet is, for the Auto theme's sunrise and sunset. Only a rounded position is kept,
+ * on this tablet. The browser may ask permission, so the panel asks with care: never during the
+ * automatic nightly reload, not again by itself after a refusal (⚙ → Theme has a button for
+ * that), and at most daily after no answer. Refused: the saved position is forgotten, and the
+ * weather location is used.
  */
-async function refreshPlace() {
-  const p = await locate();
-  if (!p) return;
-  state.place = p;
+const LOCATION = 'wallpanel.location.v1'; // { outcome, at }
+const lastLocate = () => { try { return JSON.parse(localStorage.getItem(LOCATION) || 'null'); } catch { return null; } };
+function usePlace(place) {
+  state.place = place;
   persist();
   applyTheme();
+}
+async function refreshPlace({ asked = false } = {}) {
+  let perm = null;
+  try { perm = (await navigator.permissions?.query({ name: 'geolocation' }))?.state || null; } catch { /* not supported */ }
+  const last = lastLocate();
+  const record = (outcome) => { try { localStorage.setItem(LOCATION, JSON.stringify({ outcome, at: Date.now() })); } catch { /* storage full */ } };
+  if (perm === 'denied') {
+    if (state.place) { state.place = null; persist(); applyTheme(); }
+    record('denied');
+    return 'denied';
+  }
+  if (!asked && perm !== 'granted') {
+    // Asking might put a prompt on screen: not while nobody's there, and not to nag.
+    if (autoReloaded) return null;
+    if (last?.outcome === 'denied') return 'denied';
+    if (last && last.outcome !== 'ok' && Date.now() - last.at < 864e5) return last.outcome;
+  }
+  const r = await locate(undefined, { onLate: (p) => { usePlace(p); record('ok'); } });
+  if (r.place) { usePlace(r.place); record('ok'); return 'ok'; }
+  if (r.error === 'denied' && state.place) { state.place = null; persist(); applyTheme(); }
+  record(r.error);
+  return r.error;
 }
 
 /** Light between sunrise and sunset (or always light/dark, as set). Returns true if it changed. */
@@ -363,7 +471,8 @@ function applyTheme(now = Date.now()) {
 // An automatic nightly reload isn't a touch, so it shouldn't wake the screen.
 const AUTO_RELOAD = 'wallpanel.autoreload';
 let lastTouch = Date.now();
-try { if (sessionStorage.getItem(AUTO_RELOAD)) { lastTouch = 0; sessionStorage.removeItem(AUTO_RELOAD); } } catch { /* storage blocked */ }
+let autoReloaded = false; // this start is the automatic nightly reload
+try { if (sessionStorage.getItem(AUTO_RELOAD)) { lastTouch = 0; autoReloaded = true; sessionStorage.removeItem(AUTO_RELOAD); } } catch { /* storage blocked */ }
 let nightSnoozeUntil = 0;
 function updateNight() {
   const show = nightNow() && Date.now() > nightSnoozeUntil && Date.now() - lastTouch > 90e3 && !live;
@@ -399,7 +508,7 @@ async function boot() {
     camera: openCamera,
     cameraClose: closeCamera,
     launch,
-    settings: () => openSettings(document.body, { settings, save, state, google, sun }),
+    settings: () => openSettings(document.body, { settings, save, state, google, sun, spotify, place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
@@ -408,14 +517,19 @@ async function boot() {
     },
     status: (key) => explain(state.status[key]),
     chartTap: (hit) => ui.showChartTip(refs, hit, priceOpts(), tz),
+    musicCmd,
+    musicClose: closeMusic,
     shopTick: tickShopping,
     shopAdd: addShopping,
     nightTap: () => { nightSnoozeUntil = Date.now() + 5 * 60e3; updateNight(); },
   });
   document.addEventListener('pointerdown', () => { lastTouch = Date.now(); }, true);
 
+  // Spotify's sign-in comes back to the same address as Google's; each checks its own state.
+  const spotifyResult = await spotify.handleRedirect(location, sessionStorage, history, redirectUri(location));
   const result = await google.handleRedirect();
   renderAll();
+  if (spotifyResult) ui.toast(refs, spotifyResult === 'connected' ? 'Spotify connected. Tap the music button for the controls.' : `Spotify: ${spotifyResult.slice(7)}`, 7000);
   if (result === 'signed-in') {
     // Google lets people untick parts of the sign-in; say which parts won't work.
     const missing = google.missingScopes();
@@ -427,7 +541,7 @@ async function boot() {
   }
 
   const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
-  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun });
+  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun, spotify, place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
@@ -450,11 +564,21 @@ async function boot() {
   source('shopping', refreshShopping, minutes(2), {
     staleAfter: 30 * 60e3, enabled: () => !!(google.hasTasks && settings.google.shoppingList?.id), clear: () => { state.shopping = null; },
   })();
+  source('spotify', refreshMusic, musicInterval, { enabled: spotifyReady, clear: () => { state.music = null; }, render: renderMusic })();
   source('kia', refreshKia, minutes(15), { staleAfter: 6 * 3600e3, enabled: () => !!(settings.kia.url && settings.kia.key), clear: () => { state.kia = null; } })();
   refreshPlace();
 
   // Every second: clock + camera countdown. Every 30 s: price/chart (slot changes), staleness, night.
-  setInterval(() => { const now = Date.now(); ui.renderClock(refs, now, tz); ui.renderCamTimer(refs, live, now); }, 1000);
+  setInterval(() => {
+    const now = Date.now();
+    ui.renderClock(refs, now, tz);
+    ui.renderCamTimer(refs, live, now);
+    if (ui.musicIsOpen(refs)) {
+      ui.renderMusicProgress(refs, state.music, now);
+      // Left open with nobody using it: close after 2 minutes.
+      if (now - (refs.music.touched || 0) > 120e3) closeMusic();
+    }
+  }, 1000);
   setInterval(() => { for (const s of Object.values(sources)) s.staleCheck(); applyTheme(); renderAll(); updateNight(); }, 30e3);
   let lastW = innerWidth, lastH = innerHeight;
   addEventListener('resize', () => { if (innerWidth !== lastW || innerHeight !== lastH) { lastW = innerWidth; lastH = innerHeight; renderAll(); } });

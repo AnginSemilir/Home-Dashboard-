@@ -27,6 +27,7 @@ export const DEFAULTS = Object.freeze({
   },
   weather: { lat: null, lon: null, place: '' },
   kia: { url: '', key: '' },
+  spotify: { clientId: '' }, // Spotify controls (optional; needs Premium). The sign-in itself is kept apart: see spotify.js
   panel: {
     cameraName: 'Front door',
     cameraBattery: true,   // battery cams: tap-for-live, Google stops the stream after 5 minutes

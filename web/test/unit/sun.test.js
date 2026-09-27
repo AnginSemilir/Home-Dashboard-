@@ -43,15 +43,22 @@ test('themeFor: auto follows the sun; fixed modes ignore it', () => {
   assert.equal(themeFor('dark', iso('2026-09-25T12:00:00+01:00'), sun), 'dark');
 });
 
-test('locate: the tablet\'s position, rounded to about 1 km; null when location is off, refused or silent', async () => {
+test('locate: the tablet\'s position, rounded to about 1 km; says why when there isn\'t one', async () => {
   const geo = (fn) => ({ getCurrentPosition: fn });
   let asked;
   const ok = await locate(geo((yes, _no, opts) => { asked = opts; yes({ coords: { latitude: 51.501364, longitude: -0.141890, accuracy: 30 } }); }), { now: () => 42 });
-  assert.deepEqual(ok, { lat: 51.5, lon: -0.14, at: 42 });
+  assert.deepEqual(ok, { place: { lat: 51.5, lon: -0.14, at: 42 } });
   assert.equal(asked.enableHighAccuracy, false, 'Wi-Fi location is plenty; no GPS warm-up');
-  assert.equal(await locate(geo((_yes, no) => no({ code: 1, message: 'User denied Geolocation' }))), null);
-  assert.equal(await locate(undefined), null);
-  assert.equal(await locate(geo(() => { throw new Error('blocked'); })), null);
-  assert.equal(await locate(geo((yes) => yes({ coords: { latitude: NaN, longitude: 2 } }))), null);
-  assert.equal(await locate(geo(() => {}), { timeout: 5 }), null, 'a WebView that never answers');
+  assert.deepEqual(await locate(geo((_yes, no) => no({ code: 1, message: 'User denied Geolocation' }))), { error: 'denied' });
+  assert.deepEqual(await locate(geo((_yes, no) => no({ code: 2 }))), { error: 'unavailable' });
+  assert.deepEqual(await locate(geo((_yes, no) => no({ code: 3 }))), { error: 'timeout' });
+  assert.deepEqual(await locate(undefined), { error: 'unsupported' });
+  assert.deepEqual(await locate(geo(() => { throw new Error('blocked'); })), { error: 'unavailable' });
+  assert.deepEqual(await locate(geo((yes) => yes({ coords: { latitude: NaN, longitude: 2 } }))), { error: 'unavailable' });
+  // Nothing back in time (a prompt left on screen): 'noanswer', but a late Allow still counts.
+  let late = null, answer;
+  const r = await locate(geo((yes) => { answer = yes; }), { wait: 5, onLate: (p) => { late = p; }, now: () => 7 });
+  assert.deepEqual(r, { error: 'noanswer' });
+  answer({ coords: { latitude: 53.8, longitude: -1.55 } });
+  assert.deepEqual(late, { lat: 53.8, lon: -1.55, at: 7 });
 });
