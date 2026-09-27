@@ -29,8 +29,10 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Unit tests
         run: npm test
-      - name: Browser tests (every outside service is faked)
-        run: npm run test:e2e
+      - name: Browser tests, Bold style (every outside service is faked)
+        run: PANEL_STYLE=bold npm run test:e2e
+      - name: Browser tests, Ambient style
+        run: PANEL_STYLE=ambient npm run test:e2e
       - name: Keep screenshots
         if: always()
         uses: actions/upload-artifact@v4
