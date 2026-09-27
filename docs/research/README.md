@@ -27,6 +27,7 @@ Everything researched while building the panel, saved here so it outlives the cl
 | [Can one web page do it all? (Octopus, Google, Kia from the browser)](2026-09-25-web-only-feasibility.md) | Current: the research behind the switch to the GitHub Pages web app |
 | [Could Android widgets alone do it?](2026-09-25-widgets-only.md) | Research for the earlier Home Assistant plan (superseded by the web app on 25 Sep 2026) |
 | [Opening "the default assistant" from a link (answer: Android has no such link)](2026-09-27-default-assistant.md) | Current (web app) |
+| [Doorbell: full-screen live view and chime (Nest events via Pub/Sub), plus the Google Home app route](2026-09-27-doorbell.md) | Current (web app) |
 | [Opening Gemini straight into Live voice (answer: no known way)](2026-09-27-gemini-live.md) | Current (web app) |
 | [Google API 403 errors: formats, causes, what to tell the owner](2026-09-27-google-403-errors.md) | Current (web app) |
 | [Music controls: Spotify, Amazon Music and tablet media keys](2026-09-27-music-controls.md) | Current (web app) |
