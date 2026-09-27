@@ -30,7 +30,11 @@ const DOCK = [
   { id: 'home', label: 'Home', icon: 'home' },
 ];
 
-/** Tap vs press-and-hold (550 ms) on an element. */
+/**
+ * Tap vs press-and-hold (550 ms) on an element. The tap acts on the click, after the finger has
+ * lifted: acting on pointerup would let the same touch's click land on whatever the tap opened
+ * (a pop-up's backdrop would close it again at once).
+ */
 function pressable(el, onTap, onHold) {
   let timer = null, held = false;
   el.addEventListener('pointerdown', () => {
@@ -40,7 +44,8 @@ function pressable(el, onTap, onHold) {
   const cancel = () => clearTimeout(timer);
   el.addEventListener('pointerleave', cancel);
   el.addEventListener('pointercancel', cancel);
-  el.addEventListener('pointerup', () => { cancel(); if (!held) onTap?.(); });
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('click', () => { if (!held) onTap?.(); held = false; });
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
@@ -214,8 +219,10 @@ function buildMusic(on) {
     h('div', { class: 'ms-devices-head' }, h('span', {}, 'Play on'), app),
     m.devices);
   m.sheet = h('div', { class: 'music-sheet hidden', id: 'music', role: 'dialog', 'aria-label': 'Spotify' }, m.card);
-  // A tap outside the card closes it.
-  m.sheet.addEventListener('click', (e) => { if (e.target === m.sheet) on.musicClose?.(); });
+  // A tap outside the card closes it: only a tap that started there (not the end of the tap
+  // that opened it).
+  m.sheet.addEventListener('pointerdown', (e) => { m.downOutside = e.target === m.sheet; });
+  m.sheet.addEventListener('click', (e) => { if (e.target === m.sheet && m.downOutside) on.musicClose?.(); m.downOutside = false; });
   m.card.addEventListener('pointerdown', () => { m.touched = Date.now(); });
   return m;
 }

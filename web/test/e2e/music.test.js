@@ -99,6 +99,22 @@ test('the controls: pause, next, volume, move to another speaker; hold opens the
   await ctx.close();
 });
 
+test('on a touchscreen, a tap opens the controls and they stay open', async () => {
+  const { ctx, page } = await openPanel(env, { spotify: true, touch: true });
+  const btn = page.locator('.dock [data-app="music"]');
+  await btn.locator('.d-label', { hasText: 'Here Comes the Sun' }).waitFor();
+  await btn.tap();
+  await page.waitForTimeout(600);
+  assert.equal(await page.locator('#music').isVisible(), true, 'still open after the tap');
+  // A tap on the dark area outside the card closes it; a tap on the card doesn't.
+  await page.locator('#music .ms-title').tap();
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('#music').isVisible(), true);
+  await page.touchscreen.tap(5, 5);
+  await page.locator('#music').waitFor({ state: 'hidden' });
+  await ctx.close();
+});
+
 test('nothing playing anywhere: the pop-up says so and offers the speakers', async () => {
   const { ctx, page, calls } = await openPanel(env, { spotify: true, fail: new Set(['spotify-idle']) });
   await waitFor(() => spCalls(calls, 'GET', '/me/player').length, 'a player check');

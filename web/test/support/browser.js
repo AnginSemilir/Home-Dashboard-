@@ -24,11 +24,11 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
-  style, theme, geolocation, spotify,
+  style, theme, geolocation, spotify, touch,
 } = {}) {
   // `geolocation`: { latitude, longitude } the tablet reports (location allowed); by default it's refused.
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block',
-    ...(geolocation ? { geolocation, permissions: ['geolocation'] } : {}) });
+    ...(geolocation ? { geolocation, permissions: ['geolocation'] } : {}), ...(touch ? { hasTouch: true } : {}) });
   const page = await ctx.newPage();
   const problems = [];
   page.on('console', (m) => { if (m.type() === 'error') problems.push(m.text()); });
