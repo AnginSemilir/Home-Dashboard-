@@ -11,7 +11,7 @@ import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
 import { detectEnv, MUSIC_APPS, ASSISTANTS } from './launcher.js';
 import { hhmm } from './time.js';
-import { exportSpotify, importSpotify } from './spotify.js';
+import { exportSpotify, importSpotify, spotifyEnded } from './spotify.js';
 import { LOCATION_WHY } from './sun.js';
 import { checkSubName } from './doorbell.js';
 import { Chime } from './chime.js';
@@ -48,8 +48,9 @@ export function checklist(s, st) {
       !s.google.doorbellSub ? 'optional: docs/doorbell.md'
         : checkSubName(s.google.doorbellSub, s.google.projectId) || (!s.google.projectId ? 'needs the Nest (Device Access) project ID'
           : !signed || !s.google.scopes.includes('/auth/pubsub') ? 'sign in to Google again to allow it' : ''), 'doorbell'),
-    item(exportSpotify() && s.spotify.clientId ? (s.panel.music === 'amazonmusic' ? 'off' : res('spotify')) : s.spotify.clientId ? 'todo' : 'off',
-      'Spotify controls (optional, needs Premium)', s.panel.music === 'amazonmusic' ? 'the music button is set to Amazon Music' : s.spotify.clientId && !exportSpotify() ? 'tap Connect Spotify' : '', 'spotify'),
+    item(exportSpotify() && s.spotify.clientId ? (s.panel.music === 'amazonmusic' ? 'off' : res('spotify')) : s.spotify.clientId ? (spotifyEnded() ? 'bad' : 'todo') : 'off',
+      'Spotify controls (optional, needs Premium)', s.panel.music === 'amazonmusic' ? 'the music button is set to Amazon Music'
+        : s.spotify.clientId && !exportSpotify() ? (spotifyEnded() ? `the sign-in ended on ${new Date(spotifyEnded()).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })} (Spotify ends them after 6 months): tap Connect Spotify` : 'tap Connect Spotify') : '', 'spotify'),
     item(s.kia.url ? res('kia') : 'off', 'Kia battery (optional)', '', 'kia'),
   ];
 }
@@ -268,7 +269,7 @@ export function openSettings(root, ctx) {
   const keyOut = h('div', { class: 'help' });
   // Spotify
   const spState = h('div', { class: 'help' });
-  const showSpotify = () => { spState.textContent = exportSpotify() ? 'Connected.' : 'Not connected.'; };
+  const showSpotify = () => { spState.textContent = exportSpotify() ? 'Connected.' : spotifyEnded() ? 'Not connected: the sign-in ended (Spotify ends them after 6 months). Connect again.' : 'Not connected.'; };
   showSpotify();
   const spotify_ = h('section', {}, h('h2', {}, 'Spotify (music controls, optional)'),
     h('div', { class: 'help' }, "With Spotify Premium, the music button shows what's playing, and a tap opens controls: play/pause, skip, volume and which speaker. One-off setup in docs/spotify.md. Redirect URI for your Spotify app: ", h('span', { class: 'mono' }, redirect)),
@@ -344,12 +345,15 @@ export function openSettings(root, ctx) {
 
   // Move settings
   const box = h('textarea', { placeholder: 'Paste settings here' });
+  let movedSpotify = null;
   const move = h('section', {}, h('h2', {}, 'Copy settings to another browser'),
     h('div', { class: 'help' }, 'Use this to sign in to Google in Chrome, then move everything into the kiosk app. The text contains your keys, so paste it straight into the other app and nowhere else.'),
     btn('Copy settings', async () => {
-      // Spotify's sign-in changes each time it's used, so only one browser can keep it: it
-      // moves with the copy, and this browser lets go of it.
-      const sp = exportSpotify();
+      // Spotify's sign-in can change each time it's used, so only one browser can keep it: it
+      // moves with the copy, and this browser lets go of it. Copying again (say the clipboard
+      // didn't carry over) still includes it.
+      const sp = exportSpotify() || movedSpotify;
+      movedSpotify = sp;
       const text = sp ? JSON.stringify({ ...JSON.parse(exportSettings(draft)), spotifyToken: sp }) : exportSettings(draft);
       const moved = sp ? ' Spotify moves with the settings, so this browser is now disconnected from it (Connect Spotify again here if you only wanted a copy).' : '';
       try { await navigator.clipboard.writeText(text); say(`Copied. Now open the panel in the other app → Settings → Paste.${moved}`); } catch { box.value = text; say(`Copy the text in the box below.${moved}`); }
@@ -358,9 +362,10 @@ export function openSettings(root, ctx) {
     btn('Paste settings', async () => {
       const text = box.value.trim() || (await navigator.clipboard.readText());
       const imported = importSettings(text);
-      try { importSpotify(JSON.parse(text).spotifyToken); } catch { /* no Spotify sign-in in it */ }
+      let movedIn = false;
+      try { const t = JSON.parse(text).spotifyToken; if (t && t !== exportSpotify()) { importSpotify(t); movedIn = true; } } catch { /* no Spotify sign-in in it */ }
       Object.assign(s, imported); save();
-      say('Imported. Reloading…');
+      say(movedIn ? 'Imported, including the Spotify sign-in. Reloading…' : 'Imported. Reloading…');
       setTimeout(() => location.reload(), 600);
     }, true), box);
 

@@ -240,10 +240,11 @@ export function openMusic(r) {
 
 export function closeMusic(r) { r.music.sheet.classList.add('hidden'); }
 
-/** A line in the pop-up: what went wrong, or what's happening. */
-export function musicSay(r, text, bad = false) {
+/** A line in the pop-up: what went wrong, or what's happening. `fromStatus`: it came from a poll. */
+export function musicSay(r, text, bad = false, fromStatus = false) {
   r.music.msg.textContent = text || '';
   r.music.msg.classList.toggle('bad', !!bad);
+  r.music.msg.dataset.src = fromStatus ? 'status' : '';
 }
 
 const safeImg = (url) => (/^https:\/\/[\w.-]+\.(scdn\.co|spotifycdn\.com)\//.test(url || '') ? url : '');
@@ -274,7 +275,9 @@ export function renderMusic(r, m, st, { ready, label = 'Spotify' } = {}) {
   if (!ready) return;
 
   const M = r.music;
+  // Nothing playing anywhere: Play/Next would only fail, so the speakers are the thing to tap.
   M.sheet.classList.toggle('idle', !m);
+  for (const el of [M.play.parentElement, M.pos.parentElement]) el.classList.toggle('hidden', !m);
   M.title.textContent = m?.title || 'Nothing playing';
   M.artist.textContent = m?.artist || (m ? '' : 'Choose where to play below, or open Spotify');
   M.device.replaceChildren(...(m?.device ? [icon('speaker'), h('span', {}, `${m.playing ? 'Playing on' : 'On'} ${m.device.name}`)] : []));
@@ -288,7 +291,8 @@ export function renderMusic(r, m, st, { ready, label = 'Spotify' } = {}) {
   // Don't move the slider under a finger that's using it.
   if (vol && document.activeElement !== M.vol && Date.now() - (M.touched || 0) > 1500) M.vol.value = String(m.device.volume ?? 50);
   for (const b of [M.play, M.prev, M.next]) b.disabled = !!m?.device?.restricted;
-  if (st?.error && !M.msg.textContent) musicSay(r, st.error, true);
+  if (st?.error && !M.msg.textContent) musicSay(r, st.error, true, true);
+  else if (st?.ok && M.msg.dataset.src === 'status') musicSay(r, ''); // it recovered
   renderMusicProgress(r, m);
 }
 

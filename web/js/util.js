@@ -24,7 +24,10 @@ export async function fetchJSON(url, opts = {}, timeoutMs = 20000) {
     try { body = text ? JSON.parse(text) : null; } catch { body = text; }
     if (!res.ok) {
       const msg = (body && (body.error_description || body.error?.message || body.detail || body.error)) || res.statusText;
-      throw new HttpError(res.status, `${res.status} ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`, body);
+      const err = new HttpError(res.status, `${res.status} ${typeof msg === 'string' ? msg : JSON.stringify(msg)}`, body);
+      const wait = Number(res.headers?.get?.('retry-after')); // seconds, when the service says (and lets us read it)
+      if (Number.isFinite(wait) && wait > 0) err.retryAfter = wait;
+      throw err;
     }
     return body;
   } finally {

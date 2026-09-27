@@ -35,15 +35,15 @@ The research behind this is in [research/2026-09-27-music-controls.md](research/
    3. Log in to Spotify and tap **Agree**.
    4. You're sent back to the panel, and it says "Spotify connected".
 
-**In WebView Kiosk:** if you log in to Spotify with **Continue with Google / Facebook / Apple**, those buttons don't work inside kiosk apps. Instead:
+**In WebView Kiosk:** if you log in to Spotify with **Continue with Google** or **Facebook** (and possibly Apple), those buttons don't work inside kiosk apps. Instead:
 1. Connect in **Chrome** on the tablet.
 2. Use ⚙ → **Copy settings** there, then **Paste settings** in WebView Kiosk.
 
-The Spotify sign-in *moves* with the copy. Spotify changes it every time it's used, so only one browser can keep it, and Chrome lets go of it.
+The Spotify sign-in *moves* with the copy. Spotify can replace it each time it's used, so only one browser can keep it, and Chrome lets go of it. Pressing **Copy settings** again still includes it.
 
 ## Using it
 
-- **Nothing playing:** the button just says *Spotify*. Tap it and choose where to play under **Play on**, or tap **Open Spotify**.
+- **Nothing playing:** the button just says *Spotify*. Tap it and choose where to play under **Play on** (the play buttons appear once something is playing), or tap **Open Spotify**.
 - **Speakers:** a speaker only shows under **Play on** while Spotify can see it.
   - Speakers with Spotify built in (Spotify Connect) are the most dependable.
   - Google Nest and Chromecast speakers usually only appear after someone has cast to them from a phone.
@@ -57,10 +57,11 @@ The Spotify sign-in *moves* with the copy. Spotify changes it every time it's us
 |---|---|---|
 | "Spotify only lets Premium accounts use the controls" | The connected account isn't Premium | Connect a Premium account |
 | "This Spotify account isn't allowed to use your Spotify app yet" | It isn't under User Management | Step 4 above |
-| "The Spotify sign-in has ended…" (and ⚙ says *Not connected*) | Spotify ends sign-ins after 6 months, or access was removed | ⚙ → Spotify → **Connect Spotify** again |
+| A tap on the music button says "Spotify's sign-in has ended…" (and ⚙ says so too) | Spotify ends sign-ins after 6 months, or access was removed | ⚙ → Spotify → **Connect Spotify** again |
+| "Spotify didn't allow that just now" | Spotify refused that command (already paused, or an advert can't be skipped) | Try again in a moment |
 | "Nothing is ready to play" | No speaker or app is active on your account | Pick one under **Play on**, or open Spotify on the tablet |
-| "Spotify has paused the panel's access for a while" | Too many requests in a day | It tries again later by itself |
+| "Spotify has paused the panel's access for a while" | Too many requests | The panel sends nothing to Spotify until Spotify's wait is over (up to a few hours), then carries on |
 | `INVALID_CLIENT: Invalid redirect URI` on Spotify's page | The redirect URI in step 2 doesn't match | Copy it exactly from the panel's Settings |
 | Spotify's login page is blank or its Google button does nothing, in the kiosk app | Kiosk apps can't do Google/Facebook/Apple logins | Connect in Chrome and copy the settings across (above) |
 
-To remove the panel's access: ⚙ → **Disconnect Spotify**. To cut it off from Spotify's side, go to spotify.com → Account → **Apps** → *Home panel* → Remove access.
+To remove the panel's access: ⚙ → **Disconnect Spotify** (this browser forgets it). To cut it off everywhere, go to <https://www.spotify.com/account/apps/> (Account → Security and privacy → Manage apps) → *Home panel* → **Remove access**.

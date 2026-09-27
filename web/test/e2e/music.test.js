@@ -123,10 +123,39 @@ test('nothing playing anywhere: the pop-up says so and offers the speakers', asy
   await btn.click();
   const sheet = page.locator('#music');
   await sheet.locator('.ms-title', { hasText: 'Nothing playing' }).waitFor();
-  await sheet.getByRole('button', { name: 'Play' }).click();
-  await sheet.locator('.ms-msg.bad', { hasText: 'Nothing is ready to play' }).waitFor();
+  // Play and Next would only fail with nothing active, so they aren't offered; the speakers are.
+  assert.equal(await sheet.getByRole('button', { name: 'Play' }).isVisible(), false);
   await sheet.locator('.ms-dev', { hasText: 'Kitchen speaker' }).click();
   await sheet.locator('.ms-title', { hasText: 'Here Comes the Sun' }).waitFor();
+  await sheet.getByRole('button', { name: 'Pause' }).waitFor();
+  await ctx.close();
+});
+
+test('rate limits: after Spotify says "too many", the panel sends nothing until its wait is over', async () => {
+  const { ctx, page, calls } = await openPanel(env, { spotify: true });
+  await page.locator('.dock [data-app="music"] .d-label', { hasText: 'Here Comes the Sun' }).waitFor();
+  // Spotify's daily quota runs out.
+  await page.route(/^https:\/\/api\.spotify\.com\/v1\/me\/player\/pause/, (route) => route.fulfill({ status: 429, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: { status: 429, message: 'API rate limit exceeded', reason: 'QUOTA_EXCEEDED' } }) }));
+  await page.locator('.dock [data-app="music"]').click();
+  await page.locator('#music').getByRole('button', { name: 'Pause' }).click();
+  await page.locator('#music .ms-msg.bad', { hasText: 'paused the panel\'s access' }).waitFor();
+  const before = spCalls(calls).length;
+  await page.locator('#music').getByRole('button', { name: 'Next' }).click();
+  await page.locator('#music').getByRole('button', { name: 'Close' }).click();
+  await page.locator('.dock [data-app="music"]').click();
+  await page.waitForTimeout(1500);
+  assert.equal(spCalls(calls).length, before, 'nothing sent while paused');
+  await page.locator('#music .ms-msg.bad', { hasText: 'paused the panel\'s access' }).waitFor();
+  await ctx.close();
+});
+
+test('an ended sign-in says so when the music button is tapped', async () => {
+  const { ctx, page } = await openPanel(env, { spotify: true, fail: new Set(['spotify-expired']) });
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('wallpanel.spotify.v1') || '{}').ended);
+  await page.locator('.dock [data-app="music"]').click();
+  await page.locator('.toast', { hasText: 'Spotify\'s sign-in has ended' }).waitFor();
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText(/Spotify controls \(optional, needs Premium\) · (the sign-in ended on|The Spotify sign-in has ended)/).waitFor();
   await ctx.close();
 });
 
@@ -140,10 +169,10 @@ test('without Premium, and after the sign-in ends: plain explanations', async ()
 
   const b = await openPanel(env, { spotify: true, fail: new Set(['spotify-expired']) });
   await waitFor(() => b.calls.some((c) => c.service === 'spotify-token'), 'a refresh');
-  await waitFor(async () => (await b.page.evaluate(() => localStorage.getItem('wallpanel.spotify.v1'))) === null, 'the ended sign-in forgotten');
+  await waitFor(async () => JSON.parse((await b.page.evaluate(() => localStorage.getItem('wallpanel.spotify.v1'))) || '{}').ended, 'the ended sign-in noted');
   assert.equal(await b.page.locator('.dock [data-app="music"]').innerText(), 'Spotify');
   await b.page.locator('#clock .gear').click();
-  await b.page.locator('#settings').getByText('Not connected.').waitFor();
+  await b.page.locator('#settings').getByText('Not connected: the sign-in ended').waitFor();
   await b.ctx.close();
 });
 
@@ -160,13 +189,15 @@ test('Amazon Music chosen: no Spotify calls, the button just opens the app', asy
 });
 
 test('Copy settings moves the Spotify sign-in to the other browser (it can only live in one)', async () => {
-  const a = await openPanel(env, { spotify: true });
+  const a = await openPanel(env, { spotify: true, initScript: () => { navigator.clipboard.writeText = () => Promise.reject(new Error('no')); } });
   await a.page.locator('.dock [data-app="music"] .d-label', { hasText: 'Here Comes the Sun' }).waitFor();
   await a.page.locator('#clock .gear').click();
   const set = a.page.locator('#settings');
   await set.getByRole('button', { name: 'Copy settings' }).click();
   await set.getByText(/Spotify moves with the settings/).waitFor();
-  const text = (await set.locator('textarea').inputValue()) || (await a.page.evaluate(() => navigator.clipboard.readText().catch(() => '')));
+  // Pressed again (say the first copy didn't carry over): still includes it.
+  await set.getByRole('button', { name: 'Copy settings' }).click();
+  const text = await set.locator('textarea').inputValue();
   assert.equal(JSON.parse(text).spotifyToken, 'sp-rt-1');
   assert.equal(await a.page.evaluate(() => localStorage.getItem('wallpanel.spotify.v1')), null, 'this browser let go of it');
   await a.ctx.close();

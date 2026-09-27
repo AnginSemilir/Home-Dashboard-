@@ -12,6 +12,8 @@ const TOKENS = 'wallpanel.spotify.v1';     // { refreshToken, access, accessExp 
                                            // settings so Save & close can never put back an old token
 const STATE = 'wallpanel.spotify.state';   // sign-in round trip (sessionStorage)
 const VERIFIER = 'wallpanel.spotify.verifier';
+const STATE_PREFIX = 'sp.';                // marks Spotify's sign-in returns (Google's share the address)
+const BLOCK = 'wallpanel.spotify.block';   // Spotify asked us to stop until this time (ms)
 
 const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -54,8 +56,15 @@ export function explainSpotifyError(e) {
   if (reason === 'NO_ACTIVE_DEVICE' || /no active device/i.test(text)) return wrap('Nothing is ready to play. Choose where to play, or open Spotify on the tablet.');
   if (/not registered|user may not be registered/i.test(text)) return wrap('This Spotify account isn\'t allowed to use your Spotify app yet: add it under User Management in the Spotify developer dashboard.');
   if (reason === 'VOLUME_CONTROL_DISALLOW') return wrap('This device doesn\'t let the panel change its volume.');
-  if (e.status === 429) return wrap(/QUOTA/i.test(reason + text) ? 'Spotify has paused the panel\'s access for a while (too many requests). It will try again later.' : 'Spotify asked the panel to slow down. It will try again shortly.');
+  if (/restriction violated/i.test(text)) return wrap('Spotify didn\'t allow that just now (it may already be paused, or this can\'t be skipped).');
+  if (e.status === 429) return Object.assign(wrap(/QUOTA/i.test(reason + text) ? 'Spotify has paused the panel\'s access for a while (too many requests). It will try again later.' : 'Spotify asked the panel to slow down. It will try again shortly.'), { retryAfter: e.retryAfter, quota: /QUOTA/i.test(reason + text) });
+  if (e.status === 403) return wrap('Spotify refused. Check the account is under User Management (docs/spotify.md, step 4) and that the app\'s owner has Premium.');
   return e;
+}
+
+/** When a sign-in ended (Spotify ends them after 6 months), or null. */
+export function spotifyEnded(storage = globalThis.localStorage) {
+  try { return JSON.parse(storage.getItem(TOKENS) || 'null')?.ended || null; } catch { return null; }
 }
 
 export class Spotify {
@@ -78,7 +87,7 @@ export class Spotify {
   /** Spotify's sign-in page for this panel (the verifier and state wait in sessionStorage). */
   async authUrl(redirect, session = globalThis.sessionStorage) {
     const verifier = newVerifier();
-    const state = b64url(crypto.getRandomValues(new Uint8Array(16)));
+    const state = STATE_PREFIX + b64url(crypto.getRandomValues(new Uint8Array(16)));
     session.setItem(VERIFIER, verifier);
     session.setItem(STATE, state);
     const q = new URLSearchParams({
@@ -100,7 +109,14 @@ export class Spotify {
   async handleRedirect(loc = globalThis.location, session = globalThis.sessionStorage, history = globalThis.history, redirect) {
     const params = new URLSearchParams(loc.search);
     const expected = session.getItem(STATE);
-    if (!expected || params.get('state') !== expected || !(params.has('code') || params.has('error'))) return null;
+    const got = params.get('state') || '';
+    if (!(params.has('code') || params.has('error')) || !got.startsWith(STATE_PREFIX)) return null; // not Spotify's
+    if (!expected || got !== expected) {
+      // Spotify's, but already used or from another tab (e.g. Back to Spotify's page): say so here,
+      // rather than let it look like a failed Google sign-in.
+      history.replaceState(null, '', redirect + loc.hash);
+      return 'error: that sign-in link had already been used. Tap Connect Spotify again';
+    }
     const verifier = session.getItem(VERIFIER);
     session.removeItem(STATE);
     session.removeItem(VERIFIER);
@@ -122,6 +138,9 @@ export class Spotify {
 
   disconnect() { this.setTokens(null); }
 
+  /** Spotify asked the panel to wait (rate limit): until when, or 0. */
+  blockedUntil() { try { return Number(this.store.getItem(BLOCK)) || 0; } catch { return 0; } }
+
   /** A current access token. Refreshes one at a time: Spotify replaces the refresh token as it goes. */
   async accessToken(force = false) {
     const t = this.tokens();
@@ -134,12 +153,16 @@ export class Spotify {
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: t.refreshToken, client_id: this.s.spotify.clientId }).toString(),
         });
-        // A new refresh token replaces the old one straight away; without one, keep the old.
-        this.setTokens({ refreshToken: tok.refresh_token || t.refreshToken, access: tok.access_token, accessExp: Date.now() + (tok.expires_in || 3600) * 1000 });
+        // A new refresh token replaces the old one straight away; without one, keep the old. Only
+        // if nothing else changed the sign-in meanwhile (Disconnect, Copy settings, a new sign-in).
+        if (this.tokens().refreshToken === t.refreshToken) {
+          this.setTokens({ refreshToken: tok.refresh_token || t.refreshToken, access: tok.access_token, accessExp: Date.now() + (tok.expires_in || 3600) * 1000 });
+        }
         return tok.access_token;
       } catch (e) {
         if (e instanceof HttpError && e.status === 400 && /invalid_grant|invalid_client/.test(JSON.stringify(e.body || ''))) {
-          this.setTokens(null);
+          // Keep a note that it ended, so the panel can say so (not just go quiet).
+          if (this.tokens().refreshToken === t.refreshToken) this.setTokens({ ended: Date.now() });
           throw new Error('The Spotify sign-in has ended (Spotify ends them after 6 months, or when access is removed): ⚙ → Spotify → Connect Spotify again');
         }
         throw e;
@@ -152,6 +175,10 @@ export class Spotify {
 
   /** An authorised Web API call. Retries once with a fresh token on 401. */
   async api(method, path, body) {
+    // While Spotify has asked us to wait, don't call it at all: each call could make it longer.
+    if (Date.now() < this.blockedUntil()) {
+      throw Object.assign(new HttpError(429, 'Spotify has paused the panel\'s access for a while (too many requests). It will try again later.', null), { blocked: true });
+    }
     const call = async (force) => fetchJSON(`${SPOTIFY_API}${path}`, {
       method,
       headers: { Authorization: `Bearer ${await this.accessToken(force)}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
@@ -165,7 +192,13 @@ export class Spotify {
         throw e;
       }
     } catch (e) {
-      throw explainSpotifyError(e);
+      const x = explainSpotifyError(e);
+      if (x instanceof HttpError && x.status === 429) {
+        // Retry-After when Spotify gives one; hours for the daily quota; else a minute.
+        const wait = x.retryAfter ? x.retryAfter * 1000 : x.quota ? 6 * 3600e3 : 60e3;
+        try { this.store.setItem(BLOCK, String(Date.now() + wait)); } catch { /* fine */ }
+      }
+      throw x;
     }
   }
 

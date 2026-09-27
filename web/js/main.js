@@ -5,7 +5,7 @@ import { backoffMs, describeError, HttpError } from './util.js';
 import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort } from './time.js';
 import { Octopus, costToday } from './octopus.js';
 import { Google, redirectUri } from './google.js';
-import { Spotify } from './spotify.js';
+import { Spotify, spotifyEnded } from './spotify.js';
 import { DoorbellListener, SUB_RE } from './doorbell.js';
 import { Chime } from './chime.js';
 import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
@@ -327,16 +327,30 @@ function launch(button, hold) {
   const env = settings.panel.launcher === 'auto' ? detectEnv() : settings.panel.launcher;
   // With Spotify connected, a tap on the music button opens the controls (hold opens the app).
   if (button === 'music' && !hold && spotifyReady()) { openMusic(); return; }
+  // Its sign-in ended (Spotify ends them after 6 months): say so, rather than quietly change.
+  if (button === 'music' && !hold && musicApp(settings) === 'spotify' && settings.spotify.clientId && spotifyEnded()) {
+    ui.toast(refs, 'Spotify\'s sign-in has ended (Spotify ends them after 6 months): ⚙ → Spotify → Connect Spotify. Hold the button to open the Spotify app.', 9000);
+    return;
+  }
   const pkg = name === 'car' ? settings.panel.carApp : undefined;
   perform(actionFor(name, env, { hold, pkg }), window, (t) => ui.toast(refs, t));
 }
 
 // ---------- Spotify controls ----------
 const spotifyReady = () => musicApp(settings) === 'spotify' && spotify.connected;
-const renderMusic = () => ui.renderMusic(refs, state.music, state.status.spotify, { ready: spotifyReady(), label: MUSIC_APPS[musicApp(settings)] });
+// While Spotify can't be reached, don't keep claiming a song is playing.
+const renderMusic = () => {
+  const m = state.music && state.status.spotify?.error && Date.now() - state.music.at > 120e3 ? { ...state.music, playing: false } : state.music;
+  ui.renderMusic(refs, m, state.status.spotify, { ready: spotifyReady(), label: MUSIC_APPS[musicApp(settings)] });
+};
 
 async function refreshMusic() {
-  state.music = await spotify.player();
+  const prev = state.music;
+  const m = await spotify.player();
+  // Still "playing" the same track but not moving on (a speaker that dropped off): don't keep
+  // polling every few seconds for a track change that isn't coming.
+  if (m && prev && m.playing && m.title === prev.title && m.progress <= prev.progress + 1000) m.stuck = true;
+  state.music = m;
 }
 
 /**
@@ -347,7 +361,7 @@ function musicInterval() {
   if (document.visibilityState !== 'visible' || (nightNow() && Date.now() - lastTouch > 90e3)) return 5 * 60e3;
   if (ui.musicIsOpen(refs)) return 4e3;
   const m = state.music;
-  if (m?.playing) {
+  if (m?.playing && !m.stuck) {
     const left = m.duration ? m.duration - ui.musicPosition(m) : Infinity;
     return Math.max(3e3, Math.min(20e3, left + 1500));
   }
@@ -365,8 +379,9 @@ async function loadMusicDevices() {
 function openMusic() {
   ui.openMusic(refs);
   renderMusic();
-  sources.spotify?.run();
-  loadMusicDevices();
+  // Not while Spotify has asked us to wait: the pop-up shows the reason instead.
+  if (Date.now() >= spotify.blockedUntil()) { sources.spotify?.run(); loadMusicDevices(); }
+  else ui.musicSay(refs, 'Spotify has paused the panel\'s access for a while (too many requests). It will try again later.', true);
 }
 
 function closeMusic() { ui.closeMusic(refs); }
@@ -401,8 +416,8 @@ async function musicCmd(cmd, arg) {
     if (e?.reason === 'NO_ACTIVE_DEVICE') loadMusicDevices();
   }
   renderMusic();
-  // Spotify applies commands in its own time: look again shortly.
-  setTimeout(() => { sources.spotify?.run(); if (cmd === 'device') loadMusicDevices(); }, 800);
+  // Spotify applies commands in its own time: look again shortly (not while it asked us to wait).
+  setTimeout(() => { if (Date.now() < spotify.blockedUntil()) return; sources.spotify?.run(); if (cmd === 'device') loadMusicDevices(); }, 800);
 }
 
 /** Tapping a card with a red or amber dot says why. */
@@ -517,6 +532,7 @@ try { if (sessionStorage.getItem(AUTO_RELOAD)) { lastTouch = 0; autoReloaded = t
 let nightSnoozeUntil = 0;
 function updateNight() {
   const show = nightNow() && Date.now() > nightSnoozeUntil && Date.now() - lastTouch > 90e3 && !live;
+  if (show && ui.musicIsOpen(refs)) closeMusic(); // don't leave the bright pop-up over the night screen
   refs.night.classList.toggle('hidden', !show);
 }
 

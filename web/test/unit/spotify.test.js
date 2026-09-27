@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Spotify, challengeFor, newVerifier, parsePlayer, explainSpotifyError, exportSpotify, importSpotify, SPOTIFY_SCOPES } from '../../js/spotify.js';
+import { Spotify, challengeFor, newVerifier, parsePlayer, explainSpotifyError, exportSpotify, importSpotify, spotifyEnded, SPOTIFY_SCOPES } from '../../js/spotify.js';
 import { HttpError } from '../../js/util.js';
 
 const memStore = () => { const m = new Map(); return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) }; };
@@ -112,4 +112,51 @@ test('explainSpotifyError: plain words for the common refusals', () => {
   assert.match(explainSpotifyError(e(429, { status: 429, message: 'API rate limit exceeded' })).message, /slow down/);
   const other = new HttpError(500, '500 Server error', null);
   assert.equal(explainSpotifyError(other), other);
+});
+
+test('a used or foreign Spotify return is handled as Spotify\'s, never passed on as a failed Google sign-in', async () => {
+  const store = memStore(), session = memStore();
+  const sp = new Spotify(settings(), { storage: store });
+  const hist = { replaceState(_a, _b, x) { this.url = x; } };
+  // Google's return: not Spotify's (Google's states don't start with "sp.").
+  assert.equal(await sp.handleRedirect({ search: '?code=g&state=123-456', hash: '' }, session, hist, 'https://p/'), null);
+  // A Spotify return whose sign-in was already used (Back to Spotify's page): Spotify's message.
+  assert.match(await sp.handleRedirect({ search: '?code=c&state=sp.old', hash: '' }, session, hist, 'https://p/'), /already been used/);
+  assert.equal(hist.url, 'https://p/', 'the code is removed from the address');
+});
+
+test('rate limit: Spotify\'s wait is kept, and no call is made until it\'s over', async () => {
+  const store = memStore();
+  importSpotify('rt-0', store);
+  const sp = new Spotify(settings(), { storage: store });
+  const calls = fakeFetch((url) => (url.includes('/api/token') ? { body: { access_token: 'at', expires_in: 3600 } } : { status: 429, body: { error: { status: 429, message: 'API rate limit exceeded', reason: 'QUOTA_EXCEEDED' } } }));
+  await assert.rejects(sp.pause(), /paused the panel's access/);
+  assert.ok(sp.blockedUntil() > Date.now() + 5 * 3600e3, 'hours for the daily quota');
+  const n = calls.length;
+  await assert.rejects(sp.player(), /paused the panel's access/);
+  assert.equal(calls.length, n, 'nothing sent while blocked');
+});
+
+test('explainSpotifyError: "Restriction violated" and bare 403s', () => {
+  const e = (status, error) => new HttpError(status, `${status}`, { error });
+  assert.match(explainSpotifyError(e(403, { status: 403, message: 'Player command failed: Restriction violated', reason: 'UNKNOWN' })).message, /didn't allow that just now/);
+  assert.match(explainSpotifyError(new HttpError(403, '403 ', null)).message, /User Management/);
+});
+
+test('a refresh doesn\'t undo a Disconnect made while it was in flight; an ended sign-in leaves a note', async () => {
+  const store = memStore();
+  importSpotify('rt-0', store);
+  const sp = new Spotify(settings(), { storage: store });
+  let release;
+  fakeFetch(() => new Promise((r) => { release = () => r({ body: { access_token: 'at', refresh_token: 'rt-1', expires_in: 3600 } }); }));
+  const p = sp.accessToken();
+  await new Promise((r) => setTimeout(r, 0));
+  sp.disconnect();
+  release();
+  await p;
+  assert.equal(sp.connected, false, 'still disconnected');
+  importSpotify('rt-2', store);
+  fakeFetch(() => ({ status: 400, body: { error: 'invalid_grant' } }));
+  await assert.rejects(sp.accessToken(true));
+  assert.ok(spotifyEnded(store) > 0);
 });
