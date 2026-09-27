@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sunTimes, sunToday, themeFor } from '../../js/sun.js';
+import { sunTimes, sunToday, themeFor, locate } from '../../js/sun.js';
 import { hhmm } from '../../js/time.js';
 
 const iso = (s) => Date.parse(s);
@@ -41,4 +41,17 @@ test('themeFor: auto follows the sun; fixed modes ignore it', () => {
   assert.equal(themeFor('auto', iso('2026-09-25T12:00:00+01:00'), null), 'dark');
   assert.equal(themeFor('light', iso('2026-09-25T23:00:00+01:00'), sun), 'light');
   assert.equal(themeFor('dark', iso('2026-09-25T12:00:00+01:00'), sun), 'dark');
+});
+
+test('locate: the tablet\'s position, rounded to about 1 km; null when location is off, refused or silent', async () => {
+  const geo = (fn) => ({ getCurrentPosition: fn });
+  let asked;
+  const ok = await locate(geo((yes, _no, opts) => { asked = opts; yes({ coords: { latitude: 51.501364, longitude: -0.141890, accuracy: 30 } }); }), { now: () => 42 });
+  assert.deepEqual(ok, { lat: 51.5, lon: -0.14, at: 42 });
+  assert.equal(asked.enableHighAccuracy, false, 'Wi-Fi location is plenty; no GPS warm-up');
+  assert.equal(await locate(geo((_yes, no) => no({ code: 1, message: 'User denied Geolocation' }))), null);
+  assert.equal(await locate(undefined), null);
+  assert.equal(await locate(geo(() => { throw new Error('blocked'); })), null);
+  assert.equal(await locate(geo((yes) => yes({ coords: { latitude: NaN, longitude: 2 } }))), null);
+  assert.equal(await locate(geo(() => {}), { timeout: 5 }), null, 'a WebView that never answers');
 });

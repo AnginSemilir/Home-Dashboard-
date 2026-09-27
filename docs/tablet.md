@@ -11,7 +11,8 @@ It's on **F-Droid** and the **Play Store** (search "WebView Kiosk"; developer nk
 3. In its settings, turn on **keep screen on** and full screen / immersive mode if offered.
 
    Leave "set as default launcher / home app" **off**. Otherwise the panel's Home button would bring you straight back to the panel.
-4. The panel opens its Settings screen with a checklist. Set up weather and Octopus there. Do Google in Chrome ([google.md](google.md), step 3), then copy the settings across.
+4. If it asks to use your location, allow it: the panel uses it only to go light at sunrise and dark at sunset where the tablet is (nothing is sent anywhere). If the kiosk app can't share location, the panel uses the weather location instead.
+5. The panel opens its Settings screen with a checklist. Set up weather and Octopus there. Do Google in Chrome ([google.md](google.md), step 3), then copy the settings across.
 
 Menu names differ between versions of the app. If a setting described here isn't there, look for the nearest equivalent.
 
@@ -32,7 +33,7 @@ In Chrome, open the URL → ⋮ → **Add to Home screen → Install**. It opens
 What's different in Chrome:
 - **Home** can't be done by a web page in Chrome. The button shows a reminder to swipe up from the bottom edge instead.
 - **Claude** opens the Claude app on a new chat (tap its voice button); press-and-hold does the same.
-- **Gemini** and **Spotify** open their apps (Gemini doesn't start listening by itself: tap its microphone).
+- **Assistant**, **Gemini** and the music button open their apps (the assistant doesn't start listening by itself: tap its microphone).
 - The **car** tile (without Kia data) opens the Kia app's Play Store page; tap **Open** there.
 - Keep-screen-on uses the browser's Wake Lock, which works while the panel is in front.
 

@@ -1,6 +1,7 @@
-// Sunrise and sunset, for the light/dark theme. Open-Meteo's times are used when the weather
-// has loaded; this calculation (after Vladimir Agafonkin's SunCalc, from the NOAA formulas) is
-// the fallback, accurate to a minute or two, with no network needed.
+// Sunrise and sunset, for the light/dark theme: light from sunrise to sunset where the tablet
+// is. The place comes from the tablet's own location (see locate); without it, the weather
+// location. This calculation (after Vladimir Agafonkin's SunCalc, from the NOAA formulas) is
+// accurate to a minute or two, with no network needed.
 
 import { startOfDay, DEFAULT_TZ } from './time.js';
 
@@ -43,7 +44,30 @@ export function sunToday(now, { weather, lat, lon, tz = DEFAULT_TZ } = {}) {
   return sunTimes(startOfDay(now, tz) + 12 * 3600e3, lat ?? 51.5, lon ?? -0.12); // UK default: London
 }
 
-/** 'light' or 'dark' for a Theme setting of 'auto' | 'light' | 'dark'. */
+/**
+ * Where the tablet is, from the browser's location service (Wi-Fi or GPS), rounded to about
+ * 1 km: plenty for sunrise and sunset, and all that's kept. It never leaves the tablet.
+ * Resolves null if location is off, refused or doesn't answer.
+ */
+export function locate(geo = globalThis.navigator?.geolocation, { timeout = 30e3, maximumAge = 12 * 3600e3, now = () => Date.now() } = {}) {
+  return new Promise((resolve) => {
+    if (typeof geo?.getCurrentPosition !== 'function') { resolve(null); return; }
+    let done = false;
+    const finish = (v) => { if (!done) { done = true; clearTimeout(guard); resolve(v); } };
+    const guard = setTimeout(() => finish(null), timeout + 5e3); // some WebViews never answer
+    const r2 = (n) => Math.round(n * 100) / 100;
+    try {
+      geo.getCurrentPosition((p) => {
+        const lat = p?.coords?.latitude, lon = p?.coords?.longitude;
+        finish(Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 ? { lat: r2(lat), lon: r2(lon), at: now() } : null);
+      }, () => finish(null), { enableHighAccuracy: false, timeout, maximumAge });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/** 'light' or 'dark': 'auto' follows the sun; 'light'/'dark' force one (previews and tests only). */
 export function themeFor(mode, now, sun) {
   if (mode === 'light' || mode === 'dark') return mode;
   return sun && now >= sun.rise && now < sun.set ? 'light' : 'dark';

@@ -11,7 +11,7 @@ import { fetchWeather } from './weather.js';
 import { fetchKia } from './kia.js';
 import { actionFor, detectEnv, perform, musicApp, assistantApp } from './launcher.js';
 import * as ui from './ui.js';
-import { sunToday, themeFor } from './sun.js';
+import { sunToday, themeFor, locate } from './sun.js';
 import { fetchItems, setDone, addItem } from './tasks.js';
 import { openSettings } from './settings-ui.js';
 
@@ -34,11 +34,13 @@ export const state = {
   kia: cache.kia || null,
   shopping: cache.shopping || null,
   status: {},
+  place: cache.place || null, // { lat, lon, at }: where the tablet is, for sunrise and sunset
 };
 
 const persist = () => saveCache({
   rates: state.rates, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
   thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia, shopping: state.shopping,
+  place: state.place,
 });
 
 const google = new Google(settings, save);
@@ -323,11 +325,33 @@ function applyStyle() {
   });
 }
 
-const sun = (now = Date.now()) => sunToday(now, { weather: state.weather, lat: settings.weather.lat, lon: settings.weather.lon, tz });
+// Sunrise and sunset where the tablet is (its own location), else at the weather location.
+const sun = (now = Date.now()) => (state.place
+  ? sunToday(now, { lat: state.place.lat, lon: state.place.lon, tz })
+  : sunToday(now, { weather: state.weather, lat: settings.weather.lat, lon: settings.weather.lon, tz }));
 
-/** Light between sunrise and sunset (or always light/dark, as set). Returns true if it changed. */
+// ?theme=light or ?theme=dark pins one theme, for screenshots and tests. There's no setting:
+// the panel is light from sunrise to sunset.
+const THEME_PIN = (() => {
+  try { const t = new URLSearchParams(location.search).get('theme'); return t === 'light' || t === 'dark' ? t : 'auto'; } catch { return 'auto'; }
+})();
+
+/**
+ * Where the tablet is, for sunrise and sunset. Asked at each start (the page reloads every
+ * night). The browser asks permission the first time; if location is off or refused, the
+ * weather location is used instead. Only a rounded position is kept, on this tablet.
+ */
+async function refreshPlace() {
+  const p = await locate();
+  if (!p) return;
+  state.place = p;
+  persist();
+  applyTheme();
+}
+
+/** Light between sunrise and sunset. Returns true if it changed. */
 function applyTheme(now = Date.now()) {
-  const theme = themeFor(settings.panel.theme, now, sun(now));
+  const theme = themeFor(THEME_PIN, now, sun(now));
   const root = document.documentElement;
   if (root.dataset.theme === theme) return false;
   root.dataset.theme = theme;
@@ -376,7 +400,7 @@ async function boot() {
     camera: openCamera,
     cameraClose: closeCamera,
     launch,
-    settings: () => openSettings(document.body, { settings, save, state, google, sun }),
+    settings: () => openSettings(document.body, { settings, save, state, google }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
@@ -404,7 +428,7 @@ async function boot() {
   }
 
   const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
-  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun });
+  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
@@ -428,6 +452,7 @@ async function boot() {
     staleAfter: 30 * 60e3, enabled: () => !!(google.hasTasks && settings.google.shoppingList?.id), clear: () => { state.shopping = null; },
   })();
   source('kia', refreshKia, minutes(15), { staleAfter: 6 * 3600e3, enabled: () => !!(settings.kia.url && settings.kia.key), clear: () => { state.kia = null; } })();
+  refreshPlace();
 
   // Every second: clock + camera countdown. Every 30 s: price/chart (slot changes), staleness, night.
   setInterval(() => { const now = Date.now(); ui.renderClock(refs, now, tz); ui.renderCamTimer(refs, live, now); }, 1000);

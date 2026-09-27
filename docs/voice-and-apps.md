@@ -5,15 +5,15 @@
 | Button | Tap | Press and hold |
 |---|---|---|
 | **Camera** ("Front door") | Live view, full screen. Tap the picture to shrink it to a corner; ✕ to stop | – |
-| **Spotify** | Opens Spotify | the same |
-| **Claude** | Opens Claude's assistant/voice screen | Opens the Claude app normally |
-| **Gemini** | Starts Gemini listening, like saying "Hey Google" | Opens the Gemini app |
+| **Music**: Spotify or Amazon Music (⚙ → Panel → **Music button**) | Opens the app | the same |
+| **AI**: Claude (default) or Gemini (⚙ → Panel → **AI button**) | Claude: its voice/assistant screen. Gemini: the Gemini app (Live is one tap away; there's no way to open Live directly) | Opens the app normally |
+| **Assistant** | Starts the tablet's own voice assistant as a pop-up, already listening (Gemini/Google on most tablets), like saying "Hey Google" | Opens the Gemini app |
 | **Home** | Goes to the Android home screen | – |
 
-The table is for **WebView Kiosk** (see [tablet.md](tablet.md)). In Chrome, Home shows a "swipe up" reminder, and Claude and Gemini open their apps' normal screens. That's a Chrome restriction on what web pages may open.
+The table is for **WebView Kiosk** (see [tablet.md](tablet.md)). In Chrome, web pages may only open ordinary app links, so there Home shows a "swipe up" reminder, and Claude, Gemini and Assistant open the apps' normal screens instead of listening. If the Assistant button opens the Gemini app rather than a listening pop-up, the panel is running in Chrome: move it to WebView Kiosk ([tablet.md](tablet.md#moving-from-the-chrome-app-to-webview-kiosk)).
 
 **Honest status:** the links were checked in tests, but not on a real M10.
-- **Home, Spotify and Gemini** use standard Android intents that are very likely to work.
+- **Home, Assistant, the music apps and Gemini** use standard Android intents that are very likely to work.
 - **Claude's voice screen** uses a part of the Claude app that Anthropic doesn't document (found in the app's manifest). If a tap does nothing or shows an error, press and hold to open Claude normally, then tap its voice button. If a future Claude app update moves it, only the one line for `claude` in `web/js/launcher.js` needs changing.
 
 ## Voice: "Hey Google" (Gemini)

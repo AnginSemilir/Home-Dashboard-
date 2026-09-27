@@ -24,9 +24,11 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
-  style, theme,
+  style, theme, geolocation,
 } = {}) {
-  const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block' });
+  // `geolocation`: { latitude, longitude } the tablet reports (location allowed); by default it's refused.
+  const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block',
+    ...(geolocation ? { geolocation, permissions: ['geolocation'] } : {}) });
   const page = await ctx.newPage();
   const problems = [];
   page.on('console', (m) => { if (m.type() === 'error') problems.push(m.text()); });
@@ -34,17 +36,18 @@ export async function openPanel(env, {
   if (clock === 'install') await page.clock.install({ time: now });
   else await page.clock.setFixedTime(now);
   const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt });
-  // PANEL_STYLE / PANEL_THEME run the whole suite in another look (CI runs every style).
+  // PANEL_STYLE / PANEL_THEME run the whole suite in another look (CI runs every style). The
+  // theme isn't a setting (it follows the sun), so it's pinned with ?theme= for tests.
   style ??= process.env.PANEL_STYLE;
   theme ??= process.env.PANEL_THEME;
   const s = settings === undefined ? fullSettings(now) : settings;
-  if (s && (style || theme)) s.panel = { ...s.panel, ...(style ? { style } : {}), ...(theme ? { theme } : {}) };
+  if (s && style) s.panel = { ...s.panel, style };
   if (s) {
     // Only on the first load, so tests can reload and keep what the page saved.
     await page.addInitScript((json) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('wallpanel.settings.v1', json); sessionStorage.setItem('seeded', '1'); } }, JSON.stringify(s));
   }
   if (initScript) await page.addInitScript(initScript);
-  await page.goto(env.url);
+  await page.goto(theme ? `${env.url}?theme=${theme}` : env.url);
   return { ctx, page, calls, problems };
 }
 

@@ -22,9 +22,9 @@ A wall panel for a Lenovo Tab M10 (3rd gen, TB328), built as **one web page on G
 | **Weather** now + 4 days | ✅ | Open-Meteo (free, no key). |
 | **Agile price now**, rest of today, tomorrow after ~4pm | ✅ ⚠️ | Octopus's public prices API. The panel finds your tariff and region from your account. Colours: green < 15p, amber, red ≥ 25p, blue at or below 0p (you can change these); the price box takes the colour of the price now. Tap a bar for its price and time. Until tomorrow's prices arrive (about 4pm) the chart spreads today's across its width. |
 | **Home Mini live usage** + £ so far today | ✅ ⚠️ | Octopus's API (`smartMeterTelemetry`), every 60 s. |
-| **Buttons:** Camera, Spotify, Claude voice, Gemini voice, Home | ✅ | Android `intent:` links. In the free **WebView Kiosk** app, Claude and Gemini go straight to listening and Home goes to the home screen; in Chrome they open the apps normally and Home can't work (use the swipe). See [docs/voice-and-apps.md](docs/voice-and-apps.md). |
+| **Buttons:** Camera, Music (Spotify or Amazon Music), AI (Claude or Gemini), Assistant, Home | ✅ | Android `intent:` links. In the free **WebView Kiosk** app, Claude and the Assistant go straight to listening and Home goes to the home screen; in Chrome they open the apps normally and Home can't work (use the swipe). See [docs/voice-and-apps.md](docs/voice-and-apps.md). |
 | **Kia e-Niro battery** (optional) | 🧪 | A free GitHub Action reads the car's last-reported battery once an hour and publishes it **encrypted**. It's an experiment: Kia may block it. See [docs/kia.md](docs/kia.md). |
-| Two looks, light by day | ✅ | ⚙ → Panel → **Style**: *Bold* or *Ambient*. **Theme**: *Auto* goes light at sunrise and dark at sunset (for your location), or always dark / always light. |
+| Two looks, light by day | ✅ | ⚙ → Panel → **Style**: *Bold* or *Ambient*. Light and dark switch by themselves at sunrise and sunset where the tablet is (its location; allow it when asked). No setting needed. |
 | Night dimming, screen always on, offline start | ✅ | Near-black screen 22:30–06:30 when nobody's touched it for 90 s (tap to wake); Wake Lock; cached data if the internet drops. |
 
 ⚠️ = expected to work from the browser, but **the first thing to check on the tablet**: some sites say Octopus blocks direct browser calls, others work fine. If yours is blocked, a free 5-minute fix is in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked).
@@ -51,7 +51,7 @@ If something shows a small amber or red dot, tap the card for the reason, or see
 
 ## What I could and couldn't test
 
-Everything was tested in a browser against **fake** versions of every service: 49 unit tests and 32 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
+Everything was tested in a browser against **fake** versions of every service: 53 unit tests and 37 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
 
 - that Octopus accepts calls from the page (if not, use the proxy in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked));
 - real Google sign-in and a real camera stream;

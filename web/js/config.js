@@ -41,7 +41,7 @@ export const DEFAULTS = Object.freeze({
     music: 'spotify',      // spotify | amazonmusic: what the music button opens
     assistant: 'claude',   // claude | gemini: the AI button (the tablet's own assistant has its own button)
     style: 'bold',         // bold | ambient (two looks; see Settings → Panel)
-    theme: 'auto',         // auto (light from sunrise to sunset) | dark | light
+    // Light and dark aren't a setting: light from sunrise to sunset where the tablet is.
   },
 });
 
