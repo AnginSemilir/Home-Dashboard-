@@ -49,6 +49,8 @@ The one exception is the optional Kia job: your Kia login goes into GitHub's enc
 
 If something shows a small amber or red dot, tap the card for the reason, or see [docs/troubleshooting.md](docs/troubleshooting.md). To change colours, layout or add something, see [docs/customising.md](docs/customising.md).
 
+The research behind each part (APIs, what's possible on Android, sources) is saved in [docs/research](docs/research/README.md).
+
 ## What I could and couldn't test
 
 Everything was tested in a browser against **fake** versions of every service: 53 unit tests and 37 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
