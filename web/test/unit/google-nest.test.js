@@ -90,20 +90,30 @@ const http403 = (body) => new HttpError(403, `403 ${body.error.message}`, body);
 
 test('explainGoogleError: an API switched off in the Cloud project, with a link that turns it on', () => {
   const e = explainGoogleError(http403(serviceDisabled()), TASKS_URL);
-  assert.match(e.message, /Google Tasks API is switched off in your Google Cloud project/);
+  assert.match(e.message, /Google Tasks API is switched off in Google Cloud project 123 \(the project your client ID belongs to\)/);
+  assert.match(e.message, /allow a few minutes \(up to 5\)/);
+  assert.match(e.message, /Still refused after 10 minutes\? It was switched on in a different project: use the link, which opens project 123\./);
   assert.equal(e.status, 403);
   assert.deepEqual(e.link, { href: 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=123', text: 'Turn on the Google Tasks API' });
   // A link anywhere but Google's console is never offered; the plain library page is.
   const odd = explainGoogleError(http403(serviceDisabled('https://example.com/phish')), TASKS_URL);
-  assert.equal(odd.link.href, 'https://console.cloud.google.com/apis/library/tasks.googleapis.com');
+  assert.equal(odd.link.href, 'https://console.cloud.google.com/apis/library/tasks.googleapis.com?project=123');
   // Older error shape (message only), recognised by its wording and the API's address.
   const bare = explainGoogleError(http403({ error: { code: 403, message: 'Google Calendar API has not been used in project 9 before or it is disabled.' } }), 'https://www.googleapis.com/calendar/v3/users/me/calendarList');
-  assert.match(bare.message, /Google Calendar API is switched off/);
-  assert.equal(bare.link.href, 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com');
+  assert.match(bare.message, /Google Calendar API is switched off in Google Cloud project 9 /);
+  assert.equal(bare.link.href, 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=9');
+  // No project anywhere in the error: says which project to use instead, and the link opens the plain library page.
+  const none = explainGoogleError(http403({ error: { code: 403, message: 'Google Tasks API has not been used in project before or it is disabled.', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED', metadata: { service: 'tasks.googleapis.com', activationUrl: 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview' } }] } }), TASKS_URL);
+  assert.match(none.message, /switched off in the Google Cloud project your client ID belongs to\..*Credentials page lists your client ID/);
+  assert.equal(none.link.href, 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview');
+  // Only a plain project number or ID is ever repeated from the error.
+  const weird = explainGoogleError(http403({ error: { code: 403, message: 'x', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED', metadata: { service: 'tasks.googleapis.com', consumer: 'projects/<b>hi</b>' } }] } }), TASKS_URL);
+  assert.doesNotMatch(weird.message, /<b>/);
+  assert.equal(weird.link.href, 'https://console.cloud.google.com/apis/library/tasks.googleapis.com');
 });
 
 test('explainGoogleError: a sign-in without the permission; other errors pass through', () => {
-  assert.match(explainGoogleError(http403(scopeMissing), TASKS_URL).message, /sign-in doesn't allow Google Tasks \(the shopping list\)\. In Chrome, ⚙ → Sign in with Google again/);
+  assert.match(explainGoogleError(http403(scopeMissing), TASKS_URL).message, /sign-in doesn't allow Google Tasks \(the shopping list\)\. In Chrome, ⚙ → Sign in with Google again, and make sure every box is ticked/);
   const cal = explainGoogleError(http403({ error: { code: 403, message: 'Request had insufficient authentication scopes.' } }), 'https://www.googleapis.com/calendar/v3/calendars/x/events');
   assert.match(cal.message, /doesn't allow Google Calendar\./);
   const nest = explainGoogleError(http403({ error: { code: 403, message: 'Request had insufficient authentication scopes.' } }), 'https://smartdevicemanagement.googleapis.com/v1/enterprises/p/devices');
@@ -124,6 +134,23 @@ test('Google.api explains a 403; missingScopes lists what a sign-in left out', a
   const g = new Google(s, () => {});
   fakeFetch((url) => (TOKEN_URLS.includes(url) ? { body: { access_token: 'at', expires_in: 3600 } } : { status: 403, body: serviceDisabled() }));
   await assert.rejects(g.api(TASKS_URL), (e) => /switched off/.test(e.message) && e.link && e.status === 403);
+  // A 401 gets one retry with a fresh token: success after it is returned, and a 403 after it is explained.
+  let n = 0;
+  const calls = fakeFetch((url) => {
+    if (TOKEN_URLS.includes(url)) return { body: { access_token: `at-${++n}`, expires_in: 3600 } };
+    return calls.filter((c) => !TOKEN_URLS.includes(c.url)).length === 1 ? { status: 401, body: { error: { code: 401, message: 'expired' } } } : { body: { items: [] } };
+  });
+  g.access = null;
+  assert.deepEqual(await g.api(TASKS_URL), { items: [] });
+  assert.equal(calls.filter((c) => TOKEN_URLS.includes(c.url)).length, 2, 'a fresh token for the retry');
+  const calls2 = fakeFetch((url) => {
+    if (TOKEN_URLS.includes(url)) return { body: { access_token: 'at-x', expires_in: 3600 } };
+    return calls2.filter((c) => !TOKEN_URLS.includes(c.url)).length === 1 ? { status: 401, body: { error: { code: 401, message: 'expired' } } } : { status: 403, body: scopeMissing };
+  });
+  await assert.rejects(g.api(TASKS_URL), /doesn't allow Google Tasks/);
+  // Two 401s in a row: Google's own error, unchanged.
+  fakeFetch((url) => (TOKEN_URLS.includes(url) ? { body: { access_token: 'at-y', expires_in: 3600 } } : { status: 401, body: { error: { code: 401, message: 'Invalid Credentials' } } }));
+  await assert.rejects(g.api(TASKS_URL), (e) => e.status === 401 && /Invalid Credentials/.test(e.message));
   assert.deepEqual(g.missingScopes(), ['Google Tasks (the shopping list)']);
   s.google.scopes = SCOPE_TASKS;
   assert.deepEqual(g.missingScopes(), ['your Nest devices', 'Google Calendar']);

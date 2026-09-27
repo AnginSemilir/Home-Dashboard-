@@ -37,18 +37,25 @@ export function explainGoogleError(e, url = '') {
     || { title: meta.serviceTitle || 'Google API', what: 'this part of the panel' };
   const title = meta.serviceTitle || api.title;
   if (/SERVICE_DISABLED|accessNotConfigured/.test(reasons) || /has not been used in project|API .*is disabled|it is disabled/i.test(text)) {
-    const out = new HttpError(403, `The ${title} is switched off in your Google Cloud project. Turn it on (Google Cloud → APIs & Services → Library → ${title} → Enable), wait a minute, then try again.`, e.body);
+    // The project Google means is the one the panel's OAuth client belongs to (the number at
+    // the start of the client ID), which isn't always the one open in the Cloud console.
+    const n = String(meta.containerInfo || meta.consumer || (/in project (\S+) before/i.exec(text) || [])[1] || '').replace(/^projects\//, '');
+    const project = /^[\w-]{1,64}$/.test(n) ? n : '';
+    const out = new HttpError(403, project
+      ? `The ${title} is switched off in Google Cloud project ${project} (the project your client ID belongs to). Turn it on (Google Cloud → APIs & Services → Library → ${title} → Enable), then allow a few minutes (up to 5) and try again. Still refused after 10 minutes? It was switched on in a different project: use the link, which opens project ${project}.`
+      : `The ${title} is switched off in the Google Cloud project your client ID belongs to. Turn it on (Google Cloud → APIs & Services → Library → ${title} → Enable), then allow a few minutes (up to 5) and try again. Still refused after 10 minutes? It must be switched on in the project whose APIs & Services → Credentials page lists your client ID.`, e.body);
     let link = null;
     try {
       const a = new URL(meta.activationUrl);
       if (a.protocol === 'https:' && CONSOLE_HOSTS.includes(a.host)) link = a.href;
     } catch { /* no usable link in the error */ }
-    if (!link && api.service) link = `https://console.cloud.google.com/apis/library/${api.service}`;
+    if (!link && api.service) link = `https://console.cloud.google.com/apis/library/${api.service}${project ? `?project=${encodeURIComponent(project)}` : ''}`;
     if (link) out.link = { href: link, text: `Turn on the ${title}` };
     return out;
   }
   if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/.test(reasons) || /insufficient authentication scopes/i.test(text)) {
-    return new HttpError(403, `Your Google sign-in doesn't allow ${api.what}. In Chrome, ⚙ → Sign in with Google again, and leave every box ticked on Google's screen.`, e.body);
+    // Google may show newly asked-for permissions unticked, so "make sure", not "leave".
+    return new HttpError(403, `Your Google sign-in doesn't allow ${api.what}. In Chrome, ⚙ → Sign in with Google again, and make sure every box is ticked on Google's screen (or tick Select all).`, e.body);
   }
   return e;
 }

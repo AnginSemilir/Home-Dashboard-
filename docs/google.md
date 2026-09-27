@@ -56,7 +56,7 @@ Google refuses sign-ins inside kiosk apps (you'd see `disallowed_useragent`), so
 2. Under **Google**, paste the **client ID**, **client secret** and **Device Access project ID**.
 3. **Sign in with Google**:
    - Pick the account that owns the Nest devices.
-   - Google's "partner connection" page lists your homes and devices. **Switch on the thermostat and the camera**, and allow Calendar and Tasks.
+   - Google's "partner connection" page lists your homes and devices. **Switch on the thermostat and the camera**, and allow Calendar and Tasks. If Google shows a list of checkboxes, make sure every one is ticked (or tick **Select all**).
    - Click past the "unverified app" warning (above).
 4. You're sent back to the panel with "Signed in to Google" and Settings open. Then:
    - **Choose camera & thermostat**: tick the camera and the thermostat.
@@ -70,8 +70,8 @@ Google refuses sign-ins inside kiosk apps (you'd see `disallowed_useragent`), so
 
 If you signed in before the shopping list was added to the panel, your sign-in doesn't include Google Tasks yet (the list says "Sign in to Google again"). Once:
 
-1. In Google Cloud, **APIs & Services → Library → Google Tasks API → Enable**. It must be the project that holds your OAuth client (its **Credentials** page lists the client ID you pasted into the panel). It can take a few minutes to start working.
-2. In **Chrome** on the tablet: ⚙ → **Sign in with Google** again, and allow Tasks.
+1. In Google Cloud, **APIs & Services → Library → Google Tasks API → Enable**. It must be the project that holds your OAuth client: its **Credentials** page lists the client ID you pasted into the panel, and its project number is the digits at the start of that client ID. It can take a few minutes (up to 5) to start working.
+2. In **Chrome** on the tablet: ⚙ → **Sign in with Google** again, and make sure the Tasks box is ticked on Google's screen (or tick **Select all**).
 3. ⚙ → **Choose shopping list** → **Save & close**, then Copy/Paste settings into the kiosk app as in step 3.5.
 
 ## Which cameras work

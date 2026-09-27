@@ -395,7 +395,7 @@ async function boot() {
     // Google lets people untick parts of the sign-in; say which parts won't work.
     const missing = google.missingScopes();
     ui.toast(refs, missing.length
-      ? `Signed in to Google, but it didn't allow ${missing.join(' or ')}. To use ${missing.length > 1 ? 'them' : 'it'}, sign in again and leave every box ticked.`
+      ? `Signed in to Google, but it didn't allow ${missing.join(' or ')}. To use ${missing.length > 1 ? 'them' : 'it'}, sign in again and make sure every box is ticked (or tick Select all).`
       : 'Signed in to Google. Now choose your camera, thermostat, calendars and shopping list in Settings.', missing.length ? 15000 : 7000);
   } else if (result) {
     ui.toast(refs, `Google sign-in: ${result.slice(7)}`, 7000);
