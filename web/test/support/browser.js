@@ -24,6 +24,7 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
+  style, theme,
 } = {}) {
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block' });
   const page = await ctx.newPage();
@@ -34,6 +35,7 @@ export async function openPanel(env, {
   else await page.clock.setFixedTime(now);
   const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt });
   const s = settings === undefined ? fullSettings(now) : settings;
+  if (s && (style || theme)) s.panel = { ...s.panel, ...(style ? { style } : {}), ...(theme ? { theme } : {}) };
   if (s) {
     // Only on the first load, so tests can reload and keep what the page saved.
     await page.addInitScript((json) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('wallpanel.settings.v1', json); sessionStorage.setItem('seeded', '1'); } }, JSON.stringify(s));

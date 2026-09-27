@@ -49,6 +49,8 @@ export function weather(now) {
       temperature_2m_max: [17.4, 15.1, 16.3, 19.2, 18.0],
       temperature_2m_min: [9.1, 10.4, 8.2, 9.3, 11.0],
       precipitation_probability_max: [10, 80, 20, 0, 60],
+      sunrise: days.map((d) => `${d}T06:53`),
+      sunset: days.map((d) => `${d}T18:55`),
     },
   };
 }

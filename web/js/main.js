@@ -11,6 +11,7 @@ import { fetchWeather } from './weather.js';
 import { fetchKia } from './kia.js';
 import { actionFor, detectEnv, perform } from './launcher.js';
 import * as ui from './ui.js';
+import { sunToday, themeFor } from './sun.js';
 import { openSettings } from './settings-ui.js';
 
 const settings = loadSettings();
@@ -172,6 +173,7 @@ async function refreshCalendar() {
 
 async function refreshWeather() {
   state.weather = await fetchWeather(settings.weather, tz);
+  applyTheme(); // today's exact sunrise/sunset for this place
 }
 
 async function refreshKia() {
@@ -259,6 +261,38 @@ function homeMiniStaleWhy() {
   return `No new Home Mini reading since ${when}. Check it's plugged in and on Wi-Fi (the Octopus app shows the same).`;
 }
 
+// ---------- Look: style (Bold / Ambient) and theme (light from sunrise to sunset) ----------
+const STYLES = ['bold', 'ambient'];
+
+/** Load the chosen style sheet before anything is drawn (the chart measures its box). */
+function applyStyle() {
+  const style = STYLES.includes(settings.panel.style) ? settings.panel.style : STYLES[0];
+  document.documentElement.dataset.style = style;
+  const link = document.getElementById('style-css');
+  const href = `css/${style}.css`;
+  if (!link || link.getAttribute('href') === href) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => resolve();
+    link.addEventListener('load', done, { once: true });
+    link.addEventListener('error', done, { once: true });
+    setTimeout(done, 3000); // never hang the panel on a slow style sheet
+    link.setAttribute('href', href);
+  });
+}
+
+const sun = (now = Date.now()) => sunToday(now, { weather: state.weather, lat: settings.weather.lat, lon: settings.weather.lon, tz });
+
+/** Light between sunrise and sunset (or always light/dark, as set). Returns true if it changed. */
+function applyTheme(now = Date.now()) {
+  const theme = themeFor(settings.panel.theme, now, sun(now));
+  const root = document.documentElement;
+  if (root.dataset.theme === theme) return false;
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'light' ? '#f4f5f7' : '#0e0f11');
+  return true;
+}
+
 // ---------- Night mode, wake lock, daily reload ----------
 // An automatic nightly reload isn't a touch, so it shouldn't wake the screen.
 const AUTO_RELOAD = 'wallpanel.autoreload';
@@ -293,11 +327,13 @@ function scheduleDailyReload() {
 
 // ---------- Boot ----------
 async function boot() {
+  applyTheme();
+  await applyStyle();
   refs = ui.buildPanel(document.getElementById('app'), {
     camera: openCamera,
     cameraClose: closeCamera,
     launch,
-    settings: () => openSettings(document.body, { settings, save, state, google }),
+    settings: () => openSettings(document.body, { settings, save, state, google, sun }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
@@ -314,7 +350,7 @@ async function boot() {
   if (result) ui.toast(refs, result === 'signed-in' ? 'Signed in to Google. Now choose your camera, thermostat and calendars in Settings.' : `Google sign-in: ${result.slice(7)}`, 7000);
 
   const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
-  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google });
+  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
@@ -338,7 +374,7 @@ async function boot() {
 
   // Every second: clock + camera countdown. Every 30 s: price/chart (slot changes), staleness, night.
   setInterval(() => { const now = Date.now(); ui.renderClock(refs, now, tz); ui.renderCamTimer(refs, live, now); }, 1000);
-  setInterval(() => { for (const s of Object.values(sources)) s.staleCheck(); renderAll(); updateNight(); }, 30e3);
+  setInterval(() => { for (const s of Object.values(sources)) s.staleCheck(); applyTheme(); renderAll(); updateNight(); }, 30e3);
   let lastW = innerWidth, lastH = innerHeight;
   addEventListener('resize', () => { if (innerWidth !== lastW || innerHeight !== lastH) { lastW = innerWidth; lastH = innerHeight; renderAll(); } });
   document.addEventListener('visibilitychange', () => {

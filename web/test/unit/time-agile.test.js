@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { startOfDay, tzOffset, hhmm, dayKey, inWindow, ago } from '../../js/time.js';
+import { startOfDay, tzOffset, hhmm, dayKey, inWindow, ago, localToMs } from '../../js/time.js';
 import { ratesFromOctopus, priceSummary, todaysRates, band, hasTomorrow, currentIndex, round1, priceAt } from '../../js/agile.js';
 
 const iso = (s) => Date.parse(s);
@@ -107,4 +107,12 @@ test('band: colour follows the value shown (rounded to 0.1p)', () => {
   assert.equal(band(NaN), 'none');
   assert.equal(band(12, { cheap: 10, pricey: 20 }), 'mid');
   assert.equal(round1(17.66), 17.7);
+});
+
+test('localToMs: Open-Meteo local times, including clock-change days', () => {
+  assert.equal(new Date(localToMs('2026-09-25T06:53')).toISOString(), '2026-09-25T05:53:00.000Z');
+  assert.equal(new Date(localToMs('2026-12-10T08:01')).toISOString(), '2026-12-10T08:01:00.000Z');
+  assert.equal(new Date(localToMs('2026-03-29T06:40')).toISOString(), '2026-03-29T05:40:00.000Z'); // BST from 01:00 GMT
+  assert.equal(new Date(localToMs('2026-10-25T07:45')).toISOString(), '2026-10-25T07:45:00.000Z'); // back to GMT
+  assert.equal(localToMs(''), null);
 });

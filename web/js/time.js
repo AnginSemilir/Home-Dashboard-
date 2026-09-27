@@ -27,6 +27,16 @@ export function tzOffset(ms, tz = DEFAULT_TZ) {
   return Date.UTC(p.y, p.m - 1, p.d, p.h, p.min, p.s) - Math.floor(ms / 1000) * 1000;
 }
 
+/** A local wall-clock time like "2026-09-25T06:53" (as Open-Meteo sends) → epoch ms, or null. */
+export function localToMs(text, tz = DEFAULT_TZ) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(text || ''));
+  if (!m) return null;
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  // Two passes, so a time just after a clock change still lands on the right offset.
+  const first = guess - tzOffset(guess, tz);
+  return guess - tzOffset(first, tz);
+}
+
 /** Epoch ms of local midnight at the start of the day containing `ms`, plus `addDays` days. */
 export function startOfDay(ms, tz = DEFAULT_TZ, addDays = 0) {
   const p = partsInTz(ms, tz);

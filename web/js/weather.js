@@ -1,12 +1,13 @@
 // Weather from Open-Meteo (free, no key, allows browser requests) and UK place lookup.
 
 import { fetchJSON } from './util.js';
+import { localToMs } from './time.js';
 
 export async function fetchWeather({ lat, lon }, tz = 'Europe/London') {
   const p = new URLSearchParams({
     latitude: lat, longitude: lon, timezone: tz,
     current: 'temperature_2m,apparent_temperature,weather_code,is_day,wind_speed_10m,relative_humidity_2m,precipitation',
-    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+    daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset',
     forecast_days: '5', wind_speed_unit: 'mph',
   });
   const b = await fetchJSON(`https://api.open-meteo.com/v1/forecast?${p}`);
@@ -25,6 +26,9 @@ export async function fetchWeather({ lat, lon }, tz = 'Europe/London') {
       max: b.daily.temperature_2m_max?.[i],
       min: b.daily.temperature_2m_min?.[i],
       rain: b.daily.precipitation_probability_max?.[i],
+      // Local times like "2026-09-25T06:53" → epoch ms (for the light/dark theme).
+      sunrise: localToMs(b.daily.sunrise?.[i], tz),
+      sunset: localToMs(b.daily.sunset?.[i], tz),
     })),
   };
 }

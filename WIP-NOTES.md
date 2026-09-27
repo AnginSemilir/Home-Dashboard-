@@ -16,11 +16,15 @@ this branch replaces with `css/bold.css` and `css/ambient.css`.
 - `web/js/chart.js`: thin rounded bars, labels that avoid bars, "not published yet" box.
 - Inter font (`web/fonts`), lighter icons; the two style sheets as the designers left them.
 
+- Style loader (main.js `applyStyle`), Theme (`applyTheme`: `data-theme` on `<html>`, checked every
+  30 s), Settings → Panel → Style / Theme, `web/js/sun.js` (Open-Meteo sunrise/sunset, calculated
+  fallback) with unit tests; index.html/privacy.html now load `css/bold.css`.
+
 ## Still to do
-1. Load `css/<style>.css` from main.js (default bold) before first render; settings for Style
-   and Theme; set `data-theme` on `<html>`; update index.html/privacy.html links.
-2. Sun times + auto theme switching; tests (unit for the sun calculation, e2e for both styles ×
-   both themes fitting 1280×800 / 1333×800 / 960×600 with nothing truncated).
+1. 5 browser tests fail after the merge (every-card render, service-failure, sign-out, first-run
+   setup, copy/paste settings) — investigate; add e2e for both styles × both themes fitting
+   1280×800 / 1333×800 / 960×600 with nothing truncated.
+2. (moved into 1)
 3. Light versions of both style sheets (band colours checked for contrast on light surfaces).
 4. Judges' fixes. Bold: give the calendar more room (compact idle camera), keep the gear inside
    the clock card, no text under ~11px at 960×600, show the chart's status dot, heating cue
