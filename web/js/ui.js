@@ -66,7 +66,9 @@ export function buildPanel(root, on) {
   r.camBarName = h('span');
   r.camClose = h('button', { class: 'close', 'aria-label': 'Close live view' }, icon('close'));
   r.camBar = h('div', { class: 'cam-bar hidden' }, h('span', { class: 'live-badge' }, 'LIVE'), r.camBarName, h('span', { class: 'spacer' }), r.camTimer, r.camClose);
-  r.cam = h('section', { class: 'card cam', id: 'cam' }, r.video, r.camIdle, r.camBar, (r.camDot = dot()));
+  // A doorbell press: a big line across the top of the live view.
+  r.camRing = h('div', { class: 'ring-banner hidden', role: 'alert', 'aria-live': 'assertive' });
+  r.cam = h('section', { class: 'card cam', id: 'cam' }, r.video, r.camIdle, r.camBar, r.camRing, (r.camDot = dot()));
   r.cam.addEventListener('click', (e) => { if (!r.camClose.contains(e.target)) on.camera?.(); });
   r.camClose.addEventListener('click', (e) => { e.stopPropagation(); on.cameraClose?.(); });
 
@@ -168,8 +170,9 @@ export function buildPanel(root, on) {
   r.night = h('div', { class: 'night hidden', id: 'night' }, r.nightTime);
   r.night.addEventListener('click', () => on.nightTap?.());
   r.toast = h('div', { class: 'toast hidden', role: 'status' });
+  r.soundHint = h('div', { class: 'sound-hint hidden', role: 'status' }, icon('volume'), h('span', {}, 'Tap once to turn on the doorbell sound'));
   r.music = buildMusic(on);
-  root.replaceChildren(r.panel, r.music.sheet, r.night, r.toast);
+  root.replaceChildren(r.panel, r.music.sheet, r.night, r.toast, r.soundHint);
   return r;
 }
 
@@ -591,7 +594,15 @@ export function renderCamera(r, s, st, live) {
   r.camIdle.classList.toggle('hidden', !!isLive);
   r.camBar.classList.toggle('hidden', !isLive);
   r.cam.classList.toggle('expanded', !!(isLive && live.expanded));
+  if (isLive && live.name) r.camBarName.textContent = live.name;
+  const ringing = !!(isLive && live.ring);
+  r.cam.classList.toggle('ring', ringing);
+  r.camRing.classList.toggle('hidden', !ringing);
+  if (ringing) r.camRing.textContent = `Someone's at the door · ${hhmm(live.ringAt)}`;
 }
+
+/** "Tap once to turn on the doorbell sound" (only where the browser blocks sound until a tap). */
+export function soundHint(r, show) { r.soundHint.classList.toggle('hidden', !show); }
 
 export function renderCamTimer(r, live, now) {
   if (!live || live.state === 'ended') { r.camTimer.textContent = ''; return; }

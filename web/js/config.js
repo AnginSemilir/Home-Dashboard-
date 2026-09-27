@@ -24,6 +24,7 @@ export const DEFAULTS = Object.freeze({
     shoppingList: null, // { id, name }: a Google Tasks list shown as the shopping list
     cameraId: '',       // enterprises/…/devices/…
     thermostatId: '',
+    doorbellSub: '',    // projects/<cloud-project-id>/subscriptions/<id>: doorbell presses (docs/doorbell.md)
   },
   weather: { lat: null, lon: null, place: '' },
   kia: { url: '', key: '' },

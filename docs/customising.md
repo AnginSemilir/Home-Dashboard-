@@ -21,6 +21,7 @@ Everything is plain HTML/CSS/JavaScript in `web/`, with no build step. Push a ch
 | Sunrise/sunset and the light/dark switch | `web/js/sun.js` (`locate`, `sunToday`) and `applyTheme()` / `refreshPlace()` in `web/js/main.js`. For screenshots, `?theme=light` or `?theme=dark` on the address overrides the setting. |
 | What each card shows | `web/js/ui.js` (`renderPrice`, `renderTiles`, `renderCalendar`, `renderShopping`, `renderWeather`, `renderCamera`, and `showChartTip` for the pop-up when you tap a bar) |
 | The shopping list (Google Tasks) | `web/js/tasks.js`; choose the list in ⚙ → Choose shopping list |
+| Doorbell pop-up and chime | `web/js/doorbell.js` (Pub/Sub listener, which presses count), `web/js/chime.js` (the ding-dong), `ring()` in `web/js/main.js` |
 | Spotify controls | `web/js/spotify.js` (sign-in, player), `renderMusic` / `buildMusic` in `web/js/ui.js`, `musicCmd` / `musicInterval` in `web/js/main.js` |
 | The price chart | `web/js/chart.js` |
 | The buttons: which apps, which intents | `web/js/launcher.js` (`APPS`) and the `DOCK` list at the top of `web/js/ui.js` (the camera button is always first) |

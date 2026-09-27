@@ -43,7 +43,7 @@ You need a computer (easier) or the tablet, and the Google account that owns you
 2. **Create project**:
    - Name: `Home panel`.
    - **OAuth client ID**: paste the client ID from step 1.5.
-   - **Events**: leave off. The panel doesn't need them.
+   - **Events**: leave off for now. Only the doorbell pop-up uses them: [doorbell.md](doorbell.md) sets them up.
 3. Copy the **Project ID** (a long code like `a1b2c3d4-…`).
 
 ## 3. Sign in from the panel, in Chrome on the tablet

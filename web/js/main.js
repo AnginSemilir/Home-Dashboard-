@@ -6,6 +6,8 @@ import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort } from './time.js';
 import { Octopus, costToday } from './octopus.js';
 import { Google, redirectUri } from './google.js';
 import { Spotify } from './spotify.js';
+import { DoorbellListener, SUB_RE } from './doorbell.js';
+import { Chime } from './chime.js';
 import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
 import { fetchEvents } from './calendar.js';
 import { fetchWeather } from './weather.js';
@@ -235,14 +237,25 @@ async function refreshKia() {
 const KIA_JOB_STALE = 3 * 3600e3;
 
 // ---------- Camera ----------
-async function openCamera() {
-  if (live && live.state !== 'ended') { live.expanded = !live.expanded; ui.renderCamera(refs, settings, state, live); return; }
-  if (!settings.google.cameraId) { ui.toast(refs, 'Set up the Nest camera in Settings'); return; }
+/**
+ * Live view. A tap on the camera button opens it (a tap on the picture toggles full screen /
+ * corner). A doorbell press opens that doorbell full screen, with `ring`.
+ */
+async function openCamera({ device, ring = false } = {}) {
+  const cam = device || settings.google.cameraId;
+  if (live && live.state !== 'ended') {
+    if (!ring) { live.expanded = !live.expanded; ui.renderCamera(refs, settings, state, live); return; }
+    // Pressed again while it's showing: no new stream (Google allows few commands a minute).
+    if (live.device === cam) { Object.assign(live, { ring: true, ringAt: Date.now(), expanded: true }); ui.renderCamera(refs, settings, state, live); return; }
+    await closeCamera();
+  }
+  if (!cam) { ui.toast(refs, 'Set up the Nest camera in Settings'); return; }
   // Each tap gets its own session object; callbacks from an older stream can't touch a newer one.
-  const mine = { state: 'connecting', expanded: true, endsAt: 0 };
+  const mine = { state: 'connecting', expanded: true, endsAt: 0, device: cam, ring, ringAt: ring ? Date.now() : 0,
+    name: cam === settings.google.cameraId ? null : 'Doorbell' };
   live = mine;
-  const stream = new LiveStream(nest, settings.google.cameraId, {
-    battery: settings.panel.cameraBattery,
+  const stream = new LiveStream(nest, cam, {
+    battery: cam === settings.google.cameraId ? settings.panel.cameraBattery : true,
     onState: (st) => {
       if (live !== mine) return;
       if (st === 'timeout') { ui.toast(refs, "The camera didn't send any video. Tap to try again."); return; }
@@ -266,7 +279,8 @@ async function openCamera() {
     await stream.stop();
     if (current) {
       state.status.camera = { error: describeError(e), at: Date.now() };
-      ui.toast(refs, `Camera: ${describeError(e)}`);
+      if (mine.ring) ui.toast(refs, `Someone's at the door (the live view didn't start: ${describeError(e)})`, 30e3);
+      else ui.toast(refs, `Camera: ${describeError(e)}`);
       if (live === mine) live = null;
     }
   }
@@ -277,7 +291,34 @@ async function closeCamera() {
   const s = live?.stream;
   live = null;
   ui.renderCamera(refs, settings, state, live);
+  updateNight();
   await s?.stop();
+}
+
+// ---------- Doorbell ----------
+const RING_CLOSE_MS = 120e3; // an unanswered ring closes itself after 2 minutes without a touch
+const chime = SUB_RE.test(settings.google.doorbellSub.trim()) ? new Chime() : null;
+let doorbell = null;
+
+/** Someone pressed the doorbell: its live view over everything, a chime, and the screen lit. */
+function ring({ device } = {}) {
+  closeMusic();
+  nightSnoozeUntil = Date.now() + RING_CLOSE_MS;
+  openCamera({ device: device || settings.google.cameraId, ring: true });
+  updateNight();
+  (chime || new Chime()).ring().then((ok) => { if (!ok) ui.soundHint(refs, true); });
+}
+
+function startDoorbell() {
+  const sub = settings.google.doorbellSub.trim();
+  if (!sub) { state.status.doorbell = null; return; }
+  if (!google.hasNest || !google.hasPubsub || !SUB_RE.test(sub)) return; // the checklist says why
+  doorbell = new DoorbellListener({
+    google, nest, sub, projectId: settings.google.projectId,
+    onRing: ring,
+    onStatus: (st) => { state.status.doorbell = st; },
+  });
+  if (document.visibilityState === 'visible') doorbell.start();
 }
 
 // ---------- Buttons ----------
@@ -508,7 +549,7 @@ async function boot() {
     camera: openCamera,
     cameraClose: closeCamera,
     launch,
-    settings: () => openSettings(document.body, { settings, save, state, google, sun, spotify, place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate }),
+    settings: () => openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
@@ -519,6 +560,7 @@ async function boot() {
     chartTap: (hit) => ui.showChartTip(refs, hit, priceOpts(), tz),
     musicCmd,
     musicClose: closeMusic,
+    ringClose: closeCamera,
     shopTick: tickShopping,
     shopAdd: addShopping,
     nightTap: () => { nightSnoozeUntil = Date.now() + 5 * 60e3; updateNight(); },
@@ -541,7 +583,7 @@ async function boot() {
   }
 
   const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
-  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun, spotify, place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate });
+  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
@@ -573,6 +615,8 @@ async function boot() {
     const now = Date.now();
     ui.renderClock(refs, now, tz);
     ui.renderCamTimer(refs, live, now);
+    // An unanswered doorbell ring closes itself (a touch keeps it open to the camera's own limit).
+    if (live?.ring && now - Math.max(live.ringAt, lastTouch) > RING_CLOSE_MS) closeCamera();
     if (ui.musicIsOpen(refs)) {
       ui.renderMusicProgress(refs, state.music, now);
       // Left open with nobody using it: close after 2 minutes.
@@ -583,9 +627,18 @@ async function boot() {
   let lastW = innerWidth, lastH = innerHeight;
   addEventListener('resize', () => { if (innerWidth !== lastW || innerHeight !== lastH) { lastW = innerWidth; lastH = innerHeight; renderAll(); } });
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { keepAwake(); for (const s of Object.values(sources)) s.runIfDue(); }
-    else if (live) closeCamera(); // don't leave a stream running in the background
+    if (document.visibilityState === 'visible') { keepAwake(); for (const s of Object.values(sources)) s.runIfDue(); doorbell?.start(); }
+    else {
+      if (live) closeCamera(); // don't leave a stream running in the background
+      doorbell?.stop(); // and don't take presses meant for the panel on screen
+    }
   });
+  startDoorbell();
+  if (chime) {
+    chime.onChange = (ready) => ui.soundHint(refs, !ready);
+    // Only a plain Chrome tab should need a tap for sound; say so if it does.
+    setTimeout(() => { if (!chime.ready) ui.soundHint(refs, true); }, 1500);
+  }
   keepAwake();
   scheduleDailyReload();
   updateNight();

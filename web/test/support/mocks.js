@@ -276,6 +276,27 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
   await page.route(/^https:\/\/i\.scdn\.co\//, (route) => route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64') }));
   calls.spotify = sp;
 
+  // Google Cloud Pub/Sub: the doorbell subscription. Tests push events into calls.pubsub.queue.
+  calls.pubsub = { queue: [], pulls: 0, acks: [] };
+  let ackN = 0;
+  await page.route(/^https:\/\/pubsub\.googleapis\.com\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization,content-type', 'access-control-allow-methods': 'POST' } });
+    const body = req.postData() ? JSON.parse(req.postData()) : null;
+    if (fail.has('pubsub-404')) return json(route, { error: { code: 404, message: `Resource not found (resource=panel-doorbell).`, status: 'NOT_FOUND' } }, 404);
+    if (fail.has('pubsub-disabled')) return json(route, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'Cloud Pub/Sub API has not been used in project 555 before or it is disabled.', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED', metadata: { service: 'pubsub.googleapis.com', serviceTitle: 'Cloud Pub/Sub API', consumer: 'projects/555' } }] } }, 403);
+    if (url.pathname.endsWith(':acknowledge')) { calls.pubsub.acks.push(...body.ackIds); return json(route, {}); }
+    if (url.pathname.endsWith(':pull')) {
+      calls.pubsub.pulls++;
+      calls.pubsub.lastPull = { url: req.url(), body, auth: req.headers().authorization };
+      if (!calls.pubsub.queue.length) await new Promise((r) => setTimeout(r, 250)); // Google holds an empty pull a while
+      const got = calls.pubsub.queue.splice(0);
+      return json(route, got.length ? { receivedMessages: got.map((ev) => ({ ackId: `ack-${++ackN}`, message: { data: Buffer.from(JSON.stringify(ev)).toString('base64'), messageId: String(ackN), publishTime: ev.timestamp } })) } : {});
+    }
+    return json(route, { error: { code: 404, message: 'not found' } }, 404);
+  });
+
   // Google's sign-in page: pretend the user approved and bounce back with a code.
   await page.route(/^https:\/\/(nestservices\.google\.com|accounts\.google\.com)\//, (route) => {
     const u = new URL(route.request().url());

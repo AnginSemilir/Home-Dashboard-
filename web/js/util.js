@@ -12,6 +12,11 @@ export class HttpError extends Error {
 export async function fetchJSON(url, opts = {}, timeoutMs = 20000) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  // A caller's own signal (e.g. the doorbell listener stopping) cancels the request too.
+  if (opts.signal) {
+    if (opts.signal.aborted) ctrl.abort();
+    else opts.signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+  }
   try {
     const res = await fetch(url, { ...opts, signal: ctrl.signal });
     const text = await res.text();

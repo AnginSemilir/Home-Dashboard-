@@ -7,6 +7,7 @@ import { fetchJSON, HttpError } from './util.js';
 export const SCOPE_SDM = 'https://www.googleapis.com/auth/sdm.service';
 export const SCOPE_CAL = 'https://www.googleapis.com/auth/calendar.readonly';
 export const SCOPE_TASKS = 'https://www.googleapis.com/auth/tasks'; // the shopping list (Google Tasks)
+export const SCOPE_PUBSUB = 'https://www.googleapis.com/auth/pubsub'; // doorbell presses (only asked for when set up)
 // oauth2.googleapis.com is the documented endpoint; the second is the one Google's sample uses.
 export const TOKEN_URLS = ['https://oauth2.googleapis.com/token', 'https://www.googleapis.com/oauth2/v4/token'];
 
@@ -15,6 +16,7 @@ const APIS = [
   { host: 'smartdevicemanagement.googleapis.com', service: 'smartdevicemanagement.googleapis.com', title: 'Smart Device Management API', what: 'your Nest devices' },
   { host: 'www.googleapis.com', path: '/calendar/', service: 'calendar-json.googleapis.com', title: 'Google Calendar API', what: 'Google Calendar' },
   { host: 'www.googleapis.com', path: '/tasks/', service: 'tasks.googleapis.com', title: 'Google Tasks API', what: 'Google Tasks (the shopping list)' },
+  { host: 'pubsub.googleapis.com', service: 'pubsub.googleapis.com', title: 'Cloud Pub/Sub API', what: 'doorbell alerts' },
 ];
 const CONSOLE_HOSTS = ['console.cloud.google.com', 'console.developers.google.com'];
 
@@ -67,7 +69,7 @@ export function redirectUri(loc = globalThis.location) {
 
 /** Where to send the user to sign in. With a Nest project ID, Google's device picker is shown too. */
 export function authUrl(g, redirect, state) {
-  const scopes = [g.projectId ? SCOPE_SDM : null, SCOPE_CAL, SCOPE_TASKS].filter(Boolean).join(' ');
+  const scopes = [g.projectId ? SCOPE_SDM : null, g.projectId && g.doorbellSub ? SCOPE_PUBSUB : null, SCOPE_CAL, SCOPE_TASKS].filter(Boolean).join(' ');
   const base = g.projectId
     ? `https://nestservices.google.com/partnerconnections/${encodeURIComponent(g.projectId)}/auth`
     : 'https://accounts.google.com/o/oauth2/v2/auth';
@@ -126,6 +128,9 @@ export class Google {
 
   get hasNest() { return !!(this.s.google.projectId && this.s.google.scopes.includes('sdm.service')); }
 
+  /** Signed in with permission to read the doorbell's Pub/Sub subscription. */
+  get hasPubsub() { return !!(this.s.google.refreshToken && (this.s.google.scopes || '').includes('/auth/pubsub')); }
+
   /** Start sign-in (navigates away to Google). */
   signIn(loc = globalThis.location, storage = globalThis.sessionStorage) {
     const state = crypto.getRandomValues(new Uint32Array(4)).join('-');
@@ -183,11 +188,11 @@ export class Google {
   }
 
   /** Authorised JSON request to a Google API; retries once with a fresh token on 401. */
-  async api(url, opts = {}) {
+  async api(url, opts = {}, timeoutMs) {
     const call = async (force) => fetchJSON(url, {
       ...opts,
       headers: { ...(opts.headers || {}), Authorization: `Bearer ${await this.accessToken(force)}` },
-    });
+    }, timeoutMs);
     try {
       try {
         return await call(false);
@@ -207,6 +212,7 @@ export class Google {
       this.s.google.projectId && !sc.includes('sdm.service') ? 'your Nest devices' : null,
       !sc.includes('/auth/calendar') ? 'Google Calendar' : null,
       !sc.includes('/auth/tasks') ? 'Google Tasks (the shopping list)' : null,
+      this.s.google.projectId && this.s.google.doorbellSub && !sc.includes('/auth/pubsub') ? 'doorbell alerts' : null,
     ].filter(Boolean);
   }
 }

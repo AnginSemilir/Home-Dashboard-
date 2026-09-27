@@ -13,6 +13,8 @@ import { detectEnv, MUSIC_APPS, ASSISTANTS } from './launcher.js';
 import { hhmm } from './time.js';
 import { exportSpotify, importSpotify } from './spotify.js';
 import { LOCATION_WHY } from './sun.js';
+import { checkSubName } from './doorbell.js';
+import { Chime } from './chime.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 
 const ENV_LABEL = {
@@ -41,6 +43,11 @@ export function checklist(s, st) {
     item(s.google.calendars.length ? res('calendar') : signed ? 'todo' : 'off', 'Google Calendar', s.google.calendars.map((c) => c.name).join(', '), 'calendar'),
     item(s.google.shoppingList?.id ? (s.google.scopes.includes('/auth/tasks') ? res('shopping') : 'bad') : signed ? 'todo' : 'off',
       'Shopping list (Google Tasks)', signed && !s.google.scopes.includes('/auth/tasks') ? 'sign in to Google again to allow it' : s.google.shoppingList?.name || '', 'shopping'),
+    item(!s.google.doorbellSub ? 'off' : checkSubName(s.google.doorbellSub, s.google.projectId) || !s.google.projectId ? 'bad' : !signed || !s.google.scopes.includes('/auth/pubsub') ? 'bad' : res('doorbell'),
+      'Doorbell alerts (pop-up and chime)',
+      !s.google.doorbellSub ? 'optional: docs/doorbell.md'
+        : checkSubName(s.google.doorbellSub, s.google.projectId) || (!s.google.projectId ? 'needs the Nest (Device Access) project ID'
+          : !signed || !s.google.scopes.includes('/auth/pubsub') ? 'sign in to Google again to allow it' : ''), 'doorbell'),
     item(exportSpotify() && s.spotify.clientId ? (s.panel.music === 'amazonmusic' ? 'off' : res('spotify')) : s.spotify.clientId ? 'todo' : 'off',
       'Spotify controls (optional, needs Premium)', s.panel.music === 'amazonmusic' ? 'the music button is set to Amazon Music' : s.spotify.clientId && !exportSpotify() ? 'tap Connect Spotify' : '', 'spotify'),
     item(s.kia.url ? res('kia') : 'off', 'Kia battery (optional)', '', 'kia'),
@@ -143,13 +150,40 @@ export function openSettings(root, ctx) {
   const devicePick = h('div', { class: 'pick' });
   const calPick = h('div', { class: 'pick' });
   const shopPick = h('div', { class: 'pick' });
-  const showGoogle = () => { googleState.textContent = draft.google.refreshToken ? 'Signed in.' : 'Not signed in.'; };
+  const showGoogle = () => {
+    googleState.textContent = !draft.google.refreshToken ? 'Not signed in.'
+      : draft.google.doorbellSub && !draft.google.scopes.includes('/auth/pubsub') ? 'Signed in, but not for doorbell alerts yet: sign in with Google again to allow them.' : 'Signed in.';
+  };
   showGoogle();
+  // Doorbell alerts: the Pub/Sub subscription (docs/doorbell.md), checked as it's typed.
+  const subInput = input(draft.google, 'doorbellSub', { placeholder: 'projects/your-cloud-project-id/subscriptions/panel-doorbell' });
+  const subWhy = h('div', { class: 'help' });
+  const checkSub = () => {
+    const why = checkSubName(draft.google.doorbellSub, draft.google.projectId);
+    subWhy.textContent = why || 'Optional: a doorbell press opens its live view full screen with a chime. Set up in docs/doorbell.md, then sign in with Google again.';
+    subWhy.classList.toggle('bad', !!why);
+    showGoogle(); renderList();
+  };
+  subInput.addEventListener('input', checkSub);
+  checkSub();
+  const doorbellField = h('div', {}, h('label', {}, 'Doorbell subscription (optional)', subInput), subWhy,
+    btn('Test chime', async () => {
+      const ok = await (ctx.chime || new Chime()).test();
+      if (!ok) throw new Error('Sound is blocked. Tap the screen once, and in WebView Kiosk → Settings → Web Engine turn Media Playback Requires User Gesture off. Turn the media volume up.');
+      say('Ding-dong! (Turn the media volume up if that was quiet.)');
+    }, true),
+    btn('Test doorbell', async () => {
+      if (!draft.google.cameraId) throw new Error('Choose the doorbell (camera & thermostat) first');
+      ctx.testRing?.();
+      say('Showing the doorbell as if it had been pressed.');
+    }, true));
+
   const google_ = h('section', {}, h('h2', {}, 'Google (Nest camera, thermostat and Calendar)'),
     h('div', { class: 'help' }, 'Redirect URI to add to your Google OAuth client: ', h('span', { class: 'mono' }, redirect)),
     field('OAuth client ID', input(draft.google, 'clientId', { placeholder: '…apps.googleusercontent.com' })),
     field('OAuth client secret', input(draft.google, 'clientSecret', { type: 'password' })),
     field('Device Access project ID (Nest)', input(draft.google, 'projectId', { placeholder: 'leave empty for Calendar only' })),
+    doorbellField,
     googleState,
     btn('Sign in with Google', async () => {
       if (!draft.google.clientId || !draft.google.clientSecret) throw new Error('Enter the client ID and secret first');

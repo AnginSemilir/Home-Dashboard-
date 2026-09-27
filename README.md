@@ -16,6 +16,7 @@ A wall panel for a Lenovo Tab M10 (3rd gen, TB328), built as **one web page on G
 | | Status | How |
 |---|---|---|
 | **Nest camera** (battery) | ✅ | The first button in the dock ("Front door"). A tap starts a live WebRTC stream straight from Google, full screen; tap the picture to shrink it to a corner and keep an eye on the door. A battery camera stops after 5 minutes to save its battery; ✕ stops it sooner. |
+| **Doorbell pop-up** (optional) | ✅ | When someone rings, the doorbell's live view fills the screen with "Someone's at the door" and a chime, even at night. Google sends presses through Pub/Sub in your own Cloud project (free tier). See [docs/doorbell.md](docs/doorbell.md). |
 | **Nest thermostat** temperature | ✅ | Nest (Smart Device Management) API, every 5 min. Shows the target temperature and Heating/Idle/Eco. |
 | **Google Calendar**, today and tomorrow | ✅ | Calendar API, same Google sign-in. Finished events drop off; all-day events show as chips. |
 | **Shopping list** | ✅ | A Google Tasks list, under the calendar. Tap an item to tick it off (with Undo), **+** to add one; add by voice with "Hey Google". Same Google sign-in. (Google Keep has no API a web page can use, so the list lives in Google Tasks.) |
@@ -46,7 +47,7 @@ The one exception is the optional Kia job: your Kia login goes into GitHub's enc
 4. **Octopus:** account number + API key → Connect ([docs/octopus.md](docs/octopus.md)). The checklist turns ✓ for prices and Home Mini, **or tells you if Octopus is blocked**.
 5. **Google (Nest, Calendar, shopping list):** the longest step, about 30 minutes, done once. [docs/google.md](docs/google.md). You'll sign in **in Chrome on the tablet**, then copy the settings into the kiosk app (Google doesn't allow sign-in inside kiosk apps).
 6. **Voice:** "Hey Google", the shopping list and Spotify: [docs/voice-and-apps.md](docs/voice-and-apps.md).
-7. Optional: **Spotify controls** on the panel: [docs/spotify.md](docs/spotify.md).
+7. Optional: **Spotify controls** on the panel: [docs/spotify.md](docs/spotify.md). **Doorbell pop-up and chime**: [docs/doorbell.md](docs/doorbell.md).
 8. Optional: **Kia battery**: [docs/kia.md](docs/kia.md).
 
 If something shows a small amber or red dot, tap the card for the reason, or see [docs/troubleshooting.md](docs/troubleshooting.md). To change colours, layout or add something, see [docs/customising.md](docs/customising.md).
@@ -55,7 +56,7 @@ The research behind each part (APIs, what's possible on Android, sources) is sav
 
 ## What I could and couldn't test
 
-Everything was tested in a browser against **fake** versions of every service: 59 unit tests and 45 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
+Everything was tested in a browser against **fake** versions of every service: 70 unit tests and 49 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
 
 - that Octopus accepts calls from the page (if not, use the proxy in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked));
 - real Google sign-in and a real camera stream;

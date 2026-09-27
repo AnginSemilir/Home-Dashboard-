@@ -25,6 +25,8 @@ The panel retries by itself, waiting longer each time (30 seconds up to 15 minut
 | Google ✗ "sign in again" | The Google app is still in *Testing* (7-day limit), or access was removed | [google.md](google.md) step 1.7, then sign in again in Chrome and Copy/Paste settings |
 | `disallowed_useragent` when signing in | Google blocks sign-in inside kiosk apps | Sign in in Chrome, then copy settings across ([google.md](google.md), step 3) |
 | `redirect_uri_mismatch` | OAuth client's redirect URI differs | Must be exactly `https://anginsemilir.github.io/Home-Dashboard-/` |
+| Doorbell alerts ✗ in the checklist, or no pop-up when someone rings | See [doorbell.md](doorbell.md#if-nothing-happens) | |
+| "Tap once to turn on the doorbell sound" | A plain Chrome tab blocks sound until a tap | Tap anywhere; or use WebView Kiosk / the installed Chrome app, which don't need it |
 | Camera: "The camera didn't send any video" | Battery camera asleep or offline, or poor Wi-Fi at the camera | Tap again; check it in the Google Home app |
 | Camera button says "Camera" and a tap says "Set up the Nest camera" | No camera chosen | ⚙ → Choose camera & thermostat |
 | Chart says "Tomorrow's prices from ~4pm" | Tomorrow's Agile prices aren't published yet | Normal; they appear after about 4pm |
