@@ -122,21 +122,27 @@ test('signing in without ticking Tasks says the shopping list won\'t work', asyn
   await ctx.close();
 });
 
-test('light and dark follow sunrise and sunset where the tablet is; there is no Theme setting', async () => {
+test('Auto theme: light and dark follow sunrise and sunset where the tablet is; Always light/dark still there', async () => {
   const at = Date.parse('2026-09-25T07:10:00+01:00'); // after sunrise in London (06:53), before it in Reykjavik (~08:20 BST)
   // Location refused: the weather location (London) decides. Light.
   const a = await openPanel(env, { now: at, theme: 'auto' });
   await a.page.locator('#price .big').waitFor();
   assert.equal(await a.page.evaluate(() => document.documentElement.dataset.theme), 'light');
   await a.page.locator('#clock .gear').click();
-  assert.equal(await a.page.locator('#settings').getByLabel('Theme').count(), 0, 'not a setting');
-  assert.equal(await a.page.locator('#settings').getByText(/Always dark|Always light/).count(), 0);
+  await a.page.locator('#settings').getByText('Today: light from 06:53 (sunrise) to 18:55 (sunset) at the weather location').waitFor();
+  // Always dark still wins over the sun.
+  await a.page.locator('#settings').getByLabel('Theme').selectOption('dark');
+  await a.page.locator('#settings').getByRole('button', { name: 'Save & close' }).click();
+  await a.page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   await a.ctx.close();
   // The tablet is in Reykjavik: still dark there. Only a rounded position is kept.
   const b = await openPanel(env, { now: at, theme: 'auto', geolocation: { latitude: 64.14681, longitude: -21.94229 } });
   await b.page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
   const place = await b.page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.cache.v1')).place);
   assert.deepEqual([place.lat, place.lon], [64.15, -21.94]);
+  await b.page.locator('#clock .gear').click();
+  await b.page.locator('#settings').getByText(/Today: light from 08:\d\d \(sunrise\) to 20:\d\d \(sunset\) where the tablet is/).waitFor();
+  await b.page.locator('#settings').getByRole('button', { name: 'Cancel' }).click();
   // The place is remembered: after a reload with location off, still Reykjavik's sun.
   await b.ctx.setGeolocation(null).catch(() => {});
   await b.ctx.clearPermissions();

@@ -3,7 +3,7 @@
 ## Without touching code (⚙ → Panel)
 
 - **Style:** *Bold* (big and clear, readable across the room; the default) or *Ambient* (softer cards, a background tint that follows the time of day).
-- **Light and dark** aren't a setting: the panel goes light at sunrise and dark at sunset where the tablet is. It uses the tablet's location (the browser asks once: tap **Allow**); if location is off or refused, it uses the weather location. Only a rounded position (about 1 km) is kept, on the tablet. Night dimming (below) works the same either way.
+- **Theme:** *Auto* goes light at sunrise and dark at sunset where the tablet is (today's times are shown under the setting). It uses the tablet's location (the browser asks once: tap **Allow**); if location is off or refused, it uses the weather location. Only a rounded position (about 1 km) is kept, on the tablet. Or *Always light* / *Always dark*. Night dimming (below) works the same in every theme.
 - **Music button:** Spotify or Amazon Music. **AI button:** Claude or Gemini. The **Assistant** button next to it always starts the tablet's own voice assistant.
 - **Green below / Red from (p/kWh):** the price colours. Blue is always at or below 0p.
 - **Night mode from/until:** when the panel dims itself (it only dims after 90 seconds without a touch, and never while the camera is live).
@@ -18,7 +18,7 @@ Everything is plain HTML/CSS/JavaScript in `web/`, with no build step. Push a ch
 | To change… | Edit |
 |---|---|
 | Colours, sizes, the grid layout | `web/css/bold.css` or `web/css/ambient.css`, one file per style. Colours are variables at the top (`--cheap`, `--mid`, `--high`, `--plunge`, `--card`, …); the light theme overrides them under `:root[data-theme="light"]`. |
-| Sunrise/sunset and the light/dark switch | `web/js/sun.js` (`locate`, `sunToday`) and `applyTheme()` / `refreshPlace()` in `web/js/main.js`. For screenshots, add `?theme=light` or `?theme=dark` to the address to pin one. |
+| Sunrise/sunset and the light/dark switch | `web/js/sun.js` (`locate`, `sunToday`) and `applyTheme()` / `refreshPlace()` in `web/js/main.js`. For screenshots, `?theme=light` or `?theme=dark` on the address overrides the setting. |
 | What each card shows | `web/js/ui.js` (`renderPrice`, `renderTiles`, `renderCalendar`, `renderShopping`, `renderWeather`, `renderCamera`, and `showChartTip` for the pop-up when you tap a bar) |
 | The shopping list (Google Tasks) | `web/js/tasks.js`; choose the list in ⚙ → Choose shopping list |
 | The price chart | `web/js/chart.js` |

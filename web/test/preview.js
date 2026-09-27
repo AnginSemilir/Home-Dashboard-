@@ -26,10 +26,10 @@ for (const vp of viewports) {
   await page.clock.setFixedTime(NOW);
   await installMocks(page, { now: NOW, dayStart });
   const s = fullSettings(NOW);
-  // STYLE=bold|ambient; THEME=light|dark pins the theme (otherwise it follows the sun)
-  s.panel = { ...s.panel, ...(process.env.STYLE ? { style: process.env.STYLE } : {}) };
+  // STYLE=bold|ambient, THEME=auto|light|dark
+  s.panel = { ...s.panel, ...(process.env.STYLE ? { style: process.env.STYLE } : {}), ...(process.env.THEME ? { theme: process.env.THEME } : {}) };
   await page.addInitScript((x) => localStorage.setItem('wallpanel.settings.v1', JSON.stringify(x)), s);
-  await page.goto(/^(light|dark)$/.test(process.env.THEME || '') ? `${url}?theme=${process.env.THEME}` : url);
+  await page.goto(url);
   await page.waitForTimeout(1500);
   const file = `${outDir}/panel-${vp.w}x${vp.h}.png`;
   await page.screenshot({ path: file });

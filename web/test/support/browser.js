@@ -36,18 +36,17 @@ export async function openPanel(env, {
   if (clock === 'install') await page.clock.install({ time: now });
   else await page.clock.setFixedTime(now);
   const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt });
-  // PANEL_STYLE / PANEL_THEME run the whole suite in another look (CI runs every style). The
-  // theme isn't a setting (it follows the sun), so it's pinned with ?theme= for tests.
+  // PANEL_STYLE / PANEL_THEME run the whole suite in another look (CI runs every style).
   style ??= process.env.PANEL_STYLE;
   theme ??= process.env.PANEL_THEME;
   const s = settings === undefined ? fullSettings(now) : settings;
-  if (s && style) s.panel = { ...s.panel, style };
+  if (s && (style || theme)) s.panel = { ...s.panel, ...(style ? { style } : {}), ...(theme ? { theme } : {}) };
   if (s) {
     // Only on the first load, so tests can reload and keep what the page saved.
     await page.addInitScript((json) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('wallpanel.settings.v1', json); sessionStorage.setItem('seeded', '1'); } }, JSON.stringify(s));
   }
   if (initScript) await page.addInitScript(initScript);
-  await page.goto(theme ? `${env.url}?theme=${theme}` : env.url);
+  await page.goto(env.url);
   return { ctx, page, calls, problems };
 }
 

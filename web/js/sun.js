@@ -67,7 +67,7 @@ export function locate(geo = globalThis.navigator?.geolocation, { timeout = 30e3
   });
 }
 
-/** 'light' or 'dark': 'auto' follows the sun; 'light'/'dark' force one (previews and tests only). */
+/** 'light' or 'dark' for a Theme setting of 'auto' (follows the sun) | 'light' | 'dark'. */
 export function themeFor(mode, now, sun) {
   if (mode === 'light' || mode === 'dark') return mode;
   return sun && now >= sun.rise && now < sun.set ? 'light' : 'dark';

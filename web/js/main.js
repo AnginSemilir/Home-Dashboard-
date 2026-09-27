@@ -330,10 +330,9 @@ const sun = (now = Date.now()) => (state.place
   ? sunToday(now, { lat: state.place.lat, lon: state.place.lon, tz })
   : sunToday(now, { weather: state.weather, lat: settings.weather.lat, lon: settings.weather.lon, tz }));
 
-// ?theme=light or ?theme=dark pins one theme, for screenshots and tests. There's no setting:
-// the panel is light from sunrise to sunset.
+// ?theme=light|dark|auto overrides the setting for this page, for screenshots and tests.
 const THEME_PIN = (() => {
-  try { const t = new URLSearchParams(location.search).get('theme'); return t === 'light' || t === 'dark' ? t : 'auto'; } catch { return 'auto'; }
+  try { const t = new URLSearchParams(location.search).get('theme'); return ['light', 'dark', 'auto'].includes(t) ? t : null; } catch { return null; }
 })();
 
 /**
@@ -349,9 +348,9 @@ async function refreshPlace() {
   applyTheme();
 }
 
-/** Light between sunrise and sunset. Returns true if it changed. */
+/** Light between sunrise and sunset (or always light/dark, as set). Returns true if it changed. */
 function applyTheme(now = Date.now()) {
-  const theme = themeFor(THEME_PIN, now, sun(now));
+  const theme = themeFor(THEME_PIN || settings.panel.theme, now, sun(now));
   const root = document.documentElement;
   if (root.dataset.theme === theme) return false;
   root.dataset.theme = theme;
@@ -400,7 +399,7 @@ async function boot() {
     camera: openCamera,
     cameraClose: closeCamera,
     launch,
-    settings: () => openSettings(document.body, { settings, save, state, google }),
+    settings: () => openSettings(document.body, { settings, save, state, google, sun }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
@@ -428,7 +427,7 @@ async function boot() {
   }
 
   const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
-  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google });
+  if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.

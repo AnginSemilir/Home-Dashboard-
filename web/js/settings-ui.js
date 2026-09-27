@@ -10,6 +10,7 @@ import { listTaskLists, createTaskList } from './tasks.js';
 import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
 import { detectEnv, MUSIC_APPS, ASSISTANTS } from './launcher.js';
+import { hhmm } from './time.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 
 const ENV_LABEL = {
@@ -247,8 +248,11 @@ export function openSettings(root, ctx) {
     el.addEventListener('change', () => { obj[key] = el.value; });
     return el;
   };
+  const today = ctx.sun?.();
+  const sunText = `${today ? `Today: light from ${hhmm(today.rise)} (sunrise) to ${hhmm(today.set)} (sunset)` : 'Sunrise and sunset'} ${ctx.state?.place ? 'where the tablet is' : 'at the weather location (allow location access for the tablet\'s own)'}.`;
   const look = [
     field('Style', select(draft.panel, 'style', [['bold', 'Bold: big and clear, readable across the room'], ['ambient', 'Ambient: softer cards, tint follows the time of day']])),
+    field('Theme', select(draft.panel, 'theme', [['auto', 'Auto: light from sunrise to sunset'], ['light', 'Always light'], ['dark', 'Always dark']]), sunText),
   ];
   const launcherSel = h('select', {}, ...['auto', 'webview', 'chrome', 'fully'].map((v) => h('option', { value: v, selected: draft.panel.launcher === v }, v)));
   launcherSel.addEventListener('change', () => { draft.panel.launcher = launcherSel.value; });

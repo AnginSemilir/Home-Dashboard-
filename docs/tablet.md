@@ -11,7 +11,7 @@ It's on **F-Droid** and the **Play Store** (search "WebView Kiosk"; developer nk
 3. In its settings, turn on **keep screen on** and full screen / immersive mode if offered.
 
    Leave "set as default launcher / home app" **off**. Otherwise the panel's Home button would bring you straight back to the panel.
-4. If it asks to use your location, allow it: the panel uses it only to go light at sunrise and dark at sunset where the tablet is (nothing is sent anywhere). If the kiosk app can't share location, the panel uses the weather location instead.
+4. If it asks to use your location, allow it: the panel uses it only for sunrise and sunset times, so the Auto theme goes light and dark at the right times where the tablet is (nothing is sent anywhere). If the kiosk app can't share location, the panel uses the weather location instead.
 5. The panel opens its Settings screen with a checklist. Set up weather and Octopus there. Do Google in Chrome ([google.md](google.md), step 3), then copy the settings across.
 
 Menu names differ between versions of the app. If a setting described here isn't there, look for the nearest equivalent.
