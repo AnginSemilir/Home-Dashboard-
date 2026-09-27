@@ -19,6 +19,11 @@ export const APPS = {
   gemini: {
     pkg: 'com.google.android.apps.bard',
     web: 'https://gemini.google.com/app',
+  },
+  // The tablet's own voice assistant, listening.
+  assistant: {
+    pkg: 'com.google.android.apps.bard',
+    web: 'https://gemini.google.com/app',
     special: 'intent:#Intent;action=android.intent.action.VOICE_ASSIST;package=com.google.android.googlequicksearchbox;launchFlags=0x10000000;end',
   },
   home: {
@@ -29,6 +34,9 @@ export const APPS = {
 /** The apps the music button can open (⚙ → Panel → Music button). */
 export const MUSIC_APPS = { spotify: 'Spotify', amazonmusic: 'Amazon Music' };
 export const musicApp = (s) => (Object.hasOwn(MUSIC_APPS, s?.panel?.music) ? s.panel.music : 'spotify');
+/** The AI button (⚙ → Panel → AI button); the tablet's own assistant has its own button. */
+export const ASSISTANTS = { claude: 'Claude', gemini: 'Gemini' };
+export const assistantApp = (s) => (Object.hasOwn(ASSISTANTS, s?.panel?.assistant) ? s.panel.assistant : 'claude');
 
 export function detectEnv(win = globalThis) {
   if (win.fully && typeof win.fully.startApplication === 'function') return 'fully';

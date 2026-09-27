@@ -63,6 +63,7 @@
   --i-amazonmusic: #5cc9e6;
   --i-claude: #e08a68;
   --i-gemini: #8fb2f7;
+  --i-assistant: #efc15a;
   --i-mix: 14%;
   /* Status: amber = old data, red = error. */
   --stale: #e0a53a;
@@ -137,6 +138,7 @@
   --i-amazonmusic: #0f7f9e;
   --i-claude: #c8623f;
   --i-gemini: #3e6fd6;
+  --i-assistant: #b07c0c;
   --i-mix: 12%;
   --stale: #d18f0b;
   --error: #d64545;
@@ -528,6 +530,7 @@ svg { display: block; }
 .dock .b-amazonmusic .d-ico { --ic: var(--i-amazonmusic); }
 .dock .b-claude .d-ico { --ic: var(--i-claude); }
 .dock .b-gemini .d-ico { --ic: var(--i-gemini); }
+.dock .b-assistant .d-ico { --ic: var(--i-assistant); }
 .dock button > span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- Overlays ---------- */

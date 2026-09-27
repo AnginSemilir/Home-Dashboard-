@@ -39,6 +39,7 @@ export const DEFAULTS = Object.freeze({
     carApp: 'com.kia.oneapp.eu',
     carName: 'e-Niro',
     music: 'spotify',      // spotify | amazonmusic: what the music button opens
+    assistant: 'claude',   // claude | gemini: the AI button (the tablet's own assistant has its own button)
     style: 'bold',         // bold | ambient (two looks; see Settings → Panel)
     theme: 'auto',         // auto (light from sunrise to sunset) | dark | light
   },

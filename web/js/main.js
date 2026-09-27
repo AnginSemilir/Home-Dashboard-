@@ -9,7 +9,7 @@ import { Nest, LiveStream, parseThermostat, parseCamera } from './nest.js';
 import { fetchEvents } from './calendar.js';
 import { fetchWeather } from './weather.js';
 import { fetchKia } from './kia.js';
-import { actionFor, detectEnv, perform, musicApp } from './launcher.js';
+import { actionFor, detectEnv, perform, musicApp, assistantApp } from './launcher.js';
 import * as ui from './ui.js';
 import { sunToday, themeFor } from './sun.js';
 import { fetchItems, setDone, addItem } from './tasks.js';
@@ -276,7 +276,7 @@ async function closeCamera() {
 
 // ---------- Buttons ----------
 function launch(button, hold) {
-  const name = button === 'music' ? musicApp(settings) : button;
+  const name = button === 'music' ? musicApp(settings) : button === 'ai' ? assistantApp(settings) : button;
   const env = settings.panel.launcher === 'auto' ? detectEnv() : settings.panel.launcher;
   const pkg = name === 'car' ? settings.panel.carApp : undefined;
   perform(actionFor(name, env, { hold, pkg }), window, (t) => ui.toast(refs, t));

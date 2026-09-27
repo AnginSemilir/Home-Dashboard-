@@ -8,7 +8,7 @@ import { priceSummary, band, round1 } from './agile.js';
 import { renderChart } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
-import { MUSIC_APPS, musicApp } from './launcher.js';
+import { MUSIC_APPS, musicApp, ASSISTANTS, assistantApp } from './launcher.js';
 
 const icon = (name, set = UI) => svg(set[name] || UI.camera);
 
@@ -25,8 +25,8 @@ export function timeOfDay(hour) {
 
 const DOCK = [
   { id: 'music', label: 'Spotify', icon: 'music' }, // Spotify or Amazon Music: see renderDock
-  { id: 'claude', label: 'Claude', icon: 'spark' },
-  { id: 'gemini', label: 'Gemini', icon: 'mic' },
+  { id: 'ai', label: 'Claude', icon: 'spark' }, // Claude or Gemini: see renderDock
+  { id: 'assistant', label: 'Assistant', icon: 'mic' }, // the tablet's own voice assistant
   { id: 'home', label: 'Home', icon: 'home' },
 ];
 
@@ -419,14 +419,20 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
   }
 }
 
-/** The music button says which app it opens (and takes that app's colour in the Ambient style). */
+const AI_ICON = { claude: 'spark', gemini: 'gem' };
+
+/** The music and assistant buttons say which app they open (and take its colour in the Ambient style). */
 export function renderDock(r, s) {
-  const app = musicApp(s);
-  const btn = r.dockBtn.music;
-  if (btn.dataset.service === app) return;
-  btn.dataset.service = app;
-  btn.className = `b-music b-${app}`;
-  btn.querySelector('.d-label').textContent = MUSIC_APPS[app];
+  const set = (btn, app, label, ico) => {
+    if (btn.dataset.service === app) return;
+    btn.dataset.service = app;
+    btn.className = `b-${btn.dataset.app} b-${app}`;
+    btn.querySelector('.d-label').textContent = label;
+    if (ico) btn.querySelector('.d-ico').replaceChildren(icon(ico));
+  };
+  const music = musicApp(s), ai = assistantApp(s);
+  set(r.dockBtn.music, music, MUSIC_APPS[music]);
+  set(r.dockBtn.ai, ai, ASSISTANTS[ai], AI_ICON[ai]);
 }
 
 export function renderCamera(r, s, st, live) {

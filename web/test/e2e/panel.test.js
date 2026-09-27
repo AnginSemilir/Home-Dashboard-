@@ -245,8 +245,9 @@ test('buttons in the kiosk app (Android WebView) open Android apps and screens',
   await ready(page);
   const nav = await recordNavigations(page);
   assert.equal(await page.locator('.dock [data-app="shopping"]').count(), 0, 'shopping is a card now, not a button');
-  for (const app of ['home', 'claude', 'gemini', 'music']) await page.locator(`.dock [data-app="${app}"]`).click();
-  const box = await page.locator('.dock [data-app="claude"]').boundingBox();
+  assert.deepEqual(await page.locator('.dock > *').allInnerTexts(), ['Front door', 'Spotify', 'Claude', 'Assistant', 'Home']);
+  for (const app of ['home', 'ai', 'assistant', 'music']) await page.locator(`.dock [data-app="${app}"]`).click();
+  const box = await page.locator('.dock [data-app="ai"]').boundingBox();
   await page.mouse.move(box.x + 10, box.y + 10);
   await page.mouse.down();
   await page.waitForTimeout(800);
@@ -256,7 +257,7 @@ test('buttons in the kiosk app (Android WebView) open Android apps and screens',
   assert.deepEqual(nav, [
     APPS.home.special,
     APPS.claude.special,
-    APPS.gemini.special,
+    APPS.assistant.special,
     launchIntent('com.spotify.music'),
     launchIntent('com.anthropic.claude'), // press and hold: the normal Claude app
   ]);
@@ -269,13 +270,33 @@ test('buttons in Chrome use links Chrome allows, and Home explains the gesture',
   const nav = await recordNavigations(page);
   await page.locator('.dock [data-app="home"]').click();
   await page.locator('.toast', { hasText: /swipe up/i }).waitFor();
-  await page.locator('.dock [data-app="claude"]').click();
+  await page.locator('.dock [data-app="ai"]').click();
   await page.locator('.dock [data-app="music"]').click();
   await waitFor(() => nav.length >= 2, 'two navigations');
   assert.deepEqual(nav, [
     'intent://claude.ai/new#Intent;scheme=https;package=com.anthropic.claude;end',
     'intent://open.spotify.com/#Intent;scheme=https;package=com.spotify.music;end',
   ]);
+  await ctx.close();
+});
+
+test('the AI button opens Claude or Gemini, as chosen in Settings; Assistant is always there', async () => {
+  const s = fullSettings(NOW);
+  s.panel.assistant = 'gemini';
+  const { ctx, page } = await openPanel(env, { settings: s, userAgent: UA.webview });
+  await ready(page);
+  const ai = page.locator('.dock [data-app="ai"]');
+  assert.equal(await ai.innerText(), 'Gemini');
+  assert.equal(await page.locator('.dock [data-app="assistant"]').innerText(), 'Assistant');
+  const nav = await recordNavigations(page);
+  await ai.click();
+  await page.locator('.dock [data-app="assistant"]').click();
+  await waitFor(() => nav.length >= 2, 'two navigations');
+  assert.deepEqual(nav, [APPS.gemini.special || launchIntent('com.google.android.apps.bard'), APPS.assistant.special]);
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByLabel('AI button').selectOption('claude');
+  await page.locator('#settings').getByRole('button', { name: 'Save & close' }).click();
+  await page.locator('.dock [data-app="ai"]', { hasText: 'Claude' }).waitFor();
   await ctx.close();
 });
 

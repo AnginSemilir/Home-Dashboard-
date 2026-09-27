@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { normalizeEvent, groupDays, dateToMs, fetchEvents } from '../../js/calendar.js';
 import { describe, lookupPlace } from '../../js/weather.js';
 import { encryptReading, decryptReading, newKey } from '../../js/kia.js';
-import { detectEnv, actionFor, appLink, launchIntent, APPS, musicApp } from '../../js/launcher.js';
+import { detectEnv, actionFor, appLink, launchIntent, APPS, musicApp, assistantApp } from '../../js/launcher.js';
 import { renderChart } from '../../js/chart.js';
 import { loadSettings, saveSettings, importSettings, exportSettings, DEFAULTS } from '../../js/config.js';
 
@@ -114,7 +114,13 @@ test('launcher: what each button does in each environment', () => {
   assert.equal(musicApp({ panel: { music: 'amazonmusic' } }), 'amazonmusic');
   assert.equal(musicApp({ panel: { music: 'toString' } }), 'spotify', 'only known apps');
   assert.equal(musicApp({}), 'spotify');
-  assert.deepEqual(actionFor('gemini', 'fully'), { kind: 'fully-intent', value: APPS.gemini.special });
+  assert.deepEqual(actionFor('assistant', 'fully'), { kind: 'fully-intent', value: APPS.assistant.special });
+  assert.deepEqual(actionFor('assistant', 'webview'), { kind: 'navigate', value: APPS.assistant.special });
+  assert.deepEqual(actionFor('assistant', 'webview', { hold: true }), { kind: 'navigate', value: launchIntent(APPS.assistant.pkg) });
+  assert.equal(actionFor('gemini', 'chrome').value, 'intent://gemini.google.com/app#Intent;scheme=https;package=com.google.android.apps.bard;end');
+  assert.equal(assistantApp({ panel: { assistant: 'gemini' } }), 'gemini');
+  assert.equal(assistantApp({ panel: { assistant: 'constructor' } }), 'claude', 'only known assistants');
+  assert.equal(assistantApp({}), 'claude');
   assert.equal(actionFor('home', 'chrome').kind, 'message');
   assert.deepEqual(actionFor('claude', 'chrome'), { kind: 'navigate', value: 'intent://claude.ai/new#Intent;scheme=https;package=com.anthropic.claude;end' });
   assert.deepEqual(actionFor('car', 'webview', { pkg: 'com.kia.oneapp.eu' }), { kind: 'navigate', value: launchIntent('com.kia.oneapp.eu') });
