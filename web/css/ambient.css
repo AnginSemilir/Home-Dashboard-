@@ -42,7 +42,7 @@
   --high: #cb3b4d;
   --past: #3a3f47;
   --chip-mix: 20%;
-  --glow-mix: 15%;
+  --glow-mix: 30%;
   /* Chart furniture: solid hairlines. */
   --grid: rgb(255 255 255 / 0.065);
   --zero: rgb(255 255 255 / 0.22);
@@ -58,7 +58,7 @@
   --t-cost: #6fc3a0;
   --t-indoor: #eb9a70;
   --heat: #f28a4e;
-  --i-shopping: #efc15a;
+  --i-camera: #c3a6f5;
   --i-spotify: #4fcf85;
   --i-claude: #e08a68;
   --i-gemini: #8fb2f7;
@@ -117,7 +117,7 @@
   --high: #bc2b42;
   --past: #c5cad2;
   --chip-mix: 16%;
-  --glow-mix: 13%;
+  --glow-mix: 24%;
   --grid: rgb(28 38 56 / 0.08);
   --zero: rgb(28 38 56 / 0.32);
   --midnight: rgb(28 38 56 / 0.17);
@@ -131,7 +131,7 @@
   --t-cost: #1e9468;
   --t-indoor: #d8683a;
   --heat: #e0622a;
-  --i-shopping: #bf870f;
+  --i-camera: #7c52d4;
   --i-spotify: #1c9a55;
   --i-claude: #c8623f;
   --i-gemini: #3e6fd6;
@@ -178,16 +178,17 @@ svg { display: block; }
   display: grid;
   gap: var(--gap);
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.72fr) minmax(0, 1fr);
-  grid-template-rows: minmax(0, 0.72fr) minmax(0, 0.33fr) minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 0.72fr) minmax(0, 1.33fr) auto auto;
   grid-template-areas:
-    "clock price cal"
-    "clock chart cal"
-    "cam   chart cal"
-    "tiles tiles cal"
+    "clock price side"
+    "clock chart side"
+    "tiles tiles side"
     "dock  dock  dock";
   background: var(--bg);
 }
-.col-main, .col-side { display: contents; }
+.col-main { display: contents; }
+/* The right-hand column: the calendar over the shopping list (as tall as its items, up to half). */
+.col-side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: var(--gap); }
 /* Time-of-day ambience: one or two very faint static glows over the page colour. */
 .panel.tod-dawn {
   background:
@@ -243,9 +244,10 @@ svg { display: block; }
 
 /* ---------- Clock + weather ---------- */
 /* The clock is large but light: ambient information, so it never competes with the price. */
-.clock { grid-area: clock; padding: var(--pad-y) var(--pad-x); display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); }
+/* A tall card: the time at the top, the weather anchored to the bottom. */
+.clock { grid-area: clock; padding: var(--pad-y) var(--pad-x); display: grid; grid-template-rows: auto auto minmax(0, 1fr) minmax(0, auto); }
 .clock .time {
-  font-size: clamp(44px, calc(12vh - 24px), 76px); font-weight: 300; line-height: 1; letter-spacing: -0.03em;
+  font-size: clamp(48px, calc(13vh - 16px), 92px); font-weight: 300; line-height: 1; letter-spacing: -0.03em;
   margin-left: -0.03em; white-space: nowrap;
 }
 .clock .date { color: var(--muted); font-size: 1.08em; margin-top: 0.3em; }
@@ -257,6 +259,7 @@ svg { display: block; }
 .clock .gear:active { background: var(--card-2); }
 .clock > .dot { right: 3.3em; top: 1.3em; }
 .wx-now {
+  align-self: end;
   display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; column-gap: 0.65em;
   margin-top: 0.75em; padding-top: 0.75em; border-top: 1px solid var(--line);
 }
@@ -265,7 +268,7 @@ svg { display: block; }
 .wx-now > div:last-child { min-width: 0; line-height: 1.3; }
 .wx-now > div:last-child > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wx-now .muted { font-size: 0.9em; }
-.wx-days { display: grid; align-content: start; gap: 0.1em; overflow: hidden; margin-top: 0.5em; font-variant-numeric: tabular-nums; }
+.wx-days { display: grid; align-content: start; gap: 0.3em; overflow: hidden; margin-top: 0.7em; font-variant-numeric: tabular-nums; }
 /* Only whole rows: rows that don't fit are hidden by the panel script. */
 .wx-day { display: grid; grid-template-columns: 2.9em 1.6em 2em minmax(0, 1fr) 2em; align-items: center; gap: 0.55em; min-height: 1.7em; }
 .wx-day > span:first-child { color: var(--muted); }
@@ -277,14 +280,18 @@ svg { display: block; }
 .wx-bar span { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(90deg, var(--wx-cold), var(--wx-warm)); }
 
 /* ---------- Price (the hero) ---------- */
+/* The card glows with the current band's colour (green when cheap, red at the peak) and
+   fades to the next one when the half hour changes. The words stay in ink. */
+@property --g { syntax: '<color>'; inherits: true; initial-value: transparent; }
 .price {
   grid-area: price; padding: var(--pad-y) var(--pad-x); display: grid; grid-template-rows: auto minmax(0, 1fr) auto;
-  --glow: transparent;
+  --g: transparent;
   background:
-    radial-gradient(55% 95% at 8% 58%, var(--glow), transparent 100%),
+    radial-gradient(85% 150% at 0% 50%, color-mix(in srgb, var(--g) var(--glow-mix), transparent), transparent 100%),
     linear-gradient(var(--card-top), var(--card) 40%);
+  box-shadow: var(--lift), inset 0 0 0 1px color-mix(in srgb, var(--g) 22%, transparent);
+  transition: --g 1.2s ease;
 }
-.price[data-band] { --glow: color-mix(in srgb, var(--g) var(--glow-mix), transparent); }
 .price[data-band="plunge"] { --g: var(--plunge); }
 .price[data-band="cheap"] { --g: var(--cheap); }
 .price[data-band="mid"] { --g: var(--mid); }
@@ -348,10 +355,27 @@ svg { display: block; }
 .chart-svg .ch-bar.ch-past { fill: var(--past); } /* gone: a clean grey, not faded colour */
 .chart-svg .ch-pending { fill: var(--pending); } /* where tomorrow's prices will go */
 .chart-svg .ch-note { fill: var(--faint); font-size: 1.05em; }
+.chart-svg .ch-soon { font-size: 1em; }
+.chart-svg .ch-hit { cursor: pointer; }
+.chart-svg .ch-hit.on { fill: var(--text); fill-opacity: 0.07; } /* the half hour you tapped */
+/* Tap a bar: its price and time in a small pop-up above it. */
+.chart-tip {
+  position: absolute; z-index: 5; pointer-events: none; white-space: nowrap;
+  padding: 0.5em 0.85em; border-radius: 12px; font-size: 1.02em; line-height: 1.3;
+  background: var(--toast-bg); color: var(--toast-ink);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06), 0 6px 18px rgb(0 0 0 / 0.3);
+}
+.chart-tip b { font-weight: 650; font-variant-numeric: tabular-nums; }
+.chart-tip .tip-band { color: color-mix(in srgb, var(--toast-ink) 72%, var(--toast-bg)); }
+.chart-tip::after {
+  content: ''; position: absolute; top: 100%; left: var(--caret, 50%); margin-left: -6px;
+  border: 6px solid transparent; border-top-color: var(--toast-bg);
+}
+.chart-tip.below::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--toast-bg); }
 .chart-svg .ch-empty { fill: var(--faint); font-size: 1.2em; }
 
 /* ---------- Calendar ---------- */
-.cal { grid-area: cal; padding: var(--pad-y) var(--pad-x); display: flex; flex-direction: column; }
+.cal { flex: 1 1 0; padding: var(--pad-y) var(--pad-x); display: flex; flex-direction: column; }
 /* A fixed height to fill: events that don't fit are hidden by the panel script ("+N more"). */
 .cal-body { flex: 1 1 0; display: flex; flex-direction: column; gap: 0.95em; min-height: 0; overflow: hidden; }
 .cal-day h3 {
@@ -374,38 +398,77 @@ svg { display: block; }
 }
 .cal .empty { color: var(--faint); padding: 0.3em 0; }
 .cal .more { color: var(--muted); font-size: 0.9em; padding: 0.15em 0 0 calc(4.8em / 0.9 + 3px); } /* lined up with the event titles */
+.cal .more.all { padding-left: 0; }
 
-/* ---------- Camera ---------- */
-.cam {
-  grid-area: cam; display: grid; place-items: center;
-  background:
-    radial-gradient(75% 65% at 50% 42%, var(--cam-glow), transparent 70%),
-    linear-gradient(var(--card-top), var(--card) 40%);
-}
-.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-.cam .cam-idle { display: grid; justify-items: center; gap: 0.35em; text-align: center; padding: 1em; }
-.cam .cam-idle .ico {
-  width: 3.6em; height: 3.6em; margin-bottom: 0.35em; border-radius: 50%; display: grid; place-items: center;
+/* ---------- Shopping list (Google Tasks) ---------- */
+.shop { flex: 0 1 auto; max-height: 50%; padding: var(--pad-y) var(--pad-x) calc(var(--pad-y) - 0.6em); display: flex; flex-direction: column; }
+.shop-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; margin: -0.45em -0.4em 0.2em 0; }
+.shop-head h3 { margin: 0; font-size: 1.08em; font-weight: 600; }
+.shop-plus {
+  flex: none; width: 2.4em; height: 2.4em; border-radius: 50%; display: grid; place-items: center;
   color: var(--muted); background: var(--card-2); box-shadow: inset 0 0 0 1px var(--edge);
 }
-.cam .cam-idle .ico svg { width: 1.7em; height: 1.7em; }
-.cam .cam-name { font-size: 1.4em; font-weight: 600; letter-spacing: -0.01em; }
-.cam .cam-idle .muted { font-size: 0.92em; max-width: 22em; text-wrap: balance; }
-.cam .cam-hint {
-  display: inline-flex; align-items: center; gap: 0.5em; margin-top: 0.55em; padding: 0.6em 1.15em 0.6em 0.95em;
-  border-radius: 999px; background: var(--card-2); box-shadow: inset 0 0 0 1px var(--edge); font-weight: 500;
+.shop-plus svg { width: 1.2em; height: 1.2em; }
+.shop-plus:active { background: var(--card-press); }
+.shop.off .shop-plus { display: none; }
+.shop > .dot { top: calc(var(--pad-y) + 0.3em); right: calc(var(--pad-x) + 2.7em); }
+.shop.off > .dot { right: var(--pad-x); }
+.shop-add { display: flex; gap: 0.45em; margin: 0.2em 0 0.4em; }
+.shop-add input {
+  flex: 1; min-width: 0; font: inherit; color: var(--text); user-select: text; -webkit-user-select: text;
+  background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 0.5em 0.7em;
 }
-.cam .cam-hint svg { width: 1em; height: 1em; color: var(--muted); }
+.shop-add input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.shop-go { flex: none; padding: 0 1em; border-radius: 10px; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.shop-items { list-style: none; margin: 0; padding: 0; flex: 0 1 auto; min-height: 0; overflow: hidden; }
+.shop-items li[data-id] { display: flex; align-items: center; gap: 0.75em; min-height: 2.75em; cursor: pointer; }
+.shop-items li[data-id] + li[data-id] { border-top: 1px solid var(--line); }
+.shop-items .tick {
+  flex: none; width: 1.45em; height: 1.45em; border-radius: 50%; border: 1.5px solid var(--faint);
+  display: grid; place-items: center; color: transparent;
+}
+.shop-items .tick svg { width: 0.9em; height: 0.9em; }
+.shop-items li[data-id]:active .tick { background: var(--ok); border-color: var(--ok); color: #fff; }
+.shop-items .what { min-width: 0; font-size: 1.05em; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shop-items .empty { color: var(--faint); padding: 0.3em 0; }
+.shop-items .more { color: var(--muted); font-size: 0.9em; padding: 0.5em 0 0 calc((1.45em + 0.75em) / 0.9); }
+
+/* ---------- Camera: the first dock button; live view fills the screen ---------- */
+.cam {
+  height: clamp(52px, 8vh, 64px); padding: 0 0.75em; font-size: 1.15em; font-weight: 500; cursor: pointer;
+  display: flex; align-items: center;
+}
+.cam .cam-idle { display: flex; align-items: center; gap: 0.7em; min-width: 0; }
+.cam .cam-idle .ico {
+  --ic: var(--i-camera);
+  width: 2.05em; height: 2.05em; flex: none; display: grid; place-items: center; border-radius: 0.62em;
+  color: var(--ic); background: color-mix(in srgb, var(--ic) var(--i-mix), transparent);
+}
+.cam .cam-idle .ico svg { width: 1.2em; height: 1.2em; }
+.cam .cam-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The long explanations live in Settings; the button just says which camera. */
+.cam .cam-idle > .muted, .cam .cam-hint { display: none; }
+.cam > .dot { top: 8px; right: 8px; }
+.cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 /* The live bar sits on video, so it stays light-on-dark in both themes. */
 .cam .cam-bar {
-  position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 0.8em;
+  position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 0.8em; font-size: 0.87em;
   padding: 0.8em 1em; background: linear-gradient(#000a, #0000); color: #fff; font-weight: 500;
 }
 .cam .cam-bar .live-badge { background: #d23c4c; color: #fff; border-radius: 6px; padding: 0.1em 0.5em; font-size: 0.85em; font-weight: 600; letter-spacing: 0.06em; }
 .cam .cam-bar .spacer { flex: 1; }
 .cam .cam-bar .close { width: 2.4em; height: 2.4em; display: grid; place-items: center; border-radius: 50%; background: #0008; color: #fff; }
 .cam .cam-bar .close svg { width: 1.3em; height: 1.3em; }
-.cam.expanded { position: fixed; inset: 0; z-index: 40; border-radius: 0; background: #000; box-shadow: none; }
+/* Live: full screen. Tap the picture to shrink it to a corner above the dock (tap again to
+   enlarge); the dock keeps an empty slot where the button was. */
+.cam.expanded { position: fixed; inset: 0; z-index: 40; height: auto; border-radius: 0; background: #000; box-shadow: none; }
+.cam:has(> video:not(.hidden)):not(.expanded) {
+  position: fixed; z-index: 40; right: var(--gap); bottom: calc(clamp(52px, 8vh, 64px) + 2 * var(--gap));
+  width: 30vw; height: auto; aspect-ratio: 16 / 9; padding: 0; background: #000;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+}
+.dock > :nth-child(2) { grid-column: 2; } .dock > :nth-child(3) { grid-column: 3; }
+.dock > :nth-child(4) { grid-column: 4; } .dock > :nth-child(5) { grid-column: 5; }
 
 /* ---------- Tiles ---------- */
 .tiles { grid-area: tiles; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap); }
@@ -459,7 +522,6 @@ svg { display: block; }
   color: var(--ic); background: color-mix(in srgb, var(--ic) var(--i-mix), transparent);
 }
 .dock .d-ico svg { width: 1.2em; height: 1.2em; }
-.dock .b-shopping .d-ico { --ic: var(--i-shopping); }
 .dock .b-spotify .d-ico { --ic: var(--i-spotify); }
 .dock .b-claude .d-ico { --ic: var(--i-claude); }
 .dock .b-gemini .d-ico { --ic: var(--i-gemini); }
@@ -476,6 +538,9 @@ svg { display: block; }
   background: var(--toast-bg); color: var(--toast-ink); padding: 0.85em 1.25em; border-radius: 14px; max-width: 80vw;
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.06), 0 6px 20px rgb(0 0 0 / 0.35); font-size: 1.05em; text-align: center;
 }
+.toast:has(> .toast-action) { display: flex; align-items: center; gap: 1.1em; padding: 0.55em 0.6em 0.55em 1.25em; }
+.toast-action { flex: none; padding: 0.45em 1em; border-radius: 999px; background: rgb(255 255 255 / 0.14); color: inherit; font-weight: 600; }
+.toast-action:active { background: rgb(255 255 255 / 0.26); }
 
 /* ---------- Settings (and the privacy page) ---------- */
 .settings { position: fixed; inset: 0; z-index: 70; background: var(--bg); overflow-y: auto; user-select: text; -webkit-user-select: text; }

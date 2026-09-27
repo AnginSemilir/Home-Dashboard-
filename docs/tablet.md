@@ -15,6 +15,16 @@ It's on **F-Droid** and the **Play Store** (search "WebView Kiosk"; developer nk
 
 Menu names differ between versions of the app. If a setting described here isn't there, look for the nearest equivalent.
 
+## Moving from the Chrome app to WebView Kiosk
+
+If the panel is already running as a Chrome app, nothing needs setting up again:
+
+1. Install WebView Kiosk and set its URL (steps 1–3 above).
+2. In the **Chrome** app: ⚙ → **Copy settings**.
+3. In **WebView Kiosk**: ⚙ → paste into the box → **Paste settings** → **Save & close**.
+
+Keep Chrome for Google sign-in: if the panel ever asks you to sign in to Google again, do it in Chrome and copy the settings across the same way.
+
 ## Fallback: Chrome as an app
 
 In Chrome, open the URL → ⋮ → **Add to Home screen → Install**. It opens full screen with its own icon.
@@ -22,7 +32,7 @@ In Chrome, open the URL → ⋮ → **Add to Home screen → Install**. It opens
 What's different in Chrome:
 - **Home** can't be done by a web page in Chrome. The button shows a reminder to swipe up from the bottom edge instead.
 - **Claude** opens the Claude app on a new chat (tap its voice button); press-and-hold does the same.
-- **Gemini**, **Spotify** and **Shopping** open their apps.
+- **Gemini** and **Spotify** open their apps (Gemini doesn't start listening by itself: tap its microphone).
 - The **car** tile (without Kia data) opens the Kia app's Play Store page; tap **Open** there.
 - Keep-screen-on uses the browser's Wake Lock, which works while the panel is in front.
 

@@ -1,15 +1,16 @@
-# Google: Nest camera, thermostat and Calendar
+# Google: Nest camera, thermostat, Calendar and the shopping list
 
-One Google sign-in covers all three. You create your own small "app" in Google Cloud, so the panel talks to Google as you, with nothing in between. It takes about 30 minutes, once.
+One Google sign-in covers all four. You create your own small "app" in Google Cloud, so the panel talks to Google as you, with nothing in between. It takes about 30 minutes, once.
 
 You need a computer (easier) or the tablet, and the Google account that owns your Nest devices.
 
 ## 1. Google Cloud project (free)
 
 1. Go to <https://console.cloud.google.com/>, and create a project (top bar → project picker → **New project**). Call it `Home panel`.
-2. **APIs & Services → Library**. Search for and **Enable** both of these:
+2. **APIs & Services → Library**. Search for and **Enable** each of these:
    - **Smart Device Management API**
    - **Google Calendar API**
+   - **Google Tasks API** (for the shopping list)
 3. **Google Auth Platform** (older consoles: **OAuth consent screen**) → **Get started**:
    - App name `Home panel`, your email as the support and contact address.
    - Audience: **External**.
@@ -55,14 +56,23 @@ Google refuses sign-ins inside kiosk apps (you'd see `disallowed_useragent`), so
 2. Under **Google**, paste the **client ID**, **client secret** and **Device Access project ID**.
 3. **Sign in with Google**:
    - Pick the account that owns the Nest devices.
-   - Google's "partner connection" page lists your homes and devices. **Switch on the thermostat and the camera**, and allow Calendar.
+   - Google's "partner connection" page lists your homes and devices. **Switch on the thermostat and the camera**, and allow Calendar and Tasks.
    - Click past the "unverified app" warning (above).
 4. You're sent back to the panel with "Signed in to Google" and Settings open. Then:
    - **Choose camera & thermostat**: tick the camera and the thermostat.
    - **Choose calendars**: tick the ones to show (family, bins, school…).
+   - **Choose shopping list**: pick your Google Tasks list, or **Create a "Shopping" list**.
    - Tick or untick **Battery-powered camera** under Panel.
    - **Save & close.**
 5. Move it all into the kiosk app: ⚙ → **Copy settings** in Chrome, then in WebView Kiosk ⚙ → paste into the box → **Paste settings**. (If the clipboard doesn't carry over, the text appears in the box to copy by hand.) The copied text contains your keys, so paste it only into the panel.
+
+## Adding the shopping list after you've signed in
+
+If you signed in before the shopping list was added to the panel, your sign-in doesn't include Google Tasks yet (the list says "Sign in to Google again"). Once:
+
+1. In Google Cloud, **APIs & Services → Library → Google Tasks API → Enable** (the same project as before).
+2. In **Chrome** on the tablet: ⚙ → **Sign in with Google** again, and allow Tasks.
+3. ⚙ → **Choose shopping list** → **Save & close**, then Copy/Paste settings into the kiosk app as in step 3.5.
 
 ## Which cameras work
 

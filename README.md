@@ -4,19 +4,25 @@ A wall panel for a Lenovo Tab M10 (3rd gen, TB328), built as **one web page on G
 
 **Your panel:** `https://anginsemilir.github.io/Home-Dashboard-/` (after the one-off setup below)
 
-![The panel at 1280×800, with made-up data](docs/img/panel.jpg)
+![The panel at 1280×800 in the Bold style, dark theme, with made-up data](docs/img/panel.jpg)
+
+<details><summary>The Ambient style, light theme</summary>
+
+![The panel in the Ambient style, light theme](docs/img/panel-ambient-light.jpg)
+</details>
 
 ## What's on it
 
 | | Status | How |
 |---|---|---|
-| **Nest camera** (battery) | ✅ | Card says "Front door · Tap for live view". A tap starts a live WebRTC stream straight from Google. A battery camera stops after 5 minutes to save its battery; ✕ stops it sooner. |
+| **Nest camera** (battery) | ✅ | The first button in the dock ("Front door"). A tap starts a live WebRTC stream straight from Google, full screen; tap the picture to shrink it to a corner and keep an eye on the door. A battery camera stops after 5 minutes to save its battery; ✕ stops it sooner. |
 | **Nest thermostat** temperature | ✅ | Nest (Smart Device Management) API, every 5 min. Shows the target temperature and Heating/Idle/Eco. |
 | **Google Calendar**, today and tomorrow | ✅ | Calendar API, same Google sign-in. Finished events drop off; all-day events show as chips. |
+| **Shopping list** | ✅ | A Google Tasks list, under the calendar. Tap an item to tick it off (with Undo), **+** to add one; add by voice with "Hey Google". Same Google sign-in. (Google Keep has no API a web page can use, so the list lives in Google Tasks.) |
 | **Weather** now + 4 days | ✅ | Open-Meteo (free, no key). |
-| **Agile price now**, rest of today, tomorrow after ~4pm | ✅ ⚠️ | Octopus's public prices API. The panel finds your tariff and region from your account. Colours: green < 15p, amber, red ≥ 25p, blue at or below 0p (you can change these). |
+| **Agile price now**, rest of today, tomorrow after ~4pm | ✅ ⚠️ | Octopus's public prices API. The panel finds your tariff and region from your account. Colours: green < 15p, amber, red ≥ 25p, blue at or below 0p (you can change these); the price box takes the colour of the price now. Tap a bar for its price and time. Until tomorrow's prices arrive (about 4pm) the chart spreads today's across its width. |
 | **Home Mini live usage** + £ so far today | ✅ ⚠️ | Octopus's API (`smartMeterTelemetry`), every 60 s. |
-| **Buttons:** Shopping (Keep), Spotify, Claude voice, Gemini voice, Home | ✅ | Android `intent:` links. All five work in the free **WebView Kiosk** app; in Chrome, Home can't work (use the swipe). See [docs/voice-and-apps.md](docs/voice-and-apps.md). |
+| **Buttons:** Camera, Spotify, Claude voice, Gemini voice, Home | ✅ | Android `intent:` links. In the free **WebView Kiosk** app, Claude and Gemini go straight to listening and Home goes to the home screen; in Chrome they open the apps normally and Home can't work (use the swipe). See [docs/voice-and-apps.md](docs/voice-and-apps.md). |
 | **Kia e-Niro battery** (optional) | 🧪 | A free GitHub Action reads the car's last-reported battery once an hour and publishes it **encrypted**. It's an experiment: Kia may block it. See [docs/kia.md](docs/kia.md). |
 | Two looks, light by day | ✅ | ⚙ → Panel → **Style**: *Bold* or *Ambient*. **Theme**: *Auto* goes light at sunrise and dark at sunset (for your location), or always dark / always light. |
 | Night dimming, screen always on, offline start | ✅ | Near-black screen 22:30–06:30 when nobody's touched it for 90 s (tap to wake); Wake Lock; cached data if the internet drops. |
@@ -37,15 +43,15 @@ The one exception is the optional Kia job: your Kia login goes into GitHub's enc
 2. **Tablet:** install WebView Kiosk and point it at the URL: [docs/tablet.md](docs/tablet.md). The first time, the panel opens its Settings screen with a setup checklist.
 3. **Weather:** type your postcode → Find.
 4. **Octopus:** account number + API key → Connect ([docs/octopus.md](docs/octopus.md)). The checklist turns ✓ for prices and Home Mini, **or tells you if Octopus is blocked**.
-5. **Google (Nest + Calendar):** the longest step, about 30 minutes, done once. [docs/google.md](docs/google.md). You'll sign in **in Chrome on the tablet**, then copy the settings into the kiosk app (Google doesn't allow sign-in inside kiosk apps).
-6. **Voice:** "Hey Google", the Keep shopping list and Spotify: [docs/voice-and-apps.md](docs/voice-and-apps.md).
+5. **Google (Nest, Calendar, shopping list):** the longest step, about 30 minutes, done once. [docs/google.md](docs/google.md). You'll sign in **in Chrome on the tablet**, then copy the settings into the kiosk app (Google doesn't allow sign-in inside kiosk apps).
+6. **Voice:** "Hey Google", the shopping list and Spotify: [docs/voice-and-apps.md](docs/voice-and-apps.md).
 7. Optional: **Kia battery**: [docs/kia.md](docs/kia.md).
 
 If something shows a small amber or red dot, tap the card for the reason, or see [docs/troubleshooting.md](docs/troubleshooting.md). To change colours, layout or add something, see [docs/customising.md](docs/customising.md).
 
 ## What I could and couldn't test
 
-Everything was tested in a browser against **fake** versions of every service: 42 unit tests and 25 browser tests, including clock-change days, midnight, night mode, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
+Everything was tested in a browser against **fake** versions of every service: 49 unit tests and 32 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
 
 - that Octopus accepts calls from the page (if not, use the proxy in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked));
 - real Google sign-in and a real camera stream;
@@ -54,7 +60,7 @@ Everything was tested in a browser against **fake** versions of every service: 4
 
 ## How it's built
 
-Plain HTML, CSS and JavaScript modules in [`web/`](web/), with no build step and no libraries, so you (or Claude) can edit it directly. [`web/js/`](web/js/) has one file per service (`octopus.js`, `google.js`, `nest.js`, `calendar.js`, `weather.js`, `kia.js`), plus `launcher.js` for the buttons and `ui.js` for the layout. `.github/workflows/pages.yml` runs the tests and publishes `web/` on every push.
+Plain HTML, CSS and JavaScript modules in [`web/`](web/), with no build step and no libraries, so you (or Claude) can edit it directly. [`web/js/`](web/js/) has one file per service (`octopus.js`, `google.js`, `nest.js`, `calendar.js`, `tasks.js`, `weather.js`, `kia.js`), plus `launcher.js` for the buttons, `ui.js` for the cards and `sun.js` for the light/dark switch. The two looks are `web/css/bold.css` and `web/css/ambient.css`. `.github/workflows/pages.yml` runs the tests and publishes `web/` on every push.
 
 ```sh
 npm install                      # Playwright, for the browser tests

@@ -119,11 +119,13 @@ export function buildPanel(root, on) {
     r.shopInput.value = '';
     r.shopForm.classList.add('hidden');
     r.shopInput.blur();
+    fitList(r.shopList);
   });
   const plus = h('button', { class: 'shop-plus', 'aria-label': 'Add to the shopping list' }, icon('plus'));
   plus.addEventListener('click', () => {
     r.shopForm.classList.toggle('hidden');
     if (!r.shopForm.classList.contains('hidden')) r.shopInput.focus();
+    fitList(r.shopList); // the form takes room from the list
   });
   r.shopList.addEventListener('click', (e) => {
     const li = e.target.closest('li[data-id]');
@@ -144,8 +146,8 @@ export function buildPanel(root, on) {
     el.addEventListener('click', (e) => { if (!e.target.closest('button, li[data-id], form')) on.status?.(key); });
   }
 
-  // Two columns for the Bold style; the Ambient style lays the cards out on one grid
-  // (its stylesheet makes these wrappers transparent with display: contents).
+  // Two columns for the Bold style; the Ambient style lays the main column's cards out on
+  // its own grid (its stylesheet makes that wrapper transparent with display: contents).
   r.panel = h('main', { class: 'panel' },
     h('div', { class: 'col-main' }, r.clock, r.price, r.chart, r.tiles),
     h('div', { class: 'col-side' }, r.cal, r.shop),
@@ -295,6 +297,13 @@ function fitCalendar(body) {
     more.textContent = `+${n} more`;
     more.classList.remove('hidden');
   }
+  // A day with no room for any of its events just says how many it has.
+  for (const day of body.querySelectorAll('.cal-day')) {
+    const more = day.querySelector('.more');
+    const all = !!day.querySelector('.ev') && !day.querySelector('.ev:not(.hidden)');
+    more.classList.toggle('all', all);
+    if (all) more.textContent = `${more.dataset.n} event${more.dataset.n === '1' ? '' : 's'}`;
+  }
 }
 
 /** A small coloured mark beside a price; the number next to it carries the meaning. */
@@ -439,14 +448,27 @@ export function showChartTip(r, hit, opts, tz = DEFAULT_TZ) {
     h('b', {}, `${round1(p).toFixed(1)}p`),
     ` ${hhmm(start, tz)}–${hhmm(end, tz)}`,
     h('span', { class: 'tip-band' }, ` · ${BAND_WORD[b] || ''}`));
-  const box = r.chart.getBoundingClientRect(), bar = hit.getBoundingClientRect();
+  // Highlight the half hour, and sit the pop-up just above its bar (bars and tap targets are
+  // drawn in the same order), with its pointer on the bar even when it's pushed off an edge.
+  const hits = [...r.chartBox.querySelectorAll('.ch-hit')];
+  hits.forEach((x) => x.classList.toggle('on', x === hit));
+  const bar = r.chartBox.querySelectorAll('.ch-bar')[hits.indexOf(hit)] || hit;
+  const box = r.chart.getBoundingClientRect(), col = hit.getBoundingClientRect(), top = bar.getBoundingClientRect().top;
   r.chartTip.classList.remove('hidden');
-  const w = r.chartTip.offsetWidth;
-  const left = Math.min(Math.max(8, bar.left - box.left + bar.width / 2 - w / 2), box.width - w - 8);
+  const w = r.chartTip.offsetWidth, tipH = r.chartTip.offsetHeight;
+  const cx = col.left - box.left + col.width / 2;
+  const left = Math.min(Math.max(8, cx - w / 2), box.width - w - 8);
   r.chartTip.style.left = `${Math.round(left)}px`;
-  r.chartTip.style.top = `${Math.round(Math.max(4, bar.top - box.top + 4))}px`;
+  // No room above a tall bar: hang it below the bar's top instead, pointing up.
+  const above = top - box.top - tipH - 8;
+  r.chartTip.classList.toggle('below', above < 4);
+  r.chartTip.style.top = `${Math.round(above < 4 ? top - box.top + 8 : above)}px`;
+  r.chartTip.style.setProperty('--caret', `${Math.round(Math.min(Math.max(12, cx - left), w - 12))}px`);
   clearTimeout(r.chartTipTimer);
-  r.chartTipTimer = setTimeout(() => r.chartTip.classList.add('hidden'), 4000);
+  r.chartTipTimer = setTimeout(() => {
+    r.chartTip.classList.add('hidden');
+    r.chartBox.querySelector('.ch-hit.on')?.classList.remove('on');
+  }, 4000);
 }
 
 /** Shopping list card. `items` null = not loaded yet. */
@@ -466,8 +488,10 @@ export function renderShopping(r, items, st, { listName, ready, why }) {
 
 /** Hide items that don't fit, with a "+N more" line (the full list is in Google Tasks). */
 function fitList(ul) {
-  if (!ul.clientHeight) return;
+  ul.querySelector('li.more')?.remove();
   const items = [...ul.querySelectorAll('li[data-id]')];
+  items.forEach((li) => li.classList.remove('hidden'));
+  if (!ul.clientHeight) return;
   let hidden = 0;
   const more = h('li', { class: 'more' });
   while (ul.scrollHeight > ul.clientHeight + 1 && items.length > 1) {

@@ -18,9 +18,10 @@ Everything is plain HTML/CSS/JavaScript in `web/`, with no build step. Push a ch
 |---|---|
 | Colours, sizes, the grid layout | `web/css/bold.css` or `web/css/ambient.css`, one file per style. Colours are variables at the top (`--cheap`, `--mid`, `--high`, `--plunge`, `--card`, …); the light theme overrides them under `:root[data-theme="light"]`. |
 | Sunrise/sunset and the light/dark switch | `web/js/sun.js` and `applyTheme()` in `web/js/main.js` |
-| What each card shows | `web/js/ui.js` (`renderPrice`, `renderTiles`, `renderCalendar`, `renderWeather`, `renderCamera`) |
+| What each card shows | `web/js/ui.js` (`renderPrice`, `renderTiles`, `renderCalendar`, `renderShopping`, `renderWeather`, `renderCamera`, and `showChartTip` for the pop-up when you tap a bar) |
+| The shopping list (Google Tasks) | `web/js/tasks.js`; choose the list in ⚙ → Choose shopping list |
 | The price chart | `web/js/chart.js` |
-| The buttons: which apps, which intents | `web/js/launcher.js` (`APPS`) and the `DOCK` list at the top of `web/js/ui.js` |
+| The buttons: which apps, which intents | `web/js/launcher.js` (`APPS`) and the `DOCK` list at the top of `web/js/ui.js` (the camera button is always first) |
 | How often things refresh | the `source(…)` lines near the end of `web/js/main.js` |
 | Adding a new service | a new `web/js/<service>.js`, a `source(…)` line in `main.js`, a render function in `ui.js`, and its address in the `connect-src` list in `web/index.html` (the page may only call the addresses listed there) |
 

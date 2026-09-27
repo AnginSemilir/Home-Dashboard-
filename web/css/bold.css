@@ -54,6 +54,8 @@
   --wx-warm: #ffd36b;
   --toast-bg: #262a31;
   --toast-ink: #f2f4f6;
+  --tint-a: 26%;        /* the price panel's band tint, strong edge → soft edge */
+  --tint-b: 7%;
   --radius: 14px;
   --gap: 0.8em;
   --gutter: 1.7em;
@@ -98,6 +100,8 @@
   --wx-warm: #e8a317;
   --toast-bg: #1c1f24;
   --toast-ink: #f4f5f7;
+  --tint-a: 20%;
+  --tint-b: 5%;
 }
 /* The privacy page has no script to set a theme: it follows the device instead. */
 @media (prefers-color-scheme: light) {
@@ -228,15 +232,27 @@ svg { display: block; }
 
 /* ---------- Price (the one hero figure) ---------- */
 /* Number, chip and the two lines about what comes next read as one group, on one baseline. */
+/* The panel behind it takes the band's colour (cheap green, peak red…) and fades to the
+   next band when the half hour changes; the words stay in ink. */
+@property --band { syntax: '<color>'; inherits: true; initial-value: transparent; }
 .price {
   display: grid; align-items: last baseline; column-gap: 2.4em;
   grid-template-columns: auto minmax(0, 1fr);
   grid-template-areas: "label label" "main sub";
+  padding: 0.8em 1.15em 0.95em; border-radius: var(--radius);
+  --band: var(--card-2);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--band) var(--tint-a), var(--bg)), color-mix(in srgb, var(--band) var(--tint-b), var(--bg)) 80%);
+  transition: --band 1.2s ease;
 }
+.price[data-band="plunge"] { --band: var(--plunge); }
+.price[data-band="cheap"] { --band: var(--cheap); }
+.price[data-band="mid"] { --band: var(--mid); }
+.price[data-band="high"] { --band: var(--high); }
+.price > .dot { top: 0.9em; right: 0.9em; }
 .price .label { grid-area: label; margin-bottom: 0.1em; padding-right: 1.2em; }
 .price-main { grid-area: main; display: flex; align-items: baseline; gap: 0.9em; min-width: 0; }
 .price .big {
-  display: flex; align-items: baseline; font-size: 7.2em; font-weight: 650; line-height: 0.95;
+  display: flex; align-items: baseline; font-size: 6.6em; font-weight: 650; line-height: 0.95;
   letter-spacing: -0.035em; white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 .price .big small { font-size: 0.24em; font-weight: 500; letter-spacing: 0; color: var(--muted); margin-left: 0.45em; }
@@ -288,6 +304,22 @@ svg { display: block; }
 .chart-svg .ch-pending { fill: var(--pending); stroke: none; }
 .chart-svg .ch-empty { fill: var(--faint); font-size: 1.2em; }
 .chart-svg .ch-note { fill: var(--muted); font-size: 1.05em; }
+.chart-svg .ch-soon { fill: var(--faint); font-size: 1em; }
+.chart-svg .ch-hit { cursor: pointer; }
+.chart-svg .ch-hit.on { fill: var(--text); fill-opacity: 0.08; } /* the half hour you tapped */
+/* Tap a bar: its price and time in a small pop-up above it. */
+.chart-tip {
+  position: absolute; z-index: 5; pointer-events: none; white-space: nowrap;
+  padding: 0.5em 0.85em; border-radius: 10px; font-size: 1.05em; line-height: 1.3;
+  background: var(--toast-bg); color: var(--toast-ink); box-shadow: 0 6px 18px rgb(0 0 0 / 0.28);
+}
+.chart-tip b { font-weight: 700; font-variant-numeric: tabular-nums; }
+.chart-tip .tip-band { color: color-mix(in srgb, var(--toast-ink) 72%, var(--toast-bg)); }
+.chart-tip::after {
+  content: ''; position: absolute; top: 100%; left: var(--caret, 50%); margin-left: -6px;
+  border: 6px solid transparent; border-top-color: var(--toast-bg);
+}
+.chart-tip.below::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--toast-bg); }
 
 /* ---------- Tiles ---------- */
 .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--gap); }
@@ -318,7 +350,7 @@ svg { display: block; }
 .meter.low span { background: var(--mid); }
 
 /* ---------- Calendar ---------- */
-.cal { flex: 1; display: flex; flex-direction: column; }
+.cal { flex: 1 1 0; display: flex; flex-direction: column; }
 .cal-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 1.1em; }
 .cal-day h3 {
   margin: 0 0 0.55em; font-size: 1.3em; font-weight: 650; letter-spacing: -0.01em;
@@ -341,43 +373,72 @@ svg { display: block; }
 }
 .cal .empty { color: var(--muted); padding: 0.3em 0; }
 .cal .more { color: var(--muted); padding: 0.15em 0 0 calc(4.95em + 3px); } /* lines up with the titles */
+.cal .more.all { padding-left: 0; }
 
-/* ---------- Camera: a short strip until tapped; live view fills the screen ---------- */
+/* ---------- Shopping list: under the calendar ---------- */
+/* As tall as its items, up to half the column; the calendar has the rest. */
+.shop { flex: 0 1 auto; max-height: 50%; display: flex; flex-direction: column; border-top: 1px solid var(--line); padding-top: 0.85em; }
+.shop-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5em; margin-bottom: 0.25em; }
+.shop-head h3 { margin: 0; font-size: 1.3em; font-weight: 650; letter-spacing: -0.01em; }
+.shop-plus {
+  flex: none; width: 2.5em; height: 2.5em; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card); box-shadow: var(--card-shadow); color: var(--muted);
+}
+.shop-plus svg { width: 1.25em; height: 1.25em; }
+.shop-plus:active { background: var(--card-2); }
+.shop.off .shop-plus { display: none; }
+.shop > .dot { top: calc(0.85em + 0.8em); right: 3.4em; }
+.shop.off > .dot { right: 0; }
+.shop-add { display: flex; gap: 0.5em; margin: 0.35em 0 0.45em; }
+.shop-add input {
+  flex: 1; min-width: 0; font: inherit; font-size: 1.1em; color: var(--text); user-select: text; -webkit-user-select: text;
+  background: var(--field); border: 1px solid var(--field-line); border-radius: 10px; padding: 0.5em 0.7em;
+}
+.shop-add input:focus { outline: 2px solid var(--muted); outline-offset: 1px; }
+.shop-go { flex: none; padding: 0 1.05em; border-radius: 10px; background: var(--text); color: var(--bg); font-weight: 650; }
+.shop-items { list-style: none; margin: 0; padding: 0; flex: 0 1 auto; min-height: 0; overflow: hidden; }
+.shop-items li[data-id] { display: flex; align-items: center; gap: 0.8em; min-height: 2.8em; border-bottom: 1px solid var(--line); cursor: pointer; }
+.shop-items .tick {
+  flex: none; width: 1.5em; height: 1.5em; border-radius: 50%; border: 1.5px solid var(--faint);
+  display: grid; place-items: center; color: transparent;
+}
+.shop-items .tick svg { width: 0.95em; height: 0.95em; }
+.shop-items li[data-id]:active .tick { background: var(--text); border-color: var(--text); color: var(--bg); }
+.shop-items .what { min-width: 0; font-size: 1.15em; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shop-items .empty { color: var(--muted); padding: 0.3em 0; }
+.shop-items .more { color: var(--muted); padding: 0.6em 0 0 2.3em; } /* lines up with the items */
+
+/* ---------- Camera: the first dock button; live view fills the screen ---------- */
 .cam {
-  flex: none; display: grid; align-items: center; min-height: 6.2em;
-  padding: 0.95em 1.1em; background: var(--card); border-radius: var(--radius); box-shadow: var(--card-shadow);
+  font-size: 1.2em; height: 4.2em; padding: 0 0.8em; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--card); border-radius: var(--radius); box-shadow: var(--card-shadow);
 }
+.cam .cam-idle { display: flex; align-items: center; gap: 0.6em; min-width: 0; }
+.cam .cam-idle .ico { flex: none; display: grid; place-items: center; color: var(--muted); }
+.cam .cam-name { font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The long explanations live in Settings; the button just says which camera. */
+.cam .cam-idle > .muted, .cam .cam-hint { display: none; }
+.cam > .dot { top: 0.5em; right: 0.5em; }
 .cam video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
-.cam .cam-idle {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 0.85em; row-gap: 0.2em;
-  grid-template-areas: "ico name hint" "ico sub sub";
-}
-.cam .cam-idle:has(> .muted:empty) { grid-template-areas: "ico name hint"; }
-.cam .cam-idle .ico {
-  grid-area: ico; width: 2.7em; height: 2.7em; display: grid; place-items: center;
-  border-radius: 50%; background: var(--card-2); color: var(--muted);
-}
-.cam .cam-idle .ico svg { width: 1.4em; height: 1.4em; }
-.cam .cam-name { grid-area: name; font-size: 1.2em; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cam .cam-idle > .muted { grid-area: sub; color: var(--muted); font-size: max(11px, 0.85em); line-height: 1.35; text-wrap: balance; }
-.cam .cam-idle > .muted:empty { display: none; }
-.cam .cam-hint {
-  grid-area: hint; display: inline-flex; align-items: center; gap: 0.45em; padding: 0.5em 0.95em;
-  border-radius: 999px; background: var(--card-2); font-weight: 600; white-space: nowrap;
-}
-.cam .cam-hint svg { width: 0.9em; height: 0.9em; }
-/* Live but shrunk back into the column: a 16:9 picture. */
-.cam:has(> video:not(.hidden)) { aspect-ratio: 16 / 9; padding: 0; min-height: 0; background: #000; }
 .cam .cam-bar {
-  position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 0.8em;
+  position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 0.8em; font-size: 0.85em;
   padding: 0.7em 0.9em; background: linear-gradient(#000b, #0000); color: #fff; font-weight: 600;
 }
 .cam .cam-bar .live-badge { background: #d22e2c; color: #fff; border-radius: 5px; padding: 0.12em 0.5em; font-size: max(11px, 0.8em); letter-spacing: 0.06em; }
 .cam .cam-bar .spacer { flex: 1; }
 .cam .cam-bar .close { width: 2.4em; height: 2.4em; display: grid; place-items: center; border-radius: 50%; background: #0009; color: #fff; }
-.cam .cam-bar .close svg { width: 1.3em; height: 1.3em; }
-.cam > .dot { top: 0.55em; right: 0.55em; }
-.cam.expanded { position: fixed; inset: 0; z-index: 40; border-radius: 0; aspect-ratio: auto; box-shadow: none; }
+.cam .cam-bar .close svg { width: 1.3em; height: 1.3em; color: #fff; }
+/* Live: full screen. Tap the picture to shrink it to a corner above the dock (tap again to
+   enlarge); the dock keeps an empty slot where the button was. */
+.cam.expanded { position: fixed; inset: 0; z-index: 40; height: auto; border-radius: 0; box-shadow: none; background: #000; }
+.cam:has(> video:not(.hidden)):not(.expanded) {
+  position: fixed; z-index: 40; right: calc(var(--fs) * 1.35); bottom: calc(var(--fs) * 7.4);
+  width: 30vw; height: auto; aspect-ratio: 16 / 9; padding: 0; background: #000;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+}
+.dock > :nth-child(2) { grid-column: 2; } .dock > :nth-child(3) { grid-column: 3; }
+.dock > :nth-child(4) { grid-column: 4; } .dock > :nth-child(5) { grid-column: 5; }
 
 /* ---------- Dock ---------- */
 .dock { grid-area: dock; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--gap); }
@@ -402,6 +463,9 @@ svg { display: block; }
   background: var(--toast-bg); color: var(--toast-ink); padding: 0.8em 1.2em; border-radius: 12px; max-width: 80vw;
   font-size: 1.05em; text-align: center;
 }
+.toast:has(> .toast-action) { display: flex; align-items: center; gap: 1.1em; padding: 0.55em 0.6em 0.55em 1.2em; }
+.toast-action { flex: none; padding: 0.45em 1em; border-radius: 999px; background: rgb(255 255 255 / 0.14); color: inherit; font-weight: 700; }
+.toast-action:active { background: rgb(255 255 255 / 0.26); }
 
 /* ---------- Settings (and the privacy page) ---------- */
 .settings { position: fixed; inset: 0; z-index: 70; background: var(--bg); color: var(--text); overflow-y: auto; user-select: text; -webkit-user-select: text; }

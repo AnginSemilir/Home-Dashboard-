@@ -26,8 +26,11 @@ The panel retries by itself, waiting longer each time (30 seconds up to 15 minut
 | `disallowed_useragent` when signing in | Google blocks sign-in inside kiosk apps | Sign in in Chrome, then copy settings across ([google.md](google.md), step 3) |
 | `redirect_uri_mismatch` | OAuth client's redirect URI differs | Must be exactly `https://anginsemilir.github.io/Home-Dashboard-/` |
 | Camera: "The camera didn't send any video" | Battery camera asleep or offline, or poor Wi-Fi at the camera | Tap again; check it in the Google Home app |
-| Camera card says "Set up Nest in Settings" | No camera chosen | ⚙ → Choose camera & thermostat |
-| Chart says "prices from ~4pm" | Tomorrow's Agile prices aren't published yet | Normal; they appear after about 4pm |
+| Camera button says "Camera" and a tap says "Set up the Nest camera" | No camera chosen | ⚙ → Choose camera & thermostat |
+| Chart says "Tomorrow's prices from ~4pm" | Tomorrow's Agile prices aren't published yet | Normal; they appear after about 4pm |
+| Shopping list says "Sign in to Google again" | Your Google sign-in is from before the shopping list, so it doesn't include Google Tasks | [google.md](google.md#adding-the-shopping-list-after-youve-signed-in) |
+| Shopping list red dot, "…has not been used in project… or it is disabled" | The Google Tasks API isn't switched on in your Cloud project | Google Cloud → APIs & Services → Library → **Google Tasks API** → Enable; wait a minute |
+| Something said to Gemini isn't on the list | Gemini put it in Google Keep | Say "…to my Shopping list **in Google Tasks**" ([voice-and-apps.md](voice-and-apps.md#the-shopping-list)) |
 | A button does nothing | Its app isn't installed, or Chrome restrictions | See [voice-and-apps.md](voice-and-apps.md); in Chrome, Home can't work |
 | Screen turns off | Wake lock lost when another app was in front | Kiosk app's keep-screen-on setting; longest Android screen timeout |
 | Kia ✗ | See [kia.md](kia.md#if-it-fails) | |
