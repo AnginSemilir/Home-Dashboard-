@@ -2,6 +2,8 @@
 
 ## Without touching code (⚙ → Panel)
 
+- **Style:** *Bold* (big and clear, readable across the room; the default) or *Ambient* (softer cards, a background tint that follows the time of day).
+- **Theme:** *Auto* switches to light at sunrise and back to dark at sunset (times for your weather location; today's times are shown under the setting). Or *Always dark* / *Always light*. Night dimming (below) works the same in every theme.
 - **Green below / Red from (p/kWh):** the price colours. Blue is always at or below 0p.
 - **Night mode from/until:** when the panel dims itself (it only dims after 90 seconds without a touch, and never while the camera is live).
 - **Reload the page daily at:** a nightly refresh (03:30), so updates you push reach the tablet.
@@ -14,7 +16,8 @@ Everything is plain HTML/CSS/JavaScript in `web/`, with no build step. Push a ch
 
 | To change… | Edit |
 |---|---|
-| Colours, sizes, the grid layout | `web/css/panel.css` (colours are at the top as `--cheap`, `--mid`, `--high`, `--plunge`, `--card`, …; the layout is `.panel`'s `grid-template-areas`) |
+| Colours, sizes, the grid layout | `web/css/bold.css` or `web/css/ambient.css`, one file per style. Colours are variables at the top (`--cheap`, `--mid`, `--high`, `--plunge`, `--card`, …); the light theme overrides them under `:root[data-theme="light"]`. |
+| Sunrise/sunset and the light/dark switch | `web/js/sun.js` and `applyTheme()` in `web/js/main.js` |
 | What each card shows | `web/js/ui.js` (`renderPrice`, `renderTiles`, `renderCalendar`, `renderWeather`, `renderCamera`) |
 | The price chart | `web/js/chart.js` |
 | The buttons: which apps, which intents | `web/js/launcher.js` (`APPS`) and the `DOCK` list at the top of `web/js/ui.js` |

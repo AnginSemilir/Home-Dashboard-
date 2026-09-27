@@ -18,6 +18,7 @@ A wall panel for a Lenovo Tab M10 (3rd gen, TB328), built as **one web page on G
 | **Home Mini live usage** + £ so far today | ✅ ⚠️ | Octopus's API (`smartMeterTelemetry`), every 60 s. |
 | **Buttons:** Shopping (Keep), Spotify, Claude voice, Gemini voice, Home | ✅ | Android `intent:` links. All five work in the free **WebView Kiosk** app; in Chrome, Home can't work (use the swipe). See [docs/voice-and-apps.md](docs/voice-and-apps.md). |
 | **Kia e-Niro battery** (optional) | 🧪 | A free GitHub Action reads the car's last-reported battery once an hour and publishes it **encrypted**. It's an experiment: Kia may block it. See [docs/kia.md](docs/kia.md). |
+| Two looks, light by day | ✅ | ⚙ → Panel → **Style**: *Bold* or *Ambient*. **Theme**: *Auto* goes light at sunrise and dark at sunset (for your location), or always dark / always light. |
 | Night dimming, screen always on, offline start | ✅ | Near-black screen 22:30–06:30 when nobody's touched it for 90 s (tap to wake); Wake Lock; cached data if the internet drops. |
 
 ⚠️ = expected to work from the browser, but **the first thing to check on the tablet**: some sites say Octopus blocks direct browser calls, others work fine. If yours is blocked, a free 5-minute fix is in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked).
