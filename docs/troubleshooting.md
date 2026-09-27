@@ -29,7 +29,8 @@ The panel retries by itself, waiting longer each time (30 seconds up to 15 minut
 | Camera button says "Camera" and a tap says "Set up the Nest camera" | No camera chosen | ⚙ → Choose camera & thermostat |
 | Chart says "Tomorrow's prices from ~4pm" | Tomorrow's Agile prices aren't published yet | Normal; they appear after about 4pm |
 | Shopping list says "Sign in to Google again" | Your Google sign-in is from before the shopping list, so it doesn't include Google Tasks | [google.md](google.md#adding-the-shopping-list-after-youve-signed-in) |
-| Shopping list red dot, "…has not been used in project… or it is disabled" | The Google Tasks API isn't switched on in your Cloud project | Google Cloud → APIs & Services → Library → **Google Tasks API** → Enable; wait a minute |
+| "The Google Tasks API is switched off in your Google Cloud project" (older versions: "403 … has not been used in project … or it is disabled") | The Tasks API isn't on in the project your OAuth client belongs to | Tap **Turn on the Google Tasks API** next to the message (it opens the right project), **Enable**, then wait up to 5 minutes and try again. Still failing? You probably enabled it in a different project: the one to use is the one whose **APIs & Services → Credentials** lists your panel's client ID |
+| "Your Google sign-in doesn't allow Google Tasks" | Signed in before the shopping list existed, or Tasks was unticked on Google's screen | In Chrome: ⚙ → **Sign in with Google**, leave every box ticked |
 | Something said to Gemini isn't on the list | Gemini put it in Google Keep | Say "…to my Shopping list **in Google Tasks**" ([voice-and-apps.md](voice-and-apps.md#the-shopping-list)) |
 | A button does nothing | Its app isn't installed, or Chrome restrictions | See [voice-and-apps.md](voice-and-apps.md); in Chrome, Home can't work |
 | Screen turns off | Wake lock lost when another app was in front | Kiosk app's keep-screen-on setting; longest Android screen timeout |

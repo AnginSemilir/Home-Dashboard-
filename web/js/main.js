@@ -391,7 +391,15 @@ async function boot() {
 
   const result = await google.handleRedirect();
   renderAll();
-  if (result) ui.toast(refs, result === 'signed-in' ? 'Signed in to Google. Now choose your camera, thermostat and calendars in Settings.' : `Google sign-in: ${result.slice(7)}`, 7000);
+  if (result === 'signed-in') {
+    // Google lets people untick parts of the sign-in; say which parts won't work.
+    const missing = google.missingScopes();
+    ui.toast(refs, missing.length
+      ? `Signed in to Google, but it didn't allow ${missing.join(' or ')}. To use ${missing.length > 1 ? 'them' : 'it'}, sign in again and leave every box ticked.`
+      : 'Signed in to Google. Now choose your camera, thermostat, calendars and shopping list in Settings.', missing.length ? 15000 : 7000);
+  } else if (result) {
+    ui.toast(refs, `Google sign-in: ${result.slice(7)}`, 7000);
+  }
 
   const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
   if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun });

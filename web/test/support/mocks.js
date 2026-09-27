@@ -189,7 +189,10 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     const url = new URL(req.url());
     const body = req.postData() ? JSON.parse(req.postData()) : null;
     calls.push({ service: 'tasks', method: req.method(), url: req.url(), body });
-    if (fail.has('tasks')) return json(route, { error: { code: 403, message: 'Request had insufficient authentication scopes.' } }, 403);
+    if (fail.has('tasks')) return json(route, { error: { code: 403, message: 'Request had insufficient authentication scopes.', status: 'PERMISSION_DENIED', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT', metadata: { service: 'tasks.googleapis.com' } }] } }, 403);
+    if (fail.has('tasks-off')) {
+      return json(route, { error: { code: 403, status: 'PERMISSION_DENIED', message: 'Google Tasks API has not been used in project 123 before or it is disabled.', details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED', metadata: { service: 'tasks.googleapis.com', serviceTitle: 'Google Tasks API', activationUrl: 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=123' } }] } }, 403);
+    }
     if (url.pathname.endsWith('/users/@me/lists')) {
       if (req.method() === 'POST') return json(route, { id: 'shop', title: body.title });
       return json(route, { items: [{ id: 'mine', title: 'My Tasks' }, { id: 'shop', title: 'Shopping' }] });

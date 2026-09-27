@@ -38,7 +38,7 @@ export function checklist(s, st) {
     item(s.google.cameraId ? 'ok' : s.google.projectId ? 'todo' : 'off', 'Nest camera (tap for live view)', st.status.camera?.error || ''),
     item(s.google.calendars.length ? res('calendar') : signed ? 'todo' : 'off', 'Google Calendar', s.google.calendars.map((c) => c.name).join(', '), 'calendar'),
     item(s.google.shoppingList?.id ? (s.google.scopes.includes('/auth/tasks') ? res('shopping') : 'bad') : signed ? 'todo' : 'off',
-      'Shopping list (Google Tasks)', s.google.shoppingList?.id && !s.google.scopes.includes('/auth/tasks') ? 'sign in to Google again to allow it' : s.google.shoppingList?.name || '', 'shopping'),
+      'Shopping list (Google Tasks)', signed && !s.google.scopes.includes('/auth/tasks') ? 'sign in to Google again to allow it' : s.google.shoppingList?.name || '', 'shopping'),
     item(s.kia.url ? res('kia') : 'off', 'Kia battery (optional)', '', 'kia'),
   ];
 }
@@ -51,9 +51,10 @@ export function openSettings(root, ctx) {
   const msg = h('div', { class: 'help' });
   // Results and errors appear right next to the button that was pressed.
   let active = null;
-  const say = (t, bad = false) => {
+  const say = (t, bad = false, link = null) => {
     const el = active || msg;
     el.textContent = t;
+    if (link) el.append(' ', h('a', { href: link.href, target: '_blank', rel: 'noopener noreferrer' }, link.text));
     el.classList.toggle('bad', bad);
   };
 
@@ -74,7 +75,7 @@ export function openSettings(root, ctx) {
         await fn();
         if (status.textContent === 'Working…') say('');
       } catch (e) {
-        say(describeError(e), true);
+        say(describeError(e), true, e?.link);
       } finally {
         b.disabled = false;
         active = null;
@@ -183,6 +184,10 @@ export function openSettings(root, ctx) {
     calPick,
     btn('Choose shopping list', async () => {
       const g = draftGoogle();
+      if (!g.signedIn) throw new Error('Sign in with Google first');
+      // A sign-in from before the shopping list (or with Tasks unticked) can't read it: say so
+      // rather than letting Google answer "403".
+      if (!g.hasTasks) throw new Error("Your Google sign-in doesn't allow Google Tasks yet. In Chrome, tap Sign in with Google again and leave the Tasks box ticked on Google's screen, then choose the list.");
       let lists = await listTaskLists(g);
       const pick = () => shopPick.replaceChildren(
         h('div', { class: 'help' }, 'A Google Tasks list. Add to it by voice ("Hey Google, add milk to my shopping list in Google Tasks") or with + on the panel.'),

@@ -1,6 +1,7 @@
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { Google, authUrl, redirectUri, TOKEN_URLS, SCOPE_CAL, SCOPE_SDM, SCOPE_TASKS } from '../../js/google.js';
+import { Google, authUrl, redirectUri, TOKEN_URLS, SCOPE_CAL, SCOPE_SDM, SCOPE_TASKS, explainGoogleError } from '../../js/google.js';
+import { HttpError } from '../../js/util.js';
 import { parseThermostat, parseCamera, deviceName, LiveStream, isCamera, isThermostat } from '../../js/nest.js';
 import { loadSettings } from '../../js/config.js';
 
@@ -68,6 +69,66 @@ test('accessToken: refreshes, caches, falls back to the second endpoint on netwo
   assert.equal(calls.length, 2, 'cached');
   fakeFetch(() => ({ status: 400, body: { error: 'invalid_grant' } }));
   await assert.rejects(g.accessToken(true), /sign in again/);
+});
+
+// Google's 403 bodies, as the APIs send them.
+const serviceDisabled = (activationUrl = 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=123') => ({ error: {
+  code: 403, status: 'PERMISSION_DENIED',
+  message: 'Google Tasks API has not been used in project 123 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=123 then retry.',
+  errors: [{ message: '…', domain: 'usageLimits', reason: 'accessNotConfigured', extendedHelp: 'https://console.developers.google.com' }],
+  details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'SERVICE_DISABLED', domain: 'googleapis.com',
+    metadata: { service: 'tasks.googleapis.com', consumer: 'projects/123', serviceTitle: 'Google Tasks API', activationUrl } }],
+} });
+const scopeMissing = { error: {
+  code: 403, status: 'PERMISSION_DENIED', message: 'Request had insufficient authentication scopes.',
+  errors: [{ message: 'Insufficient Permission', domain: 'global', reason: 'insufficientPermissions' }],
+  details: [{ '@type': 'type.googleapis.com/google.rpc.ErrorInfo', reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT', domain: 'googleapis.com',
+    metadata: { service: 'tasks.googleapis.com', method: 'google.tasks.v1.TasksService.ListTaskLists' } }],
+} };
+const TASKS_URL = 'https://www.googleapis.com/tasks/v1/users/@me/lists?maxResults=100';
+const http403 = (body) => new HttpError(403, `403 ${body.error.message}`, body);
+
+test('explainGoogleError: an API switched off in the Cloud project, with a link that turns it on', () => {
+  const e = explainGoogleError(http403(serviceDisabled()), TASKS_URL);
+  assert.match(e.message, /Google Tasks API is switched off in your Google Cloud project/);
+  assert.equal(e.status, 403);
+  assert.deepEqual(e.link, { href: 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=123', text: 'Turn on the Google Tasks API' });
+  // A link anywhere but Google's console is never offered; the plain library page is.
+  const odd = explainGoogleError(http403(serviceDisabled('https://example.com/phish')), TASKS_URL);
+  assert.equal(odd.link.href, 'https://console.cloud.google.com/apis/library/tasks.googleapis.com');
+  // Older error shape (message only), recognised by its wording and the API's address.
+  const bare = explainGoogleError(http403({ error: { code: 403, message: 'Google Calendar API has not been used in project 9 before or it is disabled.' } }), 'https://www.googleapis.com/calendar/v3/users/me/calendarList');
+  assert.match(bare.message, /Google Calendar API is switched off/);
+  assert.equal(bare.link.href, 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com');
+});
+
+test('explainGoogleError: a sign-in without the permission; other errors pass through', () => {
+  assert.match(explainGoogleError(http403(scopeMissing), TASKS_URL).message, /sign-in doesn't allow Google Tasks \(the shopping list\)\. In Chrome, ⚙ → Sign in with Google again/);
+  const cal = explainGoogleError(http403({ error: { code: 403, message: 'Request had insufficient authentication scopes.' } }), 'https://www.googleapis.com/calendar/v3/calendars/x/events');
+  assert.match(cal.message, /doesn't allow Google Calendar\./);
+  const nest = explainGoogleError(http403({ error: { code: 403, message: 'Request had insufficient authentication scopes.' } }), 'https://smartdevicemanagement.googleapis.com/v1/enterprises/p/devices');
+  assert.match(nest.message, /doesn't allow your Nest devices/);
+  const other = http403({ error: { code: 403, message: 'The caller does not have permission' } });
+  assert.equal(explainGoogleError(other, TASKS_URL), other);
+  const notFound = new HttpError(404, '404 Not Found', null);
+  assert.equal(explainGoogleError(notFound, TASKS_URL), notFound);
+  const text403 = new HttpError(403, '403 Forbidden', '<html>Forbidden</html>');
+  assert.equal(explainGoogleError(text403, TASKS_URL), text403);
+  const net = new TypeError('Failed to fetch');
+  assert.equal(explainGoogleError(net, TASKS_URL), net);
+});
+
+test('Google.api explains a 403; missingScopes lists what a sign-in left out', async () => {
+  const s = loadSettings(memStore());
+  Object.assign(s.google, { clientId: 'c', clientSecret: 'sec', refreshToken: 'rt', projectId: 'p', scopes: `${SCOPE_SDM} ${SCOPE_CAL}` });
+  const g = new Google(s, () => {});
+  fakeFetch((url) => (TOKEN_URLS.includes(url) ? { body: { access_token: 'at', expires_in: 3600 } } : { status: 403, body: serviceDisabled() }));
+  await assert.rejects(g.api(TASKS_URL), (e) => /switched off/.test(e.message) && e.link && e.status === 403);
+  assert.deepEqual(g.missingScopes(), ['Google Tasks (the shopping list)']);
+  s.google.scopes = SCOPE_TASKS;
+  assert.deepEqual(g.missingScopes(), ['your Nest devices', 'Google Calendar']);
+  s.google.projectId = '';
+  assert.deepEqual(g.missingScopes(), ['Google Calendar']);
 });
 
 const thermo = (traits, extra = {}) => ({ name: 'enterprises/p/devices/T', type: 'sdm.devices.types.THERMOSTAT', traits, ...extra });

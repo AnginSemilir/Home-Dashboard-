@@ -63,6 +63,65 @@ test('shopping list: an older Google sign-in is asked to sign in again; no list 
   await b.ctx.close();
 });
 
+test('settings: choosing a shopping list says what to do instead of "403"', async () => {
+  // A sign-in from before the shopping list: told to sign in again, and Google isn't asked.
+  const s = fullSettings(NOW);
+  s.google.shoppingList = null;
+  s.google.scopes = 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly';
+  const a = await openPanel(env, { settings: s });
+  await a.page.locator('#clock .gear').click();
+  const set = a.page.locator('#settings');
+  await set.getByText('Shopping list (Google Tasks) · sign in to Google again to allow it').waitFor();
+  await set.getByRole('button', { name: 'Choose shopping list' }).click();
+  await set.locator('.btn-status.bad', { hasText: "doesn't allow Google Tasks yet" }).waitFor();
+  assert.equal(a.calls.some((c) => c.service === 'tasks'), false);
+  await a.ctx.close();
+
+  // The Tasks API switched off in Google Cloud: says so, with a link that turns it on.
+  const s2 = fullSettings(NOW);
+  s2.google.shoppingList = null;
+  const b = await openPanel(env, { settings: s2, fail: new Set(['tasks-off']) });
+  await b.page.locator('#clock .gear').click();
+  const set2 = b.page.locator('#settings');
+  await set2.getByRole('button', { name: 'Choose shopping list' }).click();
+  const status = set2.locator('.btn-status.bad', { hasText: 'Google Tasks API is switched off' });
+  await status.waitFor();
+  assert.doesNotMatch(await status.innerText(), /^403/);
+  assert.equal(await status.locator('a').getAttribute('href'), 'https://console.developers.google.com/apis/api/tasks.googleapis.com/overview?project=123');
+  assert.equal(await status.locator('a').getAttribute('target'), '_blank');
+  await b.ctx.close();
+
+  // On the panel, a sign-in without Tasks: the card's reason says what to do.
+  const c = await openPanel(env, { fail: new Set(['tasks']) });
+  await c.page.locator('#shop .dot.error').waitFor();
+  await c.page.locator('#shop').click();
+  await c.page.locator('.toast', { hasText: "doesn't allow Google Tasks (the shopping list)" }).waitFor();
+  await c.ctx.close();
+});
+
+test('signing in without ticking Tasks says the shopping list won\'t work', async () => {
+  const s = fullSettings(NOW);
+  s.google.refreshToken = '';
+  s.google.scopes = '';
+  const { ctx, page } = await openPanel(env, { settings: s, initScript: () => {
+    // Google's answer when the Tasks box was unticked on its screen.
+    const real = window.fetch;
+    window.fetch = async (url, opts) => {
+      const res = await real(url, opts);
+      if (String(url).includes('/token') && String(opts?.body || '').includes('authorization_code')) {
+        const b = await res.json();
+        b.scope = 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly';
+        return new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      return res;
+    };
+  } });
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByRole('button', { name: 'Sign in with Google' }).click();
+  await page.locator('.toast', { hasText: "didn't allow Google Tasks (the shopping list)" }).waitFor();
+  await ctx.close();
+});
+
 test('settings: choose (or create) the shopping list', async () => {
   const s = fullSettings(NOW);
   s.google.shoppingList = null;

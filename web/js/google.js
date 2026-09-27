@@ -10,6 +10,49 @@ export const SCOPE_TASKS = 'https://www.googleapis.com/auth/tasks'; // the shopp
 // oauth2.googleapis.com is the documented endpoint; the second is the one Google's sample uses.
 export const TOKEN_URLS = ['https://oauth2.googleapis.com/token', 'https://www.googleapis.com/oauth2/v4/token'];
 
+// What each Google API is called in the Cloud console, and what it's for on the panel.
+const APIS = [
+  { host: 'smartdevicemanagement.googleapis.com', service: 'smartdevicemanagement.googleapis.com', title: 'Smart Device Management API', what: 'your Nest devices' },
+  { host: 'www.googleapis.com', path: '/calendar/', service: 'calendar-json.googleapis.com', title: 'Google Calendar API', what: 'Google Calendar' },
+  { host: 'www.googleapis.com', path: '/tasks/', service: 'tasks.googleapis.com', title: 'Google Tasks API', what: 'Google Tasks (the shopping list)' },
+];
+const CONSOLE_HOSTS = ['console.cloud.google.com', 'console.developers.google.com'];
+
+/**
+ * Google's "403 Forbidden" in plain words. Two causes the owner can fix: the API is switched
+ * off in their Cloud project (the error then carries a link that turns it on), or their
+ * sign-in didn't allow this part. Anything else is returned unchanged.
+ */
+export function explainGoogleError(e, url = '') {
+  if (!(e instanceof HttpError) || e.status !== 403) return e;
+  const err = (e.body && typeof e.body === 'object' && e.body.error && typeof e.body.error === 'object') ? e.body.error : {};
+  const info = (Array.isArray(err.details) ? err.details : []).find((d) => String(d?.['@type'] || '').endsWith('google.rpc.ErrorInfo')) || {};
+  const meta = info.metadata || {};
+  const reasons = [info.reason, ...(Array.isArray(err.errors) ? err.errors.map((x) => x?.reason) : [])].filter(Boolean).join(' ');
+  const text = String(err.message || '');
+  let u = null;
+  try { u = new URL(url); } catch { /* no URL: work from the error alone */ }
+  const api = APIS.find((a) => a.service === meta.service)
+    || APIS.find((a) => u && u.host === a.host && (!a.path || u.pathname.startsWith(a.path)))
+    || { title: meta.serviceTitle || 'Google API', what: 'this part of the panel' };
+  const title = meta.serviceTitle || api.title;
+  if (/SERVICE_DISABLED|accessNotConfigured/.test(reasons) || /has not been used in project|API .*is disabled|it is disabled/i.test(text)) {
+    const out = new HttpError(403, `The ${title} is switched off in your Google Cloud project. Turn it on (Google Cloud → APIs & Services → Library → ${title} → Enable), wait a minute, then try again.`, e.body);
+    let link = null;
+    try {
+      const a = new URL(meta.activationUrl);
+      if (a.protocol === 'https:' && CONSOLE_HOSTS.includes(a.host)) link = a.href;
+    } catch { /* no usable link in the error */ }
+    if (!link && api.service) link = `https://console.cloud.google.com/apis/library/${api.service}`;
+    if (link) out.link = { href: link, text: `Turn on the ${title}` };
+    return out;
+  }
+  if (/ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficientPermissions/.test(reasons) || /insufficient authentication scopes/i.test(text)) {
+    return new HttpError(403, `Your Google sign-in doesn't allow ${api.what}. In Chrome, ⚙ → Sign in with Google again, and leave every box ticked on Google's screen.`, e.body);
+  }
+  return e;
+}
+
 /** The exact redirect URI to register in Google Cloud: this page's address without query/hash. */
 export function redirectUri(loc = globalThis.location) {
   return `${loc.origin}${loc.pathname.replace(/index\.html$/, '')}`;
@@ -139,10 +182,24 @@ export class Google {
       headers: { ...(opts.headers || {}), Authorization: `Bearer ${await this.accessToken(force)}` },
     });
     try {
-      return await call(false);
+      try {
+        return await call(false);
+      } catch (e) {
+        if (e instanceof HttpError && e.status === 401) return await call(true);
+        throw e;
+      }
     } catch (e) {
-      if (e instanceof HttpError && e.status === 401) return call(true);
-      throw e;
+      throw explainGoogleError(e, url);
     }
+  }
+
+  /** Which of the panel's Google parts this sign-in didn't allow, e.g. ['Google Tasks (the shopping list)']. */
+  missingScopes() {
+    const sc = this.s.google.scopes || '';
+    return [
+      this.s.google.projectId && !sc.includes('sdm.service') ? 'your Nest devices' : null,
+      !sc.includes('/auth/calendar') ? 'Google Calendar' : null,
+      !sc.includes('/auth/tasks') ? 'Google Tasks (the shopping list)' : null,
+    ].filter(Boolean);
   }
 }

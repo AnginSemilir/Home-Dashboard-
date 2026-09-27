@@ -70,7 +70,7 @@ Google refuses sign-ins inside kiosk apps (you'd see `disallowed_useragent`), so
 
 If you signed in before the shopping list was added to the panel, your sign-in doesn't include Google Tasks yet (the list says "Sign in to Google again"). Once:
 
-1. In Google Cloud, **APIs & Services → Library → Google Tasks API → Enable** (the same project as before).
+1. In Google Cloud, **APIs & Services → Library → Google Tasks API → Enable**. It must be the project that holds your OAuth client (its **Credentials** page lists the client ID you pasted into the panel). It can take a few minutes to start working.
 2. In **Chrome** on the tablet: ⚙ → **Sign in with Google** again, and allow Tasks.
 3. ⚙ → **Choose shopping list** → **Save & close**, then Copy/Paste settings into the kiosk app as in step 3.5.
 
