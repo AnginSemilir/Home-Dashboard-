@@ -86,7 +86,7 @@ The checklist in ⚙ has a line, **Doorbell alerts**, that says what's wrong in 
 
 A web page can't change the tablet's volume, and its sound always plays at the **media** volume, the same one your music uses. So:
 
-- **The panel's chime is made as loud as it can be at any volume.** It uses a bright bell tone, stays near full level instead of fading, and plays three times. Measured against the first version, it's about 9 dB louder, roughly twice as loud to the ear, at the same volume setting.
+- **The panel's chime is as loud as a web page can make it.** It's a bright bell pitched where ears and small speakers are most sensitive, driven to almost full level the whole time, and played three times. Measured at the same volume setting, it's about 18 dB louder than the first version (roughly 3–4 times as loud to the ear). The price is a harder, more alarm-like ding-dong. Beyond this, only a higher volume can make it louder.
 - **Music gets out of the way.** If Spotify is connected and playing, the panel pauses it while the doorbell rings and carries on when you close the doorbell view.
 - **Bluetooth speakers:** the chime waits half a second before playing, so a speaker that has dozed off doesn't swallow the first note.
 
