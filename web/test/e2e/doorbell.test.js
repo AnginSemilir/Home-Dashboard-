@@ -67,7 +67,7 @@ test('a press at night: the live view over everything, a banner, a chime; each p
   assert.equal(await page.locator('.ring-banner').innerText(), "Someone's at the door · 23:15");
   await waitFor(() => calls.pubsub.acks.length >= 2, 'both acknowledged');
   await waitFor(() => page.evaluate(() => window.__notes > 0), 'a chime');
-  assert.equal(await page.evaluate(() => window.__notes), 8, 'one ding-dong, twice');
+  assert.equal(await page.evaluate(() => window.__notes), 30, 'one chime: a ding-dong three times');
   assert.deepEqual(nestCmds(calls).filter((c) => c.endsWith('GenerateWebRtcStream')).length, 1);
 
   // Stale presses and a person walking past: acknowledged, no ring.
@@ -76,7 +76,7 @@ test('a press at night: the live view over everything, a banner, a chime; each p
     timestamp: new Date(NIGHT).toISOString(), resourceUpdate: { name: CAMERA_ID, events: { 'sdm.devices.events.CameraPerson.Person': { eventSessionId: 's2', eventId: 'p1' } } },
   });
   await waitFor(() => calls.pubsub.acks.length >= acksBefore + 2, 'acknowledged');
-  assert.equal(await page.evaluate(() => window.__notes), 8, 'no second chime');
+  assert.equal(await page.evaluate(() => window.__notes), 30, 'no second chime');
 
   // The ring sits above Settings.
   await page.evaluate(() => { document.querySelector('#clock .gear').click(); });
@@ -141,7 +141,7 @@ test('Test chime and Test doorbell buttons; a hidden panel doesn\'t take presses
   const set = page.locator('#settings');
   await set.getByRole('button', { name: 'Test chime' }).click();
   await set.getByText('Ding-dong!').waitFor();
-  assert.equal(await page.evaluate(() => window.__notes), 8);
+  assert.equal(await page.evaluate(() => window.__notes), 30);
   await set.getByRole('button', { name: 'Test doorbell' }).click();
   await page.locator('#cam.expanded.ring').waitFor();
   await page.locator('#cam .cam-bar .close').click();
@@ -153,5 +153,17 @@ test('Test chime and Test doorbell buttons; a hidden panel doesn\'t take presses
   const n = calls.pubsub.pulls;
   await page.waitForTimeout(3000);
   assert.ok(calls.pubsub.pulls <= n + 1, `no new pulls while hidden (${n} → ${calls.pubsub.pulls})`);
+  await ctx.close();
+});
+
+test('music on Spotify pauses while the doorbell rings, and carries on when the view closes', async () => {
+  const { ctx, page, calls } = await openPanel(env, { now: NIGHT, settings: withDoorbell(), spotify: true, initScript: nightAndSound });
+  await page.locator('.dock [data-app="music"] .d-label', { hasText: 'Here Comes the Sun' }).waitFor();
+  await waitFor(() => calls.pubsub.pulls >= 1, 'a pull');
+  calls.pubsub.queue.push(press(NIGHT, { ago: 0 }));
+  await page.locator('#cam.expanded.ring').waitFor();
+  await waitFor(() => calls.some((c) => c.service === 'spotify' && c.path === '/me/player/pause'), 'paused');
+  await page.locator('#cam .cam-bar .close').click();
+  await waitFor(() => calls.some((c) => c.service === 'spotify' && c.method === 'PUT' && c.path === '/me/player/play'), 'playing again');
   await ctx.close();
 });

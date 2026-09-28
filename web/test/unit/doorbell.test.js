@@ -187,19 +187,19 @@ function fakeAudio({ state = 'running', resumes = true } = {}) {
   return { win: { AudioContext: Ctx, addEventListener: (ev, fn) => { listeners[ev] = fn; } }, starts, listeners };
 }
 
-test('chime: plays a two-note ding-dong twice; not again within 5 s; test() always plays', async () => {
+test('chime: a two-note ding-dong three times (five overtones each); not again within 5 s; test() always plays', async () => {
   const a = fakeAudio();
   let t = 1000;
   const c = new Chime({ win: a.win, now: () => t });
   assert.equal(c.ready, true, 'kiosk / installed app: sound allowed without a tap');
   assert.equal(await c.ring(), true);
-  assert.equal(a.starts.length, 8, '2 notes × 2 tones × twice');
+  assert.equal(a.starts.length, 30, '2 notes × 5 overtones × 3 times');
   assert.deepEqual([...a.starts].sort((x, y) => x - y), a.starts.slice().sort((x, y) => x - y));
   t += 3000;
   assert.equal(await c.ring(), true);
-  assert.equal(a.starts.length, 8, 'rang 3 s ago: no second chime');
+  assert.equal(a.starts.length, 30, 'rang 3 s ago: no second chime');
   assert.equal(await c.test(), true);
-  assert.equal(a.starts.length, 16);
+  assert.equal(a.starts.length, 60);
 });
 
 test('chime: blocked until a tap (pointerup, not pointerdown); a resume that never answers gives up', async () => {

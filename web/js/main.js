@@ -289,7 +289,9 @@ async function openCamera({ device, ring = false } = {}) {
 
 async function closeCamera() {
   const s = live?.stream;
+  const wasRing = !!live?.ring;
   live = null;
+  if (wasRing) resumeMusicAfterRing();
   ui.renderCamera(refs, settings, state, live);
   updateNight();
   await s?.stop();
@@ -301,12 +303,25 @@ const chime = SUB_RE.test(settings.google.doorbellSub.trim()) ? new Chime() : nu
 let doorbell = null;
 
 /** Someone pressed the doorbell: its live view over everything, a chime, and the screen lit. */
+let musicPausedByRing = false;
 function ring({ device } = {}) {
   closeMusic();
+  // Music would drown the chime: pause Spotify, and carry on when the doorbell view closes.
+  if (spotifyReady() && state.music?.playing && !musicPausedByRing) {
+    musicPausedByRing = true;
+    spotify.pause().then(() => { if (state.music) state.music.playing = false; renderMusic(); }).catch(() => { musicPausedByRing = false; });
+    setTimeout(() => { if (!live?.ring) resumeMusicAfterRing(); }, RING_CLOSE_MS + 5e3); // if the view never opened
+  }
   nightSnoozeUntil = Date.now() + RING_CLOSE_MS;
   openCamera({ device: device || settings.google.cameraId, ring: true });
   updateNight();
   (chime || new Chime()).ring().then((ok) => { if (!ok) ui.soundHint(refs, true); });
+}
+
+function resumeMusicAfterRing() {
+  if (!musicPausedByRing) return;
+  musicPausedByRing = false;
+  spotify.play().then(() => sources.spotify?.run()).catch(() => {});
 }
 
 function startDoorbell() {

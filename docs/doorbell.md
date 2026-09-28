@@ -82,6 +82,25 @@ In the Google Home app, go to the doorbell → **Settings → Notifications**. T
 
 The checklist in ⚙ has a line, **Doorbell alerts**, that says what's wrong in plain words if something isn't set up.
 
+## Making it louder (without turning the music up)
+
+A web page can't change the tablet's volume, and its sound always plays at the **media** volume, the same one your music uses. So:
+
+- **The panel's chime is made as loud as it can be at any volume.** It uses a bright bell tone, stays near full level instead of fading, and plays three times. Measured against the first version, it's about 9 dB louder, roughly twice as loud to the ear, at the same volume setting.
+- **Music gets out of the way.** If Spotify is connected and playing, the panel pauses it while the doorbell rings and carries on when you close the doorbell view.
+- **Bluetooth speakers:** the chime waits half a second before playing, so a speaker that has dozed off doesn't swallow the first note.
+
+**Want it louder still, on its own volume?** Android has a separate **alarm** volume. The free app **MacroDroid** can play a doorbell sound on that volume whenever Google Home announces a press, leaving the media volume alone. This isn't tested on your tablet, so check where the sound comes out: on some tablets alarms play on the built-in speaker as well as, or instead of, the Bluetooth one.
+1. Set up **the Google Home alert** below, so Google Home tells the tablet about presses. You can set that alert to **Silent** in step 3; MacroDroid still sees it.
+2. Android **Settings → Sound → Alarm volume**: turn it up. It's separate from the media volume.
+3. In MacroDroid, **Add macro**:
+   - **Trigger:** Notification → **Notification received** → application **Home** (Google Home) → text contains your doorbell's name (for example `Front door`).
+   - **Action:** Media → **Play/Stop sound** → pick a loud sound, and set its stream to **Alarm** if the option is offered.
+   - Give MacroDroid the notification access it asks for, and turn off battery optimisation for it.
+4. Press the doorbell to test.
+
+If you have Google Nest speakers, the Google Home app can also make them chime or announce the doorbell: **Doorbell → Settings → Chimes / Announcements** (menu names vary).
+
 ## If nothing happens
 
 - **Did Google send anything?** Google Cloud → **Pub/Sub → Topics → nest-events → Metrics**: does *Published message count* go up when you press the bell?
