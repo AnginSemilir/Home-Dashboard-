@@ -184,7 +184,7 @@ export function renderHours({ values, bands, width, height, fs = 12, selected = 
   const H = Math.max(80, Math.round(height));
   const padL = Math.round(fs * 2.8), padR = 2, padT = Math.round(fs * 0.7), padB = Math.round(fs * 2);
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg uc-svg" role="img" aria-label="Electricity used in each hour of the day">`];
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg uc-svg" role="img" aria-label="Electricity used in each hour of the day (Table shows the figures)">`];
   const max = Math.max(0, ...values.filter(Number.isFinite));
   if (!(max > 0)) {
     out.push(`<text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="ch-empty">No usage to show yet</text></svg>`);

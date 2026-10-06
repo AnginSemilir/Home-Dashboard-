@@ -300,7 +300,7 @@ svg { display: block; }
 .price[data-band="cheap"] { --g: var(--cheap); }
 .price[data-band="mid"] { --g: var(--mid); }
 .price[data-band="high"] { --g: var(--high); }
-.price > .dot { right: 6em; } /* beside the two small buttons */
+.price > .dot { right: calc(0.45em + 2 * max(2.6em, 40px) + 14px); } /* beside the two small buttons */
 /* Number, unit and chip all sit on one baseline. */
 .price .price-main { align-self: center; display: flex; align-items: baseline; gap: 0.85em; min-width: 0; }
 .price .big {
@@ -608,7 +608,7 @@ svg { display: block; }
 
 /* ---------- Average prices: a small button on the price card, and its pop-up ---------- */
 .price .stats-btn {
-  position: absolute; top: 0.45em; right: 0.45em; width: 2.6em; height: 2.6em;
+  position: absolute; top: 0.45em; right: 0.45em; width: max(2.6em, 40px); height: max(2.6em, 40px);
   display: grid; place-items: center; color: var(--faint); border-radius: 50%;
 }
 .price .stats-btn svg { width: 1.3em; height: 1.3em; }
@@ -652,7 +652,7 @@ svg { display: block; }
 
 /* ---------- When you use electricity: the clock button beside it, and its pop-up ---------- */
 .price .usage-btn {
-  position: absolute; top: 0.45em; right: calc(0.45em + 2.7em); width: 2.6em; height: 2.6em;
+  position: absolute; top: 0.45em; right: calc(0.45em + max(2.6em, 40px) + 6px); width: max(2.6em, 40px); height: max(2.6em, 40px);
   display: grid; place-items: center; color: var(--faint); border-radius: 50%;
 }
 .price .usage-btn svg { width: 1.25em; height: 1.25em; }
@@ -665,13 +665,14 @@ svg { display: block; }
 .uc-sum b { color: var(--text); font-weight: 650; }
 .uc-chart { position: relative; height: 13.5em; margin-top: 0.5em; font-size: max(11px, 0.82em); }
 .uc-chart > svg { position: absolute; inset: 0; }
-.uc-chart.empty { height: auto; font-size: 1em; }
-.uc-chart.has-sel .ch-bar:not(.on) { opacity: 0.38; }
+.uc-chart.empty { display: grid; place-items: center; font-size: 1em; } /* keeps its height: nothing jumps */
+.uc-chart.has-sel .ch-bar:not(.on) { opacity: 0.55; }
+.uc-chart { touch-action: none; } /* a finger slides along the bars rather than moving the page */
 .uc-chart .uc-hit { cursor: pointer; }
-.uc-info { min-height: 1.4em; margin-top: 0.35em; color: var(--muted); font-size: 0.95em; }
+.uc-info { min-height: 1.4em; margin-top: 0.35em; color: var(--muted); font-size: max(12px, 0.95em); }
 .uc-info b { color: var(--text); font-weight: 600; }
 .uc-info .band-dot { margin-left: 0.15em; }
-.uc-legend { margin-top: 0.4em; }
+.uc-legend { margin-top: 0.4em; font-size: max(11px, 0.84em); }
 @media (max-height: 640px) { .uc-chart { height: 10.5em; } }
 
 /* Chart or table: a small switch at the end of the summary line; the table in two halves. */

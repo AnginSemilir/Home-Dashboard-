@@ -15,7 +15,7 @@ import { startOfDay, dayKey, partsInTz, DEFAULT_TZ } from './time.js';
 import { HttpError } from './util.js';
 
 export const STATS_KEY = 'wallpanel.stats.v1';
-const VERSION = 3; // 3: each day also keeps its usage by hour of the day
+const VERSION = 4; // 3: each day also keeps its usage by hour of the day; 4: all of it, priced or not
 const MIN = 60e3;
 const HALF = 1800e3;
 const CHUNK_DAYS = 31;            // prices a month at a time (one request each), newest first
@@ -98,23 +98,24 @@ export function daysBetween(from, to, tz = DEFAULT_TZ) {
 const r4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /**
- * A day's readings by hour of the day (local clock): kWh, cost (pence) and how many half hours
- * had a reading, for readings with a price. The hour the clocks go back holds four half hours;
- * the hour they skip, none.
+ * A day's readings by hour of the day (local clock): kWh and how many half hours had a reading
+ * (all readings), and the kWh and cost (pence) of those with a price. The hour the clocks go
+ * back holds four half hours; the hour they skip, none.
  */
 export function byHour(day, readings, priceAt, tz = DEFAULT_TZ) {
-  const k = Array(24).fill(0), c = Array(24).fill(0), n = Array(24).fill(0);
+  const k = Array(24).fill(0), kp = Array(24).fill(0), c = Array(24).fill(0), n = Array(24).fill(0);
   const plain = day.end - day.start === 864e5;
   for (const r of readings || []) {
     if (r.start < day.start || r.start >= day.end || !Number.isFinite(r.kwh)) continue;
-    const p = priceAt(r.start);
-    if (p == null) continue;
     const hr = plain ? Math.floor((r.start - day.start) / 3600e3) : partsInTz(r.start, tz).h;
     k[hr] += r.kwh;
-    c[hr] += r.kwh * p;
     n[hr] += (Math.min(r.end, day.end) - r.start) / HALF;
+    const p = priceAt(r.start);
+    if (p == null) continue;
+    kp[hr] += r.kwh;
+    c[hr] += r.kwh * p;
   }
-  return { k, c, n };
+  return { k, kp, c, n };
 }
 
 /**
@@ -263,7 +264,8 @@ export class PriceStats {
     for (const k of Object.keys(data.days)) if (!need.length || k < need[0].key) delete data.days[k];
     const today = periodStarts(now, this.tz).today;
     const oldest = dayKey(today - USAGE_GIVE_UP * 864e5, this.tz);
-    for (const k of Object.keys(data.mini)) if (k < oldest) delete data.mini[k];
+    // (A day still waiting for the meter keeps its Home Mini copy until it's been settled.)
+    for (const k of Object.keys(data.mini)) if (k < oldest && data.days[k]?.u !== 0) delete data.mini[k];
     const usage = this.o.canReadUsage;
     const noPrices = need.filter((d) => !data.days[d.key]);
     const late = usage && now - this.usageAt >= USAGE_RECHECK ? need.filter((d) => data.days[d.key] && !data.days[d.key].u) : [];
@@ -319,10 +321,11 @@ export class PriceStats {
         Object.assign(day, {
           c: r4(u.cost), k: r4(u.kwh), n: r4(u.n), u: done ? 1 : 0,
           // By hour of the day, kept small: Wh, tenths of a penny, and half hours with a
-          // reading (a digit an hour).
+          // reading (a digit an hour); the priced Wh only when some weren't priced.
           h: hrs.k.map((x) => Math.round(x * 1e3)), hc: hrs.c.map((x) => Math.round(x * 10)), hn: hrs.n.map((x) => Math.min(9, Math.round(x))).join(''),
+          ...(hrs.kp.some((x, i) => Math.abs(x - hrs.k[i]) > 1e-9) ? { hp: hrs.kp.map((x) => Math.round(x * 1e3)) } : {}),
         });
-      } else if (old) Object.assign(day, { c: old.c, k: old.k, n: old.n, u: old.u, h: old.h, hc: old.hc, hn: old.hn });
+      } else if (old) Object.assign(day, { c: old.c, k: old.k, n: old.n, u: old.u, h: old.h, hc: old.hc, hn: old.hn, hp: old.hp });
       else Object.assign(day, { c: 0, k: 0, n: 0, u: usage ? 0 : 1 });
       data.days[d.key] = day;
     };
@@ -403,6 +406,8 @@ export class PriceStats {
 
     const span = (id, from) => {
       const pr = addRates({ sum: 0, min: 0 }, rates, s.today, now);
+      // Without a Home Mini, today's readings come tomorrow: don't count them as missing.
+      const unread = readings ? 0 : pr.min;
       let expect = pr.min, missing = 0, firstAt = null, gapDays = 0, usageShort = today.usageShort;
       const u = readings ? addUsage({ cost: 0, kwh: 0, n: 0 }, readings, priceAt, s.today, now) : { cost: 0, kwh: 0, n: 0 };
       for (const d of daysBetween(from, s.today, this.tz)) {
@@ -422,7 +427,7 @@ export class PriceStats {
       const avg = !missing && pr.min ? pr.sum / pr.min : null;
       // A figure only once most of the period has readings: a week with yesterday's still to
       // come shows a dash, a year with one day to come still shows (with a note).
-      const enough = u.n >= 0.9 * (pr.min / 30);
+      const enough = u.n >= 0.9 * ((pr.min - unread) / 30);
       return {
         id, from, avg,
         paid: usage && !missing && enough && u.kwh > 0 ? u.cost / u.kwh : null,
@@ -438,33 +443,54 @@ export class PriceStats {
   }
   /**
    * Your usage by hour of the day over a period ('today', 'week', 'month' or 'year'): for each
-   * hour, kWh, cost (pence) and how many days it covers (a part day counts in part), so
-   * kWh ÷ days is the average a day at that hour. Today's comes from the Home Mini (`tele`).
-   * Also { total, missing (past days with no data yet), usageShort (readings still expected) }.
+   * hour, kWh, the kWh and cost (pence) of what had a price, and how many days it covers (a part
+   * day counts in part), so kWh ÷ days is the average a day at that hour. Today's comes from the
+   * Home Mini (`tele`). Also:
+   * - total; missing (past days not loaded yet) and held (past days that are);
+   * - short: under 90% of the period's half hours have readings (no total rather than a wrong one);
+   * - usageShort: some of the newest readings are still to come;
+   * - partial: the first day of the week, month or year (nothing to average yet: show it as today);
+   * - todayKnown (there are Home Mini readings), todayShort and todayUntil (they stop early).
    */
   usageByHour(now, live, tele, id) {
     this.#segments();
     const s = periodStarts(now, this.tz);
     const priceAt = priceFinder(live?.rates || []);
-    const kwh = Array(24).fill(0), cost = Array(24).fill(0), days = Array(24).fill(0);
-    const add = (k, c, n) => {
-      for (let h = 0; h < 24; h++) { kwh[h] += k[h]; cost[h] += c[h]; days[h] += Math.min(1, n[h] / 2); }
+    const kwh = Array(24).fill(0), priced = Array(24).fill(0), cost = Array(24).fill(0), days = Array(24).fill(0);
+    let read = 0, expected = 0;
+    const add = (k, kp, c, n) => {
+      for (let h = 0; h < 24; h++) {
+        kwh[h] += k[h]; priced[h] += kp[h]; cost[h] += c[h]; days[h] += Math.min(1, n[h] / 2); read += n[h];
+      }
     };
-    if (tele?.slots) {
+    const todayKnown = !!tele?.slots;
+    let todayShort = false, todayUntil = null;
+    if (todayKnown) {
       const day = { start: s.today, end: startOfDay(now, this.tz, 1) };
-      const list = tele.slots.map((x) => ({ start: x.start, end: Math.min(x.start + HALF, now), kwh: x.kwh })).filter((x) => x.end > x.start);
+      const list = tele.slots.map((x) => ({ start: x.start, end: Math.min(x.start + HALF, now), kwh: x.kwh })).filter((x) => x.end > x.start && x.start >= s.today);
       const t = byHour(day, list, priceAt, this.tz);
-      add(t.k, t.c, t.n);
+      add(t.k, t.kp, t.c, t.n);
+      const want = (now - s.today) / HALF;
+      expected += want;
+      todayShort = t.n.reduce((a, b) => a + b, 0) < want - 1; // the newest half hour can be a minute late
+      todayUntil = list.length ? Math.max(...list.map((x) => x.end)) : null;
     }
-    let missing = 0, usageShort = false;
+    let missing = 0, held = 0, usageShort = id === 'today' && todayShort;
     if (id !== 'today') {
       for (const d of daysBetween(s[id], s.today, this.tz)) {
         const v = this.data.days[d.key];
         if (!v) { missing++; continue; }
+        held++;
+        expected += (d.end - d.start) / HALF;
         if (!v.u && v.n < v.m / 30 - 0.01) usageShort = true; // readings still expected
-        if (v.h) add(v.h.map((x) => x / 1e3), v.hc.map((x) => x / 10), [...v.hn].map(Number));
+        if (v.h) add(v.h.map((x) => x / 1e3), (v.hp || v.h).map((x) => x / 1e3), v.hc.map((x) => x / 10), [...v.hn].map(Number));
       }
     }
-    return { id, kwh, cost, days, total: kwh.reduce((a, b) => a + b, 0), missing, usageShort, usage: this.o.canReadUsage };
+    return {
+      id, kwh, priced, cost, days, total: kwh.reduce((a, b) => a + b, 0), missing, held, usageShort,
+      short: id !== 'today' && expected > 0 && read < 0.9 * expected,
+      partial: id !== 'today' && !held && !missing,
+      todayKnown, todayShort, todayUntil, usage: this.o.canReadUsage,
+    };
   }
 }

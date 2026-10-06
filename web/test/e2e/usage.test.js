@@ -134,3 +134,53 @@ test('the table view: every hour in two halves, the busiest in bold, rows tap li
   assert.deepEqual(problems, []);
   await ctx.close();
 });
+
+test('slide a finger along the bars to pick an hour; tap the picked one again to clear', async () => {
+  const { ctx, page } = await openPanel(env, { touch: true });
+  await open(page);
+  await period(page, 'month');
+  const box = await page.locator('#usage .uc-chart').boundingBox();
+  const at = async (hr) => {
+    const r = await page.locator(`#usage .uc-hit[data-h="${hr}"]`).boundingBox();
+    return [r.x + r.width / 2, r.y + r.height / 2];
+  };
+  const [x3, y] = await at(3), [x9] = await at(9);
+  await page.mouse.move(x3, y);
+  await page.mouse.down();
+  assert.match(await page.locator('#usage .uc-info').textContent(), /^03:00–04:00/);
+  for (let i = 1; i <= 6; i++) await page.mouse.move(x3 + ((x9 - x3) * i) / 6, y);
+  assert.match(await page.locator('#usage .uc-info').textContent(), /^09:00–10:00/, 'followed the finger');
+  await page.mouse.up();
+  assert.equal(await page.locator('#usage .ch-bar.on').count(), 1);
+  // Tapping the picked hour again clears it.
+  await page.mouse.click(x9, y);
+  assert.equal(await page.locator('#usage .ch-bar.on').count(), 0);
+  assert.match(await page.locator('#usage .uc-info').textContent(), /^Tap or slide/);
+  assert.ok(box.height > 100);
+  // The two small buttons on the price card are at least 40px and don't touch.
+  const a = await page.locator('#price .usage-btn').boundingBox(), b = await page.locator('#price .stats-btn').boundingBox();
+  assert.ok(a.width >= 40 && a.height >= 40 && b.width >= 40, JSON.stringify([a, b]));
+  assert.ok(b.x - (a.x + a.width) >= 4, 'a gap between them');
+  await ctx.close();
+});
+
+test('a Home Mini that stopped: today says so instead of showing the missing hours as no use', async () => {
+  const { ctx, page } = await openPanel(env, { homeMiniStopsAt: Date.parse('2026-09-25T05:00:00+01:00') });
+  await open(page);
+  assert.match(await page.locator('#usage .uc-sum').textContent(), /^[\d.]+ kWh until 05:30 · most at/);
+  assert.match(await page.locator('#usage .st-msg').textContent(), /The Home Mini's readings stop at 05:30, so later hours are missing\./);
+  await ctx.close();
+});
+
+test('Monday morning: this week is shown as used so far, not scaled up into a day', async () => {
+  const monday = Date.parse('2026-09-21T08:05:00+01:00');
+  const { ctx, page } = await openPanel(env, { now: monday });
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#price .usage-btn').click();
+  await page.locator('#usage .uc-seg button[data-period="week"]').click();
+  await page.locator('#usage .uc-chart svg .ch-bar').first().waitFor();
+  assert.equal(await page.locator('#usage .st-sub').textContent(), 'kWh used in each hour so far (the first day)');
+  assert.match(await page.locator('#usage .uc-sum').textContent(), /^[\d.]+ kWh so far · most at/);
+  assert.doesNotMatch(await page.locator('#usage .uc-sum').textContent(), /a day/);
+  await ctx.close();
+});

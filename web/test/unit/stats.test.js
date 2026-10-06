@@ -436,3 +436,80 @@ test('PriceStats.usageByHour: each hour\'s average a day, for today, the week, t
   const fresh = setup().stats;
   assert.equal(fresh.usageByHour(NOW, live(NOW), tele(NOW), 'week').missing, 1);
 });
+
+test('usageByHour: says when today has no Home Mini, or its readings stop early', async () => {
+  const { stats } = setup();
+  await stats.ensure(NOW, live(NOW));
+  let u = stats.usageByHour(NOW, live(NOW), null, 'today');
+  assert.equal(u.todayKnown, false, 'no Home Mini: not "no use"');
+  const early = { slots: tele(NOW).slots.filter((x) => x.start < at('2026-10-06T05:00:00+01:00')) };
+  u = stats.usageByHour(NOW, live(NOW), early, 'today');
+  assert.equal(u.todayKnown, true);
+  assert.equal(u.todayShort, true);
+  assert.equal(u.todayUntil, at('2026-10-06T05:00:00+01:00'));
+  assert.equal(u.usageShort, true);
+  u = stats.usageByHour(NOW, live(NOW), tele(NOW), 'today');
+  assert.equal(u.todayShort, false);
+  // Without a Home Mini the week still has its past days, with today simply not counted.
+  u = stats.usageByHour(NOW, live(NOW), null, 'week');
+  assert.equal(u.short, false);
+  near(u.total, brute(periodStarts(NOW, TZ).week, periodStarts(NOW, TZ).today).kwh, 'Monday only');
+});
+
+test('usageByHour: the first day of a week or month is shown as used, not averaged', async () => {
+  const mon = at('2026-10-05T08:05:00+01:00'), first = at('2026-10-01T07:10:00+01:00');
+  const { stats } = setup();
+  await stats.ensure(mon, live(mon));
+  assert.equal(stats.usageByHour(mon, live(mon), tele(mon), 'week').partial, true);
+  assert.equal(stats.usageByHour(mon, live(mon), tele(mon), 'month').partial, false);
+  assert.equal(stats.usageByHour(NOW, live(NOW), tele(NOW), 'week').partial, false, 'Tuesday: Monday to average');
+  await stats.ensure(first, live(first));
+  assert.equal(stats.usageByHour(first, live(first), tele(first), 'month').partial, true);
+});
+
+test('usageByHour: a period mostly without readings gives no total rather than part of one', async () => {
+  const { octopus, stats } = setup();
+  octopus.failUsage = true;
+  await assert.rejects(stats.ensure(NOW, live(NOW)));
+  const u = stats.usageByHour(NOW, live(NOW), tele(NOW), 'year');
+  assert.equal(u.short, true);
+  assert.equal(u.missing, 0);
+  assert.ok(u.held > 0);
+});
+
+test('usageByHour: usage counts whether or not it had a single price (Economy 7)', async () => {
+  const may = at('2026-05-01T00:00:00+01:00'), jul = at('2026-07-01T00:00:00+01:00');
+  const { stats } = setup({ history: [
+    { tariff: AGILE, from: null, to: may }, { tariff: 'E-2R-ECO7-C', from: may, to: jul }, { tariff: AGILE, from: jul, to: null },
+  ] });
+  await stats.ensure(NOW, live(NOW));
+  const u = stats.usageByHour(NOW, live(NOW), tele(NOW), 'year');
+  near(u.total, brute(periodStarts(NOW, TZ).year, NOW).kwh, 'every kWh, Economy 7 months included');
+  const priced = u.priced.reduce((a, b) => a + b);
+  near(priced, brute(periodStarts(NOW, TZ).year, NOW, agile, (t) => t >= may && t < jul).kwh, 'priced: the rest');
+  assert.equal(u.short, false);
+});
+
+test('PriceStats: days the Home Mini stood in for aren\'t wiped when the meter is more than 10 days late', async () => {
+  const stop = at('2026-09-20T00:00:00+01:00');
+  const { octopus, stats } = setup({ readingsUntil: stop });
+  octopus.hasHomeMini = true;
+  octopus.homeMiniReadings = async (from, to) => {
+    const out = [];
+    for (let t = from; t < to; t += HALF) out.push({ start: t, end: t + HALF, kwh: used(t) });
+    return out;
+  };
+  const sep23 = at('2026-09-23T12:00:00+01:00');
+  await stats.ensure(sep23, live(sep23));
+  const oct2 = at('2026-10-02T12:00:00+01:00');
+  await stats.ensure(oct2, live(oct2));
+  const day = (now) => stats.usageByHour(now, live(now), tele(now), 'month');
+  const sep21 = brute(at('2026-09-21T00:00:00+01:00'), at('2026-09-22T00:00:00+01:00')).kwh;
+  // 11 days on: the 21st was settled using the Home Mini's readings, not emptied.
+  const u = stats.usageByHour(oct2, live(oct2), tele(oct2), 'week');
+  assert.ok(u.total > 0);
+  const raw = JSON.parse(JSON.stringify(stats.data.days['2026-09-21']));
+  near(raw.k > 0 ? raw.h.reduce((a, b) => a + b) / 1e3 : 0, sep21, '21 September kept');
+  assert.equal(raw.u, 1);
+  assert.ok(day(oct2));
+});

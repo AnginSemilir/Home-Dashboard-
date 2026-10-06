@@ -29,7 +29,9 @@ Only want prices? You don't need the key: type your tariff code into **Tariff co
 
 - **When you use electricity**: the small clock button next to it. A bar for each hour of the day showing how much you use then, for **today**, **this week**, **this month** or **this year** (the buttons along the top; it remembers your choice).
   - Today shows the kWh used in each hour so far. The longer periods show the **average kWh a day** in each hour, so they compare with each other.
-  - Each bar is coloured by what you paid on average in that hour (green cheap, amber normal, red peak, blue plunge), so you can see whether your busiest hours fall in the expensive ones. Tap a bar for its kWh, its share of your use and the price you paid then.
+  - Each bar is coloured by what you paid on average in that hour (green cheap, amber normal, red peak, blue plunge), so you can see whether your busiest hours fall in the expensive ones. Tap a bar (or slide a finger along them) for its kWh, its share of your use and the price you paid then.
+  - On the first day of a week, month or year there's nothing to average yet, so that period shows the kWh used so far, like Today.
+  - Today needs the Home Mini: without one (or if it stops sending), the pop-up says so rather than showing the missing hours as no use. A period with too few meter readings shows a dash and says why rather than a total built from part of it.
   - **Chart / Table** at the end of the summary line switches to a table of all 24 hours (kWh, share and price paid, the busiest hour in bold). It remembers which you used last.
   - It uses the same readings and prices as the average prices (loaded once for both), so it needs your API key too.
 

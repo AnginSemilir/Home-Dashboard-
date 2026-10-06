@@ -56,7 +56,7 @@ The research behind each part (APIs, what's possible on Android, sources) is sav
 
 ## What I could and couldn't test
 
-Everything was tested in a browser against **fake** versions of every service: 94 unit tests and 60 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
+Everything was tested in a browser against **fake** versions of every service: 99 unit tests and 63 browser tests (the browser tests run once per style), including clock-change days, midnight, night mode, sunrise/sunset theme changes, the camera's 5-minute stop and error handling, a Home Mini or Kia job that stops reporting, ticking off and adding shopping items, every button's link and three screen sizes. These things can only be confirmed on your tablet, and the setup checklist shows them:
 
 - that Octopus accepts calls from the page (if not, use the proxy in [docs/octopus.md](docs/octopus.md#if-octopus-is-blocked));
 - real Google sign-in and a real camera stream;

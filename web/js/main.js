@@ -146,6 +146,12 @@ function tapUsageHour(hr) {
   renderUsage();
 }
 
+function pickUsageHour(hr) {
+  if (hr === usageHour) return;
+  usageHour = hr;
+  renderUsage();
+}
+
 /** The first time, the year's prices and usage come from Octopus (a few seconds); after that, very little. */
 async function loadStats() {
   statsLoad = { ...statsLoad, loading: true, error: '', usageError: '', day: dayKey(Date.now(), tz) };
@@ -712,6 +718,7 @@ async function boot() {
     usageClose: closeUsage,
     usagePeriod: setUsagePeriod,
     usageTap: tapUsageHour,
+    usagePick: pickUsageHour,
     usageView: setUsageView,
     ringClose: closeCamera,
     shopTick: tickShopping,

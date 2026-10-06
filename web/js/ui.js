@@ -427,10 +427,31 @@ function buildUsage(on) {
   });
   u.sumRow = h('div', { class: 'uc-sumrow' }, u.sum, h('div', { class: 'uc-view', role: 'group', 'aria-label': 'Show as' }, ...u.viewButtons));
   u.box = h('div', { class: 'uc-chart' });
-  u.box.addEventListener('click', (e) => {
-    const hit = e.target.closest?.('.uc-hit');
-    if (hit) on.usageTap?.(Number(hit.dataset.h));
+  // Tap a bar for its hour (again to clear), or slide a finger along the bars: the columns are
+  // narrow, so the hour under the finger follows it.
+  const hourAt = (e) => {
+    const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest?.('.uc-hit');
+    return hit && u.box.contains(hit) ? Number(hit.dataset.h) : null;
+  };
+  let drag = null;
+  u.box.addEventListener('pointerdown', (e) => {
+    const hr = hourAt(e);
+    if (hr == null) return;
+    drag = { hr, moved: false, again: hr === u.sel };
+    try { u.box.setPointerCapture(e.pointerId); } catch { /* fine without */ }
+    on.usagePick?.(hr);
   });
+  u.box.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const hr = hourAt(e);
+    if (hr != null && hr !== drag.hr) { drag.hr = hr; drag.moved = true; on.usagePick?.(hr); }
+  });
+  const end = () => {
+    if (drag && !drag.moved && drag.again) on.usagePick?.(-1);
+    drag = null;
+  };
+  u.box.addEventListener('pointerup', end);
+  u.box.addEventListener('pointercancel', () => { drag = null; });
   u.table = h('div', { class: 'uc-table hidden' });
   u.table.addEventListener('click', (e) => {
     const row = e.target.closest?.('tr[data-h]');
@@ -484,49 +505,66 @@ function usageTable({ values, paid, share, peak, sel, today, opts }) {
  */
 export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
   const U = r.usage;
-  const today = st.period === 'today';
   const asTable = st.view === 'table';
+  // Today, or the first day of a week, month or year (nothing to average yet): kWh as used.
+  const asUsed = st.period === 'today' || !!data?.partial;
   for (const b of U.buttons) b.setAttribute('aria-pressed', String(b.dataset.period === st.period));
   for (const b of U.viewButtons) b.setAttribute('aria-pressed', String(b.dataset.view === (asTable ? 'table' : 'chart')));
-  U.sub.textContent = today ? 'kWh used in each hour today' : 'Average kWh a day in each hour';
+  U.sub.textContent = st.period === 'today' ? 'kWh used in each hour today' : asUsed ? 'kWh used in each hour so far (the first day)' : 'Average kWh a day in each hour';
   const say = (...lines) => U.msg.replaceChildren(...lines.filter(Boolean).map(([text, bad]) => h('div', { class: bad ? 'bad' : '' }, text)));
+  // One message where the chart goes (the box keeps its size, so nothing jumps).
   const blank = (text) => {
     U.sum.textContent = '';
     U.box.replaceChildren(h('div', { class: 'st-empty' }, text));
     U.box.classList.add('empty');
-    U.box.classList.remove('hidden');
+    U.box.classList.remove('hidden', 'has-sel');
     U.table.classList.add('hidden');
     U.info.textContent = '';
     U.legend.replaceChildren();
   };
+  const usageFailed = st.usageError && [`Couldn't get your usage from Octopus: ${st.usageError}`, true];
   if (!data || !data.usage) {
     blank(st.loading ? 'Looking up your meter…' : st.hasKey ? 'Your meter isn\'t known yet.' : 'Add your Octopus account number and API key in Settings to see your usage.');
     say(st.error && [`Couldn't look up your tariff: ${st.error}`, true]);
     return;
   }
-  if (data.missing) {
+  if (data.missing && !data.held) { // nothing loaded yet: the first time
     blank(st.loading ? 'Getting your usage from Octopus (only the first time)…' : '–');
-    say(st.error && [`Couldn't get the older prices from Octopus: ${st.error}`, true],
-      st.usageError && [`Couldn't get your usage from Octopus: ${st.usageError}`, true]);
+    say(st.error && [`Couldn't get the older prices from Octopus: ${st.error}`, true], usageFailed);
+    return;
+  }
+  if (st.period === 'today' && !data.todayKnown) {
+    blank('–');
+    say(['Today\'s use comes from the Home Mini, so it shows here once one is sending readings. Your meter\'s own readings arrive the next day: see This week.']);
+    return;
+  }
+  if (data.short) { // most of the period has no readings: no total rather than a wrong one
+    blank('–');
+    say(usageFailed || ['Only some of this period\'s days have meter readings yet.']);
+    return;
+  }
+  // Each hour: kWh as used, or the average a day; and the band of what you paid then.
+  const values = data.kwh.map((k, hr) => (data.days[hr] > 0 ? (asUsed ? k : k / data.days[hr]) : null));
+  if (!values.some((v) => v > 0)) {
+    blank(st.period === 'today' ? 'No Home Mini readings yet today.' : 'No readings for this period yet.');
+    say(usageFailed);
     return;
   }
   U.box.classList.remove('empty');
-  // Each hour: kWh (today) or the average a day, and the band of what you paid then.
-  const values = data.kwh.map((k, hr) => (data.days[hr] > 0 ? (today ? k : k / data.days[hr]) : null));
-  const paid = data.kwh.map((k, hr) => (k > 0 ? data.cost[hr] / k : null));
+  const paid = data.priced.map((k, hr) => (k > 0 ? data.cost[hr] / k : null));
   const bands = paid.map((p) => (p == null ? 'none' : band(p, opts)));
   const sel = st.selected >= 0 && Number.isFinite(values[st.selected]) ? st.selected : -1;
+  U.sel = sel;
   let peak = -1;
   values.forEach((v, hr) => { if (Number.isFinite(v) && (peak < 0 || v > values[peak])) peak = hr; });
   const perDay = values.reduce((a, v) => a + (Number.isFinite(v) ? v : 0), 0);
-  U.sum.replaceChildren(...(data.total > 0
-    ? [h('b', {}, `${kwhText(data.total)} kWh`), today ? ' so far' : ` · ${kwhText(perDay)} kWh a day`, ' · most at ', h('b', {}, hourSpan(peak))]
-    : ['No usage yet']));
+  const until = st.period === 'today' && data.todayShort && data.todayUntil ? ` until ${hhmm(data.todayUntil, tz)}` : asUsed ? ' so far' : '';
+  U.sum.replaceChildren(h('b', {}, `${kwhText(data.total)} kWh`), until || ` · ${kwhText(perDay)} kWh a day`, ' · most at ', h('b', {}, hourSpan(peak)));
   const share = data.kwh.map((k) => (data.total > 0 ? Math.round((k / data.total) * 100) : 0));
   U.box.classList.toggle('hidden', asTable);
   U.table.classList.toggle('hidden', !asTable);
   if (asTable) {
-    U.table.replaceChildren(...usageTable({ values, paid, share, peak, sel, today, opts }));
+    U.table.replaceChildren(...usageTable({ values, paid, share, peak, sel, today: asUsed, opts }));
   } else {
     // Measure after the sheet is on screen (the chart fills its box).
     const box = U.box.getBoundingClientRect();
@@ -535,18 +573,22 @@ export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
     U.box.replaceChildren(svg(renderHours({ values, bands, width: box.width || 520, height: box.height || 220, fs, selected: sel })));
   }
   if (sel >= 0) {
-    U.info.replaceChildren(h('b', {}, hourSpan(sel)), ` · ${kwhText(values[sel])} kWh${today ? '' : ' a day'} · ${share[sel]}% of your use`,
+    U.info.replaceChildren(h('b', {}, hourSpan(sel)), ` · ${kwhText(values[sel])} kWh${asUsed ? '' : ' a day'} · ${share[sel]}% of your use`,
       ...(paid[sel] != null ? [' · paid ', bandDot(paid[sel], opts), h('b', {}, `${round1(paid[sel]).toFixed(1)}p`), ' a kWh'] : []));
-  } else U.info.textContent = asTable ? 'The busiest hour is in bold. Dot: what you paid then.' : 'Tap a bar for that hour. Colour: what you paid then.';
-  const shown = new Set(bands.filter((b, hr) => Number.isFinite(values[hr]) && b !== 'none'));
+  } else U.info.textContent = asTable ? 'The busiest hour is in bold. Dot: what you paid then.' : 'Tap or slide along the bars for an hour. Colour: what you paid then.';
+  // A key for the colours drawn (in the panel's usual order).
+  const shown = new Set(bands.filter((b, hr) => Number.isFinite(values[hr]) && values[hr] > 0 && b !== 'none'));
   const item = (b, text) => h('span', { class: `lg lg-${b}` }, h('span', { class: `sw band-${b}` }), text);
   U.legend.replaceChildren(...[
-    shown.has('plunge') ? item('plunge', 'Plunge ≤0') : null,
-    item('cheap', `Cheap <${opts.cheap ?? 15}p`), item('mid', 'Normal'), item('high', `Peak ${opts.pricey ?? 25}p+`),
+    shown.has('plunge') && item('plunge', 'Plunge ≤0'), shown.has('cheap') && item('cheap', `Cheap <${opts.cheap ?? 15}p`),
+    shown.has('mid') && item('mid', 'Normal'), shown.has('high') && item('high', `Peak ${opts.pricey ?? 25}p+`),
   ].filter(Boolean));
   say(
-    st.usageError && [`Couldn't get your usage from Octopus: ${st.usageError}`, true],
-    data.usageShort && !st.loading && ['Your newest meter readings aren\'t in yet (they usually arrive the next day), so some hours may be low.'],
+    usageFailed,
+    data.missing > 0 && st.loading && ['Getting the newest days from Octopus…'],
+    data.missing > 0 && !st.loading && st.error && [`Couldn't get the newest days from Octopus: ${st.error}`, true],
+    st.period === 'today' && data.todayShort && [data.todayUntil ? `The Home Mini's readings stop at ${hhmm(data.todayUntil, tz)}, so later hours are missing.` : 'No Home Mini readings yet today.'],
+    st.period !== 'today' && data.usageShort && !st.loading && ['The newest meter readings aren\'t in yet (they usually arrive the next day), so the total leaves those hours out.'],
   );
 }
 
