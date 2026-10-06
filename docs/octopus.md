@@ -16,6 +16,10 @@ Only want prices? You don't need the key: type your tariff code into **Tariff co
 - **Chart**: from an hour ago to 24 hours ahead. Octopus publishes tomorrow's prices at about 4pm; before that, the chart says "prices from ~4pm".
 - **Using now**: live demand from the Home Mini (refreshed every 60 s), with a sparkline of the last hour.
 - **Today so far**: the cost since midnight (half-hour usage × each half-hour's price + the daily standing charge) and the kWh used.
+- **Average prices**: the small chart button in the corner of the price box. It shows your average unit price (including VAT) over the **last 30 minutes**, the **last hour**, **today**, **this week** (from Monday), **this month** and **this year** so far.
+  - It's an average over time: every half hour counts the same, whatever you were using then. It isn't weighted by your usage.
+  - The first time you open it, the panel fetches this year's prices from Octopus's public price list (about a dozen requests, a few seconds). It keeps each day's total on the tablet, so after that it fetches nothing more.
+  - If you changed tariff this year, each part of the year uses the tariff you were on. Economy 7 periods have no single price, so they're left out and the line says when the prices start.
 
 Colours: green below 15p, amber, red from 25p, **blue at or below 0p** (plunge pricing: you're paid to use power). Change the thresholds in ⚙ → Panel.
 

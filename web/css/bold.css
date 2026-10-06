@@ -248,7 +248,7 @@ svg { display: block; }
 .price[data-band="cheap"] { --band: var(--cheap); }
 .price[data-band="mid"] { --band: var(--mid); }
 .price[data-band="high"] { --band: var(--high); }
-.price > .dot { top: 0.9em; right: 0.9em; }
+.price > .dot { top: 0.9em; right: 3.2em; } /* beside the averages button */
 .price .label { grid-area: label; margin-bottom: 0.1em; padding-right: 1.2em; }
 .price-main { grid-area: main; display: flex; align-items: baseline; gap: 0.9em; min-width: 0; }
 .price .big {
@@ -523,6 +523,45 @@ svg { display: block; }
 .ms-dev.on { background: var(--text); color: var(--bg); }
 .ms-dev.on svg { color: var(--bg); }
 
+
+/* ---------- Average prices: a small button on the price card, and its pop-up ---------- */
+.price .stats-btn {
+  position: absolute; top: 0.35em; right: 0.4em; width: 2.6em; height: 2.6em;
+  display: grid; place-items: center; color: var(--faint); border-radius: 50%;
+}
+.price .stats-btn svg { width: 1.3em; height: 1.3em; }
+.price .stats-btn:active { background: var(--card-2); }
+.stats-sheet { position: fixed; inset: 0; z-index: 65; display: grid; place-items: center; padding: 1.5em; background: rgb(0 0 0 / 0.55); }
+.st-card {
+  position: relative; width: min(30em, 94vw); max-height: 94vh; overflow: auto;
+  padding: 1.5em 1.7em 1.3em; border-radius: 20px; color: var(--text);
+  background: var(--card); box-shadow: var(--card-shadow), 0 20px 60px rgb(0 0 0 / 0.45);
+}
+.st-close { position: absolute; top: 0.8em; right: 0.8em; width: 2.6em; height: 2.6em; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.st-close svg { width: 1.3em; height: 1.3em; }
+.st-close:active { background: var(--card-2); }
+.st-card h2 { margin: 0; padding-right: 2em; font-size: 1.55em; font-weight: 650; letter-spacing: -0.01em; }
+.st-sub { margin-top: 0.15em; color: var(--muted); }
+.st-rows { margin-top: 0.7em; }
+.st-row { display: flex; align-items: center; justify-content: space-between; gap: 1em; padding: 0.55em 0; border-top: 1px solid var(--line); }
+.st-row:first-child { border-top: 0; }
+/* The two rolling windows, then the calendar periods. */
+.st-row[data-id="today"] { margin-top: 0.5em; }
+.st-what { min-width: 0; }
+.st-label { font-size: 1.1em; font-weight: 600; }
+.st-since { color: var(--muted); font-size: 0.9em; }
+.st-val {
+  flex: none; display: flex; align-items: baseline; font-size: 1.75em; font-weight: 650; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.st-val .band-dot { align-self: center; width: 0.36em; height: 0.36em; margin: 0 0.4em 0 0; }
+.st-val small { margin-left: 0.1em; font-size: 0.55em; font-weight: 500; letter-spacing: 0; color: var(--muted); }
+.st-val.none { color: var(--faint); font-weight: 400; }
+.st-msg { margin-top: 0.4em; color: var(--muted); font-size: 0.95em; }
+.st-msg:empty { display: none; }
+.st-msg.bad { color: var(--bad-ink); }
+.st-note { margin: 0.6em 0 0; color: var(--faint); font-size: 0.88em; }
+.st-empty { padding: 0.8em 0; color: var(--muted); }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */
 .cam.expanded.ring { z-index: 75; } /* above night (60), the music controls (65) and Settings (70); below toasts (80) */

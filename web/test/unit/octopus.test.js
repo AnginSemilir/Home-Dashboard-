@@ -22,7 +22,13 @@ test('parseAccount picks the active import agreement and the Home Mini device', 
     { validFrom: '2024-01-01T00:00:00Z', validTo: '2025-01-01T00:00:00Z', tariff: { tariffCode: 'E-1R-OLD-C', productCode: 'OLD' } },
     { validFrom: '2025-01-01T00:00:00Z', validTo: null, tariff: { tariffCode: 'E-1R-AGILE-24-10-01-C', productCode: 'AGILE-24-10-01' } },
   ]), now);
-  assert.deepEqual({ ...d, at: 0 }, { tariff: 'E-1R-AGILE-24-10-01-C', product: 'AGILE-24-10-01', mpan: '190', serial: 'S1', deviceId: 'dev-1', at: 0 });
+  assert.deepEqual({ ...d, at: 0 }, {
+    tariff: 'E-1R-AGILE-24-10-01-C', product: 'AGILE-24-10-01', mpan: '190', serial: 'S1', deviceId: 'dev-1', at: 0,
+    history: [
+      { tariff: 'E-1R-OLD-C', from: Date.parse('2024-01-01T00:00:00Z'), to: Date.parse('2025-01-01T00:00:00Z') },
+      { tariff: 'E-1R-AGILE-24-10-01-C', from: Date.parse('2025-01-01T00:00:00Z'), to: null },
+    ],
+  });
   assert.throws(() => parseAccount(account([{ validFrom: '2025-01-01T00:00:00Z', validTo: null, tariff: { tariffCode: 'E-1R-OUT-C' } }], 'EXPORT'), now), /No active/);
   assert.equal(parseAccount(account([{ validFrom: null, validTo: null, tariff: { tariffCode: 'E-1R-AGILE-24-10-01-C' } }], 'IMPORT', null), now).deviceId, '');
 });
@@ -99,6 +105,23 @@ test('Octopus client: public rates URL, paging, and no key needed', async () => 
   assert.deepEqual(rates.map((r) => r.p), [10, 20]);
   assert.match(calls[0].url, /\/v1\/products\/AGILE-24-10-01\/electricity-tariffs\/E-1R-AGILE-24-10-01-C\/standard-unit-rates\/\?period_from=2026-09-23T23:00:00.000Z&period_to=2026-09-26T23:00:00.000Z/);
   assert.equal(calls[0].opts.headers, undefined, 'no auth header on the public endpoint');
+});
+
+test('Octopus client: unitRates for any tariff and period follows every page, and never returns part of a list', async () => {
+  const s = loadSettings(memStore());
+  let page = 0;
+  fakeFetch(() => {
+    page++;
+    const start = Date.parse('2026-01-01T00:00:00Z') + (3 - page) * 1800e3;
+    const results = [{ value_inc_vat: page, valid_from: new Date(start).toISOString(), valid_to: new Date(start + 1800e3).toISOString() }];
+    return { body: { results, next: page < 3 ? `https://api.octopus.energy/v1/products/X/?page=${page + 1}` : null } };
+  });
+  const o = new Octopus(s);
+  const rates = await o.unitRates('E-1R-FIX-12M-25-01-01-C', Date.parse('2026-01-01T00:00:00Z'), Date.parse('2026-10-05T00:00:00Z'));
+  assert.deepEqual(rates.map((r) => r.p), [3, 2, 1], 'oldest first, all three pages');
+  assert.match(calls[0].url, /\/v1\/products\/FIX-12M-25-01-01\/electricity-tariffs\/E-1R-FIX-12M-25-01-01-C\/standard-unit-rates\/\?period_from=2026-01-01T00:00:00.000Z&period_to=2026-10-05T00:00:00.000Z&page_size=1500$/);
+  page = 0;
+  await assert.rejects(o.unitRates('E-1R-FIX-12M-25-01-01-C', 0, 1, { maxPages: 2 }), /more pages of prices than expected/);
 });
 
 test('Octopus client: optional proxy replaces the Octopus address everywhere, including paging links', async () => {

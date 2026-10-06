@@ -4,6 +4,7 @@ import { loadSettings, saveSettings, loadCache, saveCache } from './config.js';
 import { backoffMs, describeError, HttpError } from './util.js';
 import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort } from './time.js';
 import { Octopus, costToday } from './octopus.js';
+import { PriceStats } from './stats.js';
 import { Google, redirectUri } from './google.js';
 import { Spotify, spotifyEnded } from './spotify.js';
 import { DoorbellListener, SUB_RE } from './doorbell.js';
@@ -50,6 +51,7 @@ const persist = () => saveCache({
 const google = new Google(settings, save);
 const spotify = new Spotify(settings);
 const octopus = new Octopus(settings);
+const priceStats = new PriceStats({ octopus, settings, tz });
 const nest = new Nest(google, settings);
 let refs;
 let live = null; // { stream, state, endsAt, expanded }
@@ -67,6 +69,7 @@ function renderAll() {
   ui.renderDock(refs, settings);
   renderMusic();
   ui.renderShopping(refs, state.shopping, state.status.shopping, shoppingInfo());
+  renderStats();
 }
 
 function shoppingInfo() {
@@ -76,6 +79,36 @@ function shoppingInfo() {
       : !list?.id ? 'Choose your Google Tasks shopping list in Settings' : '';
   return { listName: list?.name, ready: !why, why };
 }
+
+// ---------- Average prices (the small button on the price card) ----------
+let statsLoad = { loading: false, error: '' };
+function renderStats() {
+  if (!refs || !ui.statsIsOpen(refs)) return;
+  ui.renderStats(refs, octopus.tariff() ? priceStats.rows(Date.now(), state.rates) : null, statsLoad, priceOpts(), tz);
+}
+
+async function openStats() {
+  closeMusic();
+  ui.openStats(refs);
+  statsLoad = { loading: false, error: '' };
+  renderStats();
+  if (!octopus.tariff()) return;
+  // The first time, the year's prices come from Octopus (a few seconds); after that, nothing.
+  // (Rows that are already known show straight away; only missing ones say "loading".)
+  statsLoad.loading = true;
+  renderStats();
+  try {
+    try { await ensureDiscovered({ history: true }); } catch { /* prices are public: price it with the tariff we know */ }
+    await priceStats.ensure(Date.now(), state.rates);
+  } catch (e) {
+    statsLoad.error = describeError(e);
+    console.warn('[stats]', e);
+  }
+  statsLoad.loading = false;
+  renderStats();
+}
+
+function closeStats() { ui.closeStats(refs); }
 
 // ---------- Data sources ----------
 const sources = {};
@@ -136,11 +169,14 @@ const nightNow = () => inWindow(Date.now(), settings.panel.nightFrom, settings.p
 const HOME_MINI_STALE = 45 * 60e3;
 
 let discovering = null;
-/** Look up tariff, meter and Home Mini from the account (once a day). Shared by both sources. */
-async function ensureDiscovered() {
+/**
+ * Look up tariff, meter and Home Mini from the account (once a day). Shared by both sources.
+ * `history`: also needs the tariff history (the average prices), which older lookups lack.
+ */
+async function ensureDiscovered({ history = false } = {}) {
   if (!(settings.octopus.apiKey && settings.octopus.account)) return;
   const d = settings.octopus.discovered;
-  if (d && Date.now() - d.at < 24 * 3600e3) return;
+  if (d && Date.now() - d.at < 24 * 3600e3 && (!history || d.history)) return;
   discovering ??= octopus.discover().then((found) => { settings.octopus.discovered = found; save(); }).finally(() => { discovering = null; });
   await discovering;
 }
@@ -306,6 +342,7 @@ let doorbell = null;
 let musicPausedByRing = false;
 function ring({ device } = {}) {
   closeMusic();
+  closeStats();
   // Music would drown the chime: pause Spotify, and carry on when the doorbell view closes.
   if (spotifyReady() && state.music?.playing && !musicPausedByRing) {
     musicPausedByRing = true;
@@ -547,7 +584,8 @@ try { if (sessionStorage.getItem(AUTO_RELOAD)) { lastTouch = 0; autoReloaded = t
 let nightSnoozeUntil = 0;
 function updateNight() {
   const show = nightNow() && Date.now() > nightSnoozeUntil && Date.now() - lastTouch > 90e3 && !live;
-  if (show && ui.musicIsOpen(refs)) closeMusic(); // don't leave the bright pop-up over the night screen
+  if (show && ui.musicIsOpen(refs)) closeMusic(); // don't leave the bright pop-ups over the night screen
+  if (show && ui.statsIsOpen(refs)) closeStats();
   refs.night.classList.toggle('hidden', !show);
 }
 
@@ -591,6 +629,8 @@ async function boot() {
     chartTap: (hit) => ui.showChartTip(refs, hit, priceOpts(), tz),
     musicCmd,
     musicClose: closeMusic,
+    stats: openStats,
+    statsClose: closeStats,
     ringClose: closeCamera,
     shopTick: tickShopping,
     shopAdd: addShopping,
@@ -653,6 +693,7 @@ async function boot() {
       // Left open with nobody using it: close after 2 minutes.
       if (now - (refs.music.touched || 0) > 120e3) closeMusic();
     }
+    if (ui.statsIsOpen(refs) && now - (refs.stats.touched || 0) > 120e3) closeStats();
   }, 1000);
   setInterval(() => { for (const s of Object.values(sources)) s.staleCheck(); applyTheme(); renderAll(); updateNight(); }, 30e3);
   let lastW = innerWidth, lastH = innerHeight;

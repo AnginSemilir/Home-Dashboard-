@@ -3,7 +3,7 @@
 
 import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
-import { hhmm, longDate, weekdayShort, ago, partsInTz, DEFAULT_TZ } from './time.js';
+import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
 import { renderChart } from './chart.js';
 import { groupDays } from './calendar.js';
@@ -99,8 +99,11 @@ export function buildPanel(root, on) {
   r.priceBig = h('div', { class: 'big' });
   r.priceBand = h('span', { class: 'band-chip hidden' });
   r.priceSub = h('div', { class: 'sub' });
+  // A small button in the corner opens the average prices (today, this week…).
+  r.statsBtn = h('button', { class: 'stats-btn', 'aria-label': 'Average prices' }, icon('stats'));
+  r.statsBtn.addEventListener('click', () => on.stats?.());
   r.price = h('section', { class: 'card price', id: 'price' }, h('div', { class: 'label' }, 'Agile price now'),
-    h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, (r.priceDot = dot()));
+    h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, r.statsBtn, (r.priceDot = dot()));
 
   const tile = (cls, ico, label) => {
     const t = { value: h('div', { class: 't-value' }), label: h('div', { class: 't-label' }, label), extra: h('div', { class: 'extra' }), dot: dot() };
@@ -172,7 +175,8 @@ export function buildPanel(root, on) {
   r.toast = h('div', { class: 'toast hidden', role: 'status' });
   r.soundHint = h('div', { class: 'sound-hint hidden', role: 'status' }, icon('volume'), h('span', {}, 'Tap once to turn on the doorbell sound'));
   r.music = buildMusic(on);
-  root.replaceChildren(r.panel, r.music.sheet, r.night, r.toast, r.soundHint);
+  r.stats = buildStats(on);
+  root.replaceChildren(r.panel, r.music.sheet, r.stats.sheet, r.night, r.toast, r.soundHint);
   return r;
 }
 
@@ -311,6 +315,73 @@ export function renderMusicDevices(r, devices, activeId) {
     const b = h('button', { class: `ms-dev${d.id === activeId || d.active ? ' on' : ''}`, 'data-id': d.id, disabled: d.restricted }, icon('speaker'), h('span', {}, d.name));
     return b;
   }), devices.length ? '' : h('div', { class: 'ms-none' }, 'No speakers or apps are showing. Open Spotify on the tablet (or cast from a phone) and they\'ll appear here.'));
+}
+
+/** Average prices: a pop-up from the small button on the price card. */
+function buildStats(on) {
+  const st = {};
+  st.rows = h('div', { class: 'st-rows' });
+  st.msg = h('div', { class: 'st-msg', role: 'status' });
+  const close = h('button', { class: 'st-close', 'aria-label': 'Close' }, icon('close'));
+  close.addEventListener('click', () => on.statsClose?.());
+  st.card = h('div', { class: 'st-card' }, close,
+    h('h2', {}, 'Average price'),
+    h('div', { class: 'st-sub' }, 'Your unit price, including VAT'),
+    st.rows, st.msg,
+    h('p', { class: 'st-note' }, 'Every half hour counts the same, whatever you were using at the time.'));
+  st.sheet = h('div', { class: 'stats-sheet hidden', id: 'stats', role: 'dialog', 'aria-label': 'Average price' }, st.card);
+  // As with the music pop-up: a tap that started outside the card closes it.
+  st.sheet.addEventListener('pointerdown', (e) => { st.downOutside = e.target === st.sheet; });
+  st.sheet.addEventListener('click', (e) => { if (e.target === st.sheet && st.downOutside) on.statsClose?.(); st.downOutside = false; });
+  st.card.addEventListener('pointerdown', () => { st.touched = Date.now(); });
+  return st;
+}
+
+export const statsIsOpen = (r) => !r.stats.sheet.classList.contains('hidden');
+
+export function openStats(r) {
+  r.stats.sheet.classList.remove('hidden');
+  r.stats.touched = Date.now();
+}
+
+export function closeStats(r) { r.stats.sheet.classList.add('hidden'); }
+
+const STAT_LABEL = { min30: 'Last 30 minutes', hour: 'Last hour', today: 'Today', week: 'This week', month: 'This month', year: 'This year' };
+
+/** What each row covers: "since 13:42", "since Monday", "since 1 October"… */
+function statSince(row, tz) {
+  if (row.firstAt) return `prices from ${dayMonth(row.firstAt, tz)}`;
+  if (row.id === 'min30' || row.id === 'hour') return `since ${hhmm(row.from, tz)}`;
+  if (row.id === 'today') return 'since midnight';
+  if (row.id === 'week') return 'since Monday';
+  return `since ${dayMonth(row.from, tz)}`;
+}
+
+/**
+ * The average prices. `rows` from PriceStats.rows (null: no tariff yet); `loading`: older days
+ * are still coming from Octopus; `error`: why they didn't.
+ */
+export function renderStats(r, rows, { loading = false, error = '' } = {}, opts = {}, tz = DEFAULT_TZ) {
+  const S = r.stats;
+  if (!rows) {
+    S.rows.replaceChildren(h('div', { class: 'st-empty' }, 'Add your Octopus details in Settings to see average prices.'));
+    S.msg.textContent = '';
+    return;
+  }
+  S.rows.replaceChildren(...rows.map((row) => {
+    const value = row.avg != null
+      ? h('div', { class: 'st-val' }, bandDot(row.avg, opts), `${round1(row.avg).toFixed(1)}`, h('small', {}, 'p'))
+      : h('div', { class: 'st-val none' }, row.missing && loading ? '…' : '–');
+    return h('div', { class: 'st-row', 'data-id': row.id },
+      h('div', { class: 'st-what' }, h('div', { class: 'st-label' }, STAT_LABEL[row.id] || row.id),
+        h('div', { class: 'st-since' }, row.missing && loading ? 'loading…' : statSince(row, tz))),
+      value);
+  }));
+  const short = rows.some((x) => x.short && !x.firstAt);
+  S.msg.textContent = error ? `Couldn't get the older prices from Octopus: ${error}`
+    : loading && rows.some((x) => x.missing) ? 'Getting this year\'s prices from Octopus (only the first time)…'
+      : short ? 'Octopus has no price for a few of the half hours; the averages leave them out.' : '';
+  S.msg.classList.toggle('bad', !!error);
 }
 
 let toastTimer = null;

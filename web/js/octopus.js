@@ -41,12 +41,17 @@ export function parseAccount(data, now = Date.now()) {
     });
     const meter = (mp.meters || []).find((m) => m.smartImportElectricityMeter?.deviceId) || (mp.meters || [])[0];
     if (!active) continue;
+    const ms = (t) => { const v = t ? Date.parse(t) : NaN; return Number.isFinite(v) ? v : null; };
     return {
       tariff: active.tariff.tariffCode,
       product: active.tariff.productCode || productFromTariff(active.tariff.tariffCode),
       mpan: mp.mpan,
       serial: meter?.serialNumber || '',
       deviceId: meter?.smartImportElectricityMeter?.deviceId || '',
+      // Every tariff this meter has been on, oldest first (the price averages use them).
+      history: (mp.agreements || []).filter((a) => a.tariff?.tariffCode)
+        .map((a) => ({ tariff: a.tariff.tariffCode, from: ms(a.validFrom), to: ms(a.validTo) }))
+        .sort((a, b) => (a.from ?? -Infinity) - (b.from ?? -Infinity)),
       at: now,
     };
   }
@@ -187,17 +192,25 @@ export class Octopus {
   async rates(now = Date.now(), tz = this.s.tz) {
     const tariff = this.tariff();
     if (!tariff) throw new Error('Tariff not known yet (add your Octopus details in Settings)');
+    return this.unitRates(tariff, startOfDay(now, tz, -1), startOfDay(now, tz, 2), { pageSize: 250, maxPages: 5 });
+  }
+
+  /**
+   * Any single-rate tariff's unit rates between two instants (public endpoint, no key). A year of
+   * Agile is about 17,500 half hours: a dozen pages. Never returns part of the list.
+   */
+  async unitRates(tariff, from, to, { pageSize = 1500, maxPages = 100 } = {}) {
     const product = productFromTariff(tariff);
-    const from = new Date(startOfDay(now, tz, -1)).toISOString();
-    const to = new Date(startOfDay(now, tz, 2)).toISOString();
-    let url = this.#url(`/v1/products/${encodeURIComponent(product)}/electricity-tariffs/${encodeURIComponent(tariff)}/standard-unit-rates/?period_from=${from}&period_to=${to}&page_size=250`);
+    const iso = (ms) => new Date(ms).toISOString();
+    let url = this.#url(`/v1/products/${encodeURIComponent(product)}/electricity-tariffs/${encodeURIComponent(tariff)}/standard-unit-rates/?period_from=${iso(from)}&period_to=${iso(to)}&page_size=${pageSize}`);
     const results = [];
-    for (let page = 0; url && page < 5; page++) {
+    for (let page = 0; url; page++) {
+      if (page >= maxPages) throw new Error('Octopus sent more pages of prices than expected');
       const body = await fetchJSON(url);
       results.push(...(body?.results || []));
       url = body?.next ? this.#url(body.next) : null;
     }
-    return ratesFromOctopus(results, { until: Date.parse(to) });
+    return ratesFromOctopus(results, { until: to });
   }
 
   /** Today's standing charge in pence (public endpoint). */

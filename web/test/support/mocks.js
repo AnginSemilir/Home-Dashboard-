@@ -125,6 +125,8 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     if (fail.has('octopus')) return json(route, { detail: 'Service unavailable' }, 503);
     if (url.pathname === '/v1/graphql/' && fail.has('graphql')) return json(route, { errors: [{ message: 'Invalid API key.', extensions: { errorCode: 'KT-CT-1138' } }] });
     if (url.pathname.includes('/standard-unit-rates/') && fail.has('rates')) return json(route, { detail: 'Service unavailable' }, 503);
+    // Only the long lookups (the price averages ask for 1500 a page): the panel's own prices still work.
+    if (url.pathname.includes('/standard-unit-rates/') && fail.has('rate-history') && url.searchParams.get('page_size') === '1500') return json(route, { detail: 'Service unavailable' }, 503);
     if (url.pathname === '/v1/graphql/') {
       const q = JSON.parse(req.postData() || '{}').query || '';
       if (q.includes('obtainKrakenToken')) {
@@ -144,7 +146,13 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
       // Like the real service: tomorrow's prices only exist after 4pm UK time.
       const publishedUntil = now >= dayStart + 16 * 3600e3 ? dayStart + 2 * 864e5 : dayStart + 864e5;
       to = Math.min(to, publishedUntil);
-      return json(route, { count: 0, next: null, previous: null, results: rateResults(from, to) });
+      // Pages, newest first, like the real service.
+      const all = rateResults(from, to);
+      const size = Math.min(1500, Number(url.searchParams.get('page_size')) || 100);
+      const page = Number(url.searchParams.get('page')) || 1;
+      const next = page * size < all.length ? new URL(url) : null;
+      next?.searchParams.set('page', String(page + 1));
+      return json(route, { count: all.length, next: next ? next.toString() : null, previous: null, results: all.slice((page - 1) * size, page * size) });
     }
     if (url.pathname.includes('/standing-charges/')) return json(route, { results: [{ value_exc_vat: 45.6, value_inc_vat: 47.88, valid_from: '2025-04-01T00:00:00Z', valid_to: null }] });
     return json(route, { detail: 'Not found' }, 404);

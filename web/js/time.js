@@ -54,6 +54,7 @@ export function dayKey(ms, tz = DEFAULT_TZ) {
 
 export const hhmm = (ms, tz = DEFAULT_TZ) => fmt(tz, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
 export const weekdayShort = (ms, tz = DEFAULT_TZ) => fmt(tz, { weekday: 'short' }).format(new Date(ms));
+export const dayMonth = (ms, tz = DEFAULT_TZ) => fmt(tz, { day: 'numeric', month: 'long' }).format(new Date(ms));
 export const longDate = (ms, tz = DEFAULT_TZ) => fmt(tz, { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(ms));
 
 /** "just now", "12 min ago", "3 h ago", "2 days ago". */
