@@ -20,6 +20,11 @@ function total(from) {
   return k;
 }
 const bars = (page) => page.locator('#usage .uc-chart svg .ch-bar').count();
+/** Pick a period and wait for its bars (the year may still be loading from Octopus). */
+const period = async (page, id, n = 24) => {
+  await page.locator(`#usage .uc-seg button[data-period="${id}"]`).click();
+  await page.waitForFunction((want) => document.querySelectorAll('#usage .uc-chart svg .ch-bar').length === want, n);
+};
 const open = async (page) => {
   await page.locator('#price .big .num').waitFor();
   await page.locator('#price .usage-btn').click();
@@ -46,9 +51,8 @@ test('today by the hour; tap a bar for its numbers; switch to the year; the choi
   assert.equal(await page.locator('#usage .uc-chart.has-sel .ch-bar.on').count(), 1, 'the other bars fade');
 
   // The year: the same cache as the average prices (one load for both).
-  await page.locator('#usage .uc-seg button[data-period="year"]').click();
+  await period(page, 'year');
   assert.equal(await page.locator('#usage .st-sub').textContent(), 'Average kWh a day in each hour');
-  assert.equal(await bars(page), 24);
   assert.match(await page.locator('#usage .uc-sum').textContent(), new RegExp(`^${kwhText(total(YEAR))} kWh · [\\d.]+ kWh a day · most at`));
   const history = calls.filter((c) => /page_size=1500/.test(c.url)).length;
   await page.locator('#usage .st-close').click();
@@ -72,8 +76,7 @@ test('the week and month, on a small screen; a tap outside closes it', async () 
   const { ctx, page } = await openPanel(env, { viewport: { width: 960, height: 600 } });
   await open(page);
   for (const [id, from] of [['week', Date.parse('2026-09-21T00:00:00+01:00')], ['month', Date.parse('2026-09-01T00:00:00+01:00')]]) {
-    await page.locator(`#usage .uc-seg button[data-period="${id}"]`).click();
-    assert.equal(await bars(page), 24, id);
+    await period(page, id);
     assert.match(await page.locator('#usage .uc-sum').textContent(), new RegExp(`^${kwhText(total(from))} kWh · `), id);
   }
   const box = await page.locator('#usage .st-card').boundingBox();
@@ -116,8 +119,9 @@ test('the table view: every hour in two halves, the busiest in bold, rows tap li
   await page.locator('#usage .uc-table tr[data-h="3"]').click();
   assert.equal(await page.locator('#usage .uc-table tr.on').getAttribute('data-h'), '3');
   assert.match(await page.locator('#usage .uc-info').textContent(), /^03:00–04:00 · /);
-  // Another period keeps the table.
+  // Another period keeps the table (once the month has loaded).
   await page.locator('#usage .uc-seg button[data-period="month"]').click();
+  await page.waitForFunction(() => document.querySelectorAll('#usage .uc-table tbody tr').length === 24 && !document.querySelector('#usage .uc-table').classList.contains('hidden'));
   assert.equal(await page.locator('#usage .uc-table thead th').nth(1).textContent(), 'kWh a day');
   assert.equal(await page.locator('#usage .uc-table tbody td:has-text("–")').count(), 0, 'every hour has a figure this month');
   // It fits, and it's remembered.
