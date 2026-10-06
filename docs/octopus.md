@@ -16,10 +16,15 @@ Only want prices? You don't need the key: type your tariff code into **Tariff co
 - **Chart**: from an hour ago to 24 hours ahead. Octopus publishes tomorrow's prices at about 4pm; before that, the chart says "prices from ~4pm".
 - **Using now**: live demand from the Home Mini (refreshed every 60 s), with a sparkline of the last hour.
 - **Today so far**: the cost since midnight (half-hour usage × each half-hour's price + the daily standing charge) and the kWh used.
-- **Average prices**: the small chart button in the corner of the price box. It shows your average unit price (including VAT) over the **last 30 minutes**, the **last hour**, **today**, **this week** (from Monday), **this month** and **this year** so far.
-  - It's an average over time: every half hour counts the same, whatever you were using then. It isn't weighted by your usage.
-  - The first time you open it, the panel fetches this year's prices from Octopus's public price list (about a dozen requests, a few seconds). It keeps each day's total on the tablet, so after that it fetches nothing more.
-  - If you changed tariff this year, each part of the year uses the tariff you were on. Economy 7 periods have no single price, so they're left out and the line says when the prices start.
+- **Average prices**: the small chart button in the corner of the price box. For the **last 30 minutes**, the **last hour**, **today**, **this week** (from Monday), **this month** and **this year** so far, it shows two figures per kWh, including VAT:
+  - **You paid**: what the electricity you used cost, divided by the kWh you used. Half hours when you used more count for more. **This is the figure to compare with a fixed tariff's unit rate.** The kWh used is shown under each period.
+  - **Agile price**: the plain average of the prices, every half hour counting the same, whatever you were using.
+  - Neither includes the standing charge; the pop-up shows today's, so compare that with the fixed tariff's too.
+
+  Where the figures come from:
+  - **Usage**: your smart meter's half-hourly readings from Octopus (this needs your API key), and the Home Mini for today. Octopus usually has a day's readings the next day. Until then, "You paid" leaves those half hours out and says so. A period that's mostly waiting on readings (this week, on a Tuesday morning) shows a dash rather than a figure built from too little.
+  - **Prices**: Octopus's public price list. If you changed tariff this year, each part of the year uses the tariff you were on. Periods on Economy 7 (or another tariff without a single price) are left out, and the pop-up says how many days.
+  - **The first time** you open it, it fetches this year's prices (about ten requests) and readings (one request), which takes a few seconds. Each day's totals are kept on the tablet. After that it only asks Octopus for readings that hadn't arrived yet (at most every half hour), and for the days in between if it hasn't been opened for a few days.
 
 Colours: green below 15p, amber, red from 25p, **blue at or below 0p** (plunge pricing: you're paid to use power). Change the thresholds in ⚙ → Panel.
 

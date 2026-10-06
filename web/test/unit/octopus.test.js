@@ -124,6 +124,27 @@ test('Octopus client: unitRates for any tariff and period follows every page, an
   await assert.rejects(o.unitRates('E-1R-FIX-12M-25-01-01-C', 0, 1, { maxPages: 2 }), /more pages of prices than expected/);
 });
 
+test('Octopus client: half-hourly usage, with the key as Basic auth, oldest first', async () => {
+  const s = loadSettings(memStore());
+  const o = new Octopus(s);
+  await assert.rejects(o.consumption(0, 1), /API key not set/);
+  Object.assign(s.octopus, { account: 'A-1', apiKey: 'sk_live_abc', discovered: { mpan: '1900026354329', serial: '22L41' } });
+  let page = 0;
+  fakeFetch(() => {
+    page++;
+    const results = page === 1
+      ? [{ consumption: 0.25, interval_start: '2026-10-01T00:30:00+01:00', interval_end: '2026-10-01T01:00:00+01:00' }, { consumption: 'x', interval_start: 'bad', interval_end: 'bad' }]
+      : [{ consumption: 0.5, interval_start: '2026-10-01T00:00:00+01:00', interval_end: '2026-10-01T00:30:00+01:00' }];
+    return { body: { results, next: page === 1 ? 'https://api.octopus.energy/v1/next/?page=2' : null } };
+  });
+  const got = await o.consumption(Date.parse('2026-09-30T23:00:00Z'), Date.parse('2026-10-01T23:00:00Z'));
+  assert.deepEqual(got.map((x) => x.kwh), [0.5, 0.25]);
+  assert.equal(got[0].end - got[0].start, 1800e3);
+  assert.match(calls[0].url, /^https:\/\/api\.octopus\.energy\/v1\/electricity-meter-points\/1900026354329\/meters\/22L41\/consumption\/\?period_from=2026-09-30T23:00:00\.000Z&period_to=2026-10-01T23:00:00\.000Z&page_size=25000&order_by=period$/);
+  assert.equal(calls[0].opts.headers.Authorization, `Basic ${Buffer.from('sk_live_abc:').toString('base64')}`);
+  assert.equal(calls.length, 2);
+});
+
 test('Octopus client: optional proxy replaces the Octopus address everywhere, including paging links', async () => {
   const s = loadSettings(memStore());
   Object.assign(s.octopus, { tariff: 'E-1R-AGILE-24-10-01-C', proxy: 'https://octo.me.workers.dev/', account: 'A-1', apiKey: 'k', discovered: { deviceId: 'd' } });

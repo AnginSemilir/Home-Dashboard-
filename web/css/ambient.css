@@ -615,7 +615,7 @@ svg { display: block; }
 .price .stats-btn:active { background: var(--card-press); }
 .stats-sheet { position: fixed; inset: 0; z-index: 65; display: grid; place-items: center; padding: 1.5em; background: rgb(0 0 0 / 0.55); }
 .st-card {
-  position: relative; width: min(30em, 94vw); max-height: 94vh; overflow: auto;
+  position: relative; width: min(34em, 94vw); max-height: 94vh; overflow: auto;
   padding: 1.5em 1.7em 1.3em; border-radius: 20px; color: var(--text);
   background: var(--sheet); box-shadow: var(--lift), 0 20px 60px rgb(0 0 0 / 0.45);
 }
@@ -624,26 +624,31 @@ svg { display: block; }
 .st-close:active { background: var(--card-2); }
 .st-card h2 { margin: 0; padding-right: 2em; font-size: 1.55em; font-weight: 650; letter-spacing: -0.01em; }
 .st-sub { margin-top: 0.15em; color: var(--muted); }
-.st-rows { margin-top: 0.7em; }
-.st-row { display: flex; align-items: center; justify-content: space-between; gap: 1em; padding: 0.55em 0; border-top: 1px solid var(--line); }
-.st-row:first-child { border-top: 0; }
+/* Three columns shared by every row (subgrid): what, "You paid" (the main figure), and the
+   plain Agile average beside it. */
+.st-rows { margin-top: 0.6em; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; column-gap: 1.3em; }
+.st-head, .st-row { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; }
+.st-head { padding-bottom: 0.2em; color: var(--muted); font-size: 0.85em; font-weight: 600; text-align: right; }
+.st-row { padding: 0.5em 0; border-top: 1px solid var(--line); }
+.st-head + .st-row { border-top: 0; }
 /* The two rolling windows, then the calendar periods. */
-.st-row[data-id="today"] { margin-top: 0.5em; }
+.st-row[data-id="today"] { margin-top: 0.45em; }
 .st-what { min-width: 0; }
 .st-label { font-size: 1.1em; font-weight: 600; }
-.st-since { color: var(--muted); font-size: 0.9em; }
-.st-val {
-  flex: none; display: flex; align-items: baseline; font-size: 1.75em; font-weight: 650; letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums; white-space: nowrap;
-}
-.st-val .band-dot { align-self: center; width: 0.36em; height: 0.36em; margin: 0 0.4em 0 0; }
-.st-val small { margin-left: 0.1em; font-size: 0.55em; font-weight: 500; letter-spacing: 0; color: var(--muted); }
-.st-val.none { color: var(--faint); font-weight: 400; }
+.st-since { color: var(--muted); font-size: 0.9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-paid, .st-avg { display: flex; align-items: baseline; justify-content: flex-end; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.st-paid { font-size: 1.75em; font-weight: 650; letter-spacing: -0.02em; }
+.st-paid .band-dot { align-self: center; width: 0.36em; height: 0.36em; margin: 0 0.4em 0 0; }
+.st-avg { font-size: 1.15em; font-weight: 500; color: var(--muted); }
+.st-paid small, .st-avg small { margin-left: 0.1em; font-size: 0.55em; font-weight: 500; letter-spacing: 0; color: var(--muted); }
+.st-avg small { font-size: 0.75em; }
+.st-paid.none, .st-avg.none { color: var(--faint); font-weight: 400; }
 .st-msg { margin-top: 0.4em; color: var(--muted); font-size: 0.95em; }
 .st-msg:empty { display: none; }
-.st-msg.bad { color: var(--bad); }
-.st-note { margin: 0.6em 0 0; color: var(--faint); font-size: 0.88em; }
-.st-empty { padding: 0.8em 0; color: var(--muted); }
+.st-msg .bad { color: var(--bad); }
+.st-note { margin: 0.6em 0 0; color: var(--faint); font-size: 0.85em; line-height: 1.45; }
+.st-note b { color: var(--muted); font-weight: 600; }
+.st-empty { grid-column: 1 / -1; padding: 0.8em 0; color: var(--muted); }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */
 .cam.expanded.ring { z-index: 75; } /* above night (60), the music controls (65) and Settings (70); below toasts (80) */

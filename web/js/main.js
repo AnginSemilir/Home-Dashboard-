@@ -2,7 +2,7 @@
 
 import { loadSettings, saveSettings, loadCache, saveCache } from './config.js';
 import { backoffMs, describeError, HttpError } from './util.js';
-import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort } from './time.js';
+import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort, dayKey } from './time.js';
 import { Octopus, costToday } from './octopus.js';
 import { PriceStats } from './stats.js';
 import { Google, redirectUri } from './google.js';
@@ -26,6 +26,7 @@ const cache = loadCache();
 
 export const state = {
   rates: cache.rates || [],
+  ratesTariff: cache.ratesTariff || null, // the tariff those prices are for
   standingP: cache.standingP ?? null,
   tele: cache.tele || null,
   demand: cache.demand || [],
@@ -43,7 +44,7 @@ export const state = {
 };
 
 const persist = () => saveCache({
-  rates: state.rates, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
+  rates: state.rates, ratesTariff: state.ratesTariff, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
   thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia, shopping: state.shopping,
   place: state.place,
 });
@@ -81,31 +82,45 @@ function shoppingInfo() {
 }
 
 // ---------- Average prices (the small button on the price card) ----------
-let statsLoad = { loading: false, error: '' };
+let statsLoad = { loading: false, error: '', usageError: '', day: '' };
+const livePrices = () => ({ rates: state.rates, tariff: state.ratesTariff });
+
 function renderStats() {
   if (!refs || !ui.statsIsOpen(refs)) return;
-  ui.renderStats(refs, octopus.tariff() ? priceStats.rows(Date.now(), state.rates) : null, statsLoad, priceOpts(), tz);
+  const now = Date.now();
+  const rows = octopus.tariff() ? priceStats.rows(now, livePrices(), state.tele) : null;
+  ui.renderStats(refs, rows, { ...statsLoad, standingP: state.standingP, usage: octopus.canReadUsage, hasKey: octopus.hasKey }, priceOpts(), tz);
+  // Left open past midnight: the new "yesterday" is needed (once a day; after an error, reopen to retry).
+  if (rows?.some((r) => r.missing) && !statsLoad.loading && statsLoad.day !== dayKey(now, tz)) loadStats();
 }
 
-async function openStats() {
-  closeMusic();
-  ui.openStats(refs);
-  statsLoad = { loading: false, error: '' };
-  renderStats();
-  if (!octopus.tariff()) return;
-  // The first time, the year's prices come from Octopus (a few seconds); after that, nothing.
-  // (Rows that are already known show straight away; only missing ones say "loading".)
-  statsLoad.loading = true;
+/** The first time, the year's prices and usage come from Octopus (a few seconds); after that, very little. */
+async function loadStats() {
+  statsLoad = { ...statsLoad, loading: true, error: '', usageError: '', day: dayKey(Date.now(), tz) };
   renderStats();
   try {
-    try { await ensureDiscovered({ history: true }); } catch { /* prices are public: price it with the tariff we know */ }
-    await priceStats.ensure(Date.now(), state.rates);
+    try {
+      await ensureDiscovered({ history: true });
+    } catch (e) {
+      // Without the account's tariff history, past days could be priced with the wrong tariff.
+      if (octopus.hasKey && !settings.octopus.discovered?.history) throw e;
+    }
+    if (octopus.tariff()) await priceStats.ensure(Date.now(), livePrices());
   } catch (e) {
-    statsLoad.error = describeError(e);
+    if (e?.what === 'usage') statsLoad.usageError = describeError(e);
+    else statsLoad.error = describeError(e);
     console.warn('[stats]', e);
   }
   statsLoad.loading = false;
   renderStats();
+}
+
+function openStats() {
+  closeMusic();
+  ui.openStats(refs);
+  statsLoad = { loading: false, error: '', usageError: '', day: '' };
+  if (octopus.tariff() || octopus.hasKey) loadStats();
+  else renderStats();
 }
 
 function closeStats() { ui.closeStats(refs); }
@@ -189,7 +204,9 @@ async function refreshRates() {
     if (!octopus.tariff()) throw e;
     console.warn('[rates] account lookup failed; using the known tariff', e);
   }
+  const tariff = octopus.tariff();
   state.rates = await octopus.rates(Date.now(), tz);
+  state.ratesTariff = tariff;
   try { state.standingP = await octopus.standingCharge(); } catch { /* cost just omits it */ }
   updateCost();
 }
@@ -660,7 +677,7 @@ async function boot() {
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
   source('rates', refreshRates, minutes(15), {
     staleAfter: 3 * 3600e3, enabled: () => !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)),
-    clear: () => { state.rates = []; state.standingP = null; state.costP = null; },
+    clear: () => { state.rates = []; state.ratesTariff = null; state.standingP = null; state.costP = null; },
   })();
   source('homemini', refreshHomeMini, () => (nightNow() ? 300e3 : Math.max(30, settings.octopus.pollSeconds) * 1000), {
     staleAfter: HOME_MINI_STALE, dataAt: homeMiniDataAt, enabled: () => !!(settings.octopus.apiKey && settings.octopus.account),

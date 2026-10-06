@@ -322,13 +322,16 @@ function buildStats(on) {
   const st = {};
   st.rows = h('div', { class: 'st-rows' });
   st.msg = h('div', { class: 'st-msg', role: 'status' });
+  st.standing = h('span');
   const close = h('button', { class: 'st-close', 'aria-label': 'Close' }, icon('close'));
   close.addEventListener('click', () => on.statsClose?.());
   st.card = h('div', { class: 'st-card' }, close,
     h('h2', {}, 'Average price'),
-    h('div', { class: 'st-sub' }, 'Your unit price, including VAT'),
+    h('div', { class: 'st-sub' }, 'Per kWh, including VAT'),
     st.rows, st.msg,
-    h('p', { class: 'st-note' }, 'Every half hour counts the same, whatever you were using at the time.'));
+    h('p', { class: 'st-note' },
+      h('b', {}, 'You paid'), ': what the electricity you used cost ÷ the kWh, so the times you used more count for more. ',
+      h('b', {}, 'Agile price'), ': the plain average, every half hour counting the same. ', st.standing));
   st.sheet = h('div', { class: 'stats-sheet hidden', id: 'stats', role: 'dialog', 'aria-label': 'Average price' }, st.card);
   // As with the music pop-up: a tap that started outside the card closes it.
   st.sheet.addEventListener('pointerdown', (e) => { st.downOutside = e.target === st.sheet; });
@@ -357,31 +360,44 @@ function statSince(row, tz) {
   return `since ${dayMonth(row.from, tz)}`;
 }
 
+const fmtKwh = (k) => (k < 10 ? k.toFixed(1) : Math.round(k).toLocaleString('en-GB'));
+
 /**
- * The average prices. `rows` from PriceStats.rows (null: no tariff yet); `loading`: older days
- * are still coming from Octopus; `error`: why they didn't.
+ * The average prices. `rows` from PriceStats.rows (null: no tariff yet). `st`: { loading (older
+ * days still coming), error, usageError, standingP, usage (usage readable), hasKey }.
  */
-export function renderStats(r, rows, { loading = false, error = '' } = {}, opts = {}, tz = DEFAULT_TZ) {
+export function renderStats(r, rows, st = {}, opts = {}, tz = DEFAULT_TZ) {
   const S = r.stats;
+  S.standing.textContent = Number.isFinite(st.standingP) ? `Neither includes the standing charge (${round1(st.standingP).toFixed(1)}p a day).` : 'Neither includes the standing charge.';
+  const say = (...lines) => S.msg.replaceChildren(...lines.filter(Boolean).map(([text, bad]) => h('div', { class: bad ? 'bad' : '' }, text)));
   if (!rows) {
-    S.rows.replaceChildren(h('div', { class: 'st-empty' }, 'Add your Octopus details in Settings to see average prices.'));
-    S.msg.textContent = '';
+    S.rows.replaceChildren(h('div', { class: 'st-empty' },
+      st.loading ? 'Looking up your tariff…' : st.error ? '' : 'Add your Octopus details in Settings to see average prices.'));
+    say(st.error && [`Couldn't look up your tariff: ${st.error}`, true]);
     return;
   }
-  S.rows.replaceChildren(...rows.map((row) => {
-    const value = row.avg != null
-      ? h('div', { class: 'st-val' }, bandDot(row.avg, opts), `${round1(row.avg).toFixed(1)}`, h('small', {}, 'p'))
-      : h('div', { class: 'st-val none' }, row.missing && loading ? '…' : '–');
-    return h('div', { class: 'st-row', 'data-id': row.id },
-      h('div', { class: 'st-what' }, h('div', { class: 'st-label' }, STAT_LABEL[row.id] || row.id),
-        h('div', { class: 'st-since' }, row.missing && loading ? 'loading…' : statSince(row, tz))),
-      value);
-  }));
-  const short = rows.some((x) => x.short && !x.firstAt);
-  S.msg.textContent = error ? `Couldn't get the older prices from Octopus: ${error}`
-    : loading && rows.some((x) => x.missing) ? 'Getting this year\'s prices from Octopus (only the first time)…'
-      : short ? 'Octopus has no price for a few of the half hours; the averages leave them out.' : '';
-  S.msg.classList.toggle('bad', !!error);
+  const pending = (row) => row.missing && st.loading;
+  const pence = (p) => [`${round1(p).toFixed(1)}`, h('small', {}, 'p')];
+  S.rows.replaceChildren(
+    h('div', { class: 'st-head' }, h('span'), h('span', {}, 'You paid'), h('span', {}, 'Agile price')),
+    ...rows.map((row) => {
+      const since = pending(row) ? 'loading…' : `${statSince(row, tz)}${row.kwh != null && row.paid != null ? ` · ${fmtKwh(row.kwh)} kWh` : ''}`;
+      return h('div', { class: 'st-row', 'data-id': row.id },
+        h('div', { class: 'st-what' }, h('div', { class: 'st-label' }, STAT_LABEL[row.id] || row.id), h('div', { class: 'st-since' }, since)),
+        row.paid != null ? h('div', { class: 'st-paid' }, bandDot(row.paid, opts), ...pence(row.paid)) : h('div', { class: 'st-paid none' }, pending(row) ? '…' : '–'),
+        h('div', { class: `st-avg${row.avg == null ? ' none' : ''}` }, ...(row.avg != null ? pence(row.avg) : [pending(row) ? '…' : '–'])));
+    }));
+  const year = rows[rows.length - 1];
+  const loadingOld = st.loading && rows.some((x) => x.missing);
+  say(
+    st.error && [`Couldn't get the older prices from Octopus: ${st.error}`, true],
+    st.usageError && [`Couldn't get your usage from Octopus (“You paid” needs it): ${st.usageError}`, true],
+    loadingOld && ['Getting this year\'s prices and usage from Octopus (only the first time)…'],
+    !st.usage && !st.loading && [st.hasKey ? 'Your meter isn\'t known yet, so “You paid” can\'t be worked out.' : 'Add your Octopus account number and API key in Settings to see what you paid.'],
+    year.gapDays > 0 && [`${year.gapDays} day${year.gapDays === 1 ? '' : 's'} on a tariff with no single price (Economy 7, for example) ${year.gapDays === 1 ? 'is' : 'are'} left out.`],
+    rows.some((x) => x.short) && ['Octopus has no price for a few half hours; they\'re left out.'],
+    st.usage && !loadingOld && !st.usageError && rows.some((x) => x.usageShort) && ['Your newest meter readings aren\'t in yet (they usually arrive the next day), so “You paid” leaves those half hours out.'],
+  );
 }
 
 let toastTimer = null;

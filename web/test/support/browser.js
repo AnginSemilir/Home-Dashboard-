@@ -24,7 +24,7 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
-  style, theme, geolocation, spotify, touch,
+  style, theme, geolocation, spotify, touch, readingsUntil,
 } = {}) {
   // `geolocation`: { latitude, longitude } the tablet reports (location allowed); by default it's refused.
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block',
@@ -35,7 +35,7 @@ export async function openPanel(env, {
   page.on('pageerror', (e) => problems.push(e.message));
   if (clock === 'install') await page.clock.install({ time: now });
   else await page.clock.setFixedTime(now);
-  const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt });
+  const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt, readingsUntil });
   // PANEL_STYLE / PANEL_THEME run the whole suite in another look (CI runs every style).
   style ??= process.env.PANEL_STYLE;
   theme ??= process.env.PANEL_THEME;

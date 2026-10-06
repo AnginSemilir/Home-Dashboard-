@@ -125,6 +125,12 @@ export class Octopus {
 
   get hasKey() { return !!(this.s.octopus.apiKey && this.s.octopus.account); }
 
+  /** Can it read the smart meter's half-hourly usage (the key, and the meter found on the account)? */
+  get canReadUsage() {
+    const d = this.s.octopus.discovered;
+    return !!(this.hasKey && d?.mpan && d?.serial);
+  }
+
   /** Octopus, or the optional proxy in front of it (docs/octopus.md). */
   get base() {
     const p = (this.s.octopus.proxy || '').trim().replace(/\/+$/, '');
@@ -211,6 +217,29 @@ export class Octopus {
       url = body?.next ? this.#url(body.next) : null;
     }
     return ratesFromOctopus(results, { until: to });
+  }
+
+  /**
+   * The smart meter's half-hourly usage between two instants: [{ start, end, kwh }], oldest first.
+   * Needs the API key (sent only to Octopus, or the proxy). Readings usually arrive the next day.
+   */
+  async consumption(from, to, { maxPages = 20 } = {}) {
+    const d = this.s.octopus.discovered;
+    if (!this.canReadUsage) throw new Error('Octopus account number and API key not set');
+    const iso = (ms) => new Date(ms).toISOString();
+    let url = this.#url(`/v1/electricity-meter-points/${encodeURIComponent(d.mpan)}/meters/${encodeURIComponent(d.serial)}/consumption/?period_from=${iso(from)}&period_to=${iso(to)}&page_size=25000&order_by=period`);
+    const headers = { Authorization: `Basic ${btoa(`${this.s.octopus.apiKey}:`)}` };
+    const out = [];
+    for (let page = 0; url; page++) {
+      if (page >= maxPages) throw new Error('Octopus sent more pages of usage than expected');
+      const body = await fetchJSON(url, { headers });
+      for (const r of body?.results || []) {
+        const start = Date.parse(r.interval_start), end = Date.parse(r.interval_end), kwh = Number(r.consumption);
+        if (Number.isFinite(start) && end > start && Number.isFinite(kwh)) out.push({ start, end, kwh });
+      }
+      url = body?.next ? this.#url(body.next) : null;
+    }
+    return out.sort((a, b) => a.start - b.start);
   }
 
   /** Today's standing charge in pence (public endpoint). */

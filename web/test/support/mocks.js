@@ -31,12 +31,24 @@ export function rateResults(from, to) {
   return out.reverse();
 }
 
+/** kWh used in the half hour starting at `t` (the Home Mini and the smart meter agree). */
+export const usedKwh = (t) => (180 + (Math.floor(t / 1800e3) % 5) * 60) / 1000;
+
 export function telemetry(now, dayStart, stopsAt = Infinity) {
   const rows = [];
   for (let t = dayStart; t <= Math.min(now, stopsAt); t += 1800e3) {
-    rows.push({ readAt: new Date(t).toISOString(), consumption: 1000, consumptionDelta: 180 + ((t / 1800e3) % 5) * 60, demand: 520 + ((t / 1800e3) % 7) * 40, export: 0 });
+    rows.push({ readAt: new Date(t).toISOString(), consumption: 1000, consumptionDelta: usedKwh(t) * 1000, demand: 520 + ((t / 1800e3) % 7) * 40, export: 0 });
   }
   return rows;
+}
+
+/** Smart meter readings (REST), oldest first: every half hour until `until` (readings arrive late). */
+export function consumptionResults(from, to, until) {
+  const out = [];
+  for (let t = from; t < Math.min(to, until); t += 1800e3) {
+    out.push({ consumption: usedKwh(t), interval_start: new Date(t).toISOString().replace('.000Z', 'Z'), interval_end: new Date(t + 1800e3).toISOString().replace('.000Z', 'Z') });
+  }
+  return out;
 }
 
 export function weather(now) {
@@ -113,7 +125,7 @@ export function fullSettings(now) {
  * Install fake network for a Playwright page. Returns a log of calls, and `fail` to make a
  * service return errors (e.g. fail.add('octopus')).
  */
-export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt } = {}) {
+export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil } = {}) {
   const calls = [];
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
   const kiaPayload = await encryptReading(kiaReading || { battery: 78, range: 182, charging: false, plugged: false, updated: now - 2 * 3600e3 }, KIA_KEY);
@@ -153,6 +165,13 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
       const next = page * size < all.length ? new URL(url) : null;
       next?.searchParams.set('page', String(page + 1));
       return json(route, { count: all.length, next: next ? next.toString() : null, previous: null, results: all.slice((page - 1) * size, page * size) });
+    }
+    if (/^\/v1\/electricity-meter-points\/[^/]+\/meters\/[^/]+\/consumption\/$/.test(url.pathname)) {
+      if (req.headers().authorization !== `Basic ${Buffer.from('sk_test_key:').toString('base64')}`) return json(route, { detail: 'Authentication credentials were not provided.' }, 401);
+      if (fail.has('usage')) return json(route, { detail: 'Service unavailable' }, 503);
+      // By default the meter's readings are in up to midnight (yesterday complete).
+      const results = consumptionResults(Date.parse(url.searchParams.get('period_from')), Date.parse(url.searchParams.get('period_to')), readingsUntil ?? dayStart);
+      return json(route, { count: results.length, next: null, previous: null, results });
     }
     if (url.pathname.includes('/standing-charges/')) return json(route, { results: [{ value_exc_vat: 45.6, value_inc_vat: 47.88, valid_from: '2025-04-01T00:00:00Z', valid_to: null }] });
     return json(route, { detail: 'Not found' }, 404);

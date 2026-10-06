@@ -1,15 +1,24 @@
-// Average electricity price over the last 30 minutes and the last hour, and today, this week
-// (from Monday), this month and this year so far. It's an average over time: every half hour
-// counts the same, whatever the house was using then.
+// Average electricity prices for the pop-up on the price card: over the last 30 minutes and the
+// last hour, and today, this week (from Monday), this month and this year so far.
+// - "You paid": what the electricity you used cost, divided by the kWh. Half hours when you used
+//   more count for more. This is the figure to set against a fixed price.
+// - "Agile price": the plain average over time, every half hour counting the same.
+// Neither includes the standing charge.
 //
-// Past days never change, so each day's total is worked out once and kept on this tablet (a
-// few kB). The panel's own price list already covers yesterday and today, so once the year is
-// loaded nothing more needs fetching.
+// Past days never change, so each day's totals are worked out once and kept on this tablet (a
+// few kB). Prices come from Octopus's public price list; usage from the smart meter's
+// half-hourly readings, which usually arrive the next day. Today's usage is the Home Mini's.
 
 import { startOfDay, dayKey, partsInTz, DEFAULT_TZ } from './time.js';
+import { HttpError } from './util.js';
 
 export const STATS_KEY = 'wallpanel.stats.v1';
+const VERSION = 2;
 const MIN = 60e3;
+const HALF = 1800e3;
+const CHUNK_DAYS = 31;            // prices a month at a time (one request each), newest first
+const USAGE_RECHECK = 30 * 60e3;  // look again for late meter readings at most this often
+const USAGE_GIVE_UP = 10;         // days: readings still missing after this are left out for good
 
 /** Where each period starts. Weeks start on Monday. */
 export function periodStarts(now, tz = DEFAULT_TZ) {
@@ -39,6 +48,38 @@ export function addRates(acc, rates, from, to) {
   return acc;
 }
 
+/** The price in force at `t`, from rates sorted by time (null if none). */
+export function priceFinder(rates) {
+  return (t) => {
+    let lo = 0, hi = rates.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1, r = rates[mid];
+      if (t < r.start) hi = mid - 1;
+      else if (t >= r.end) lo = mid + 1;
+      else return Number.isFinite(r.p) ? r.p : null;
+    }
+    return null;
+  };
+}
+
+/**
+ * Add usage ({ start, end, kwh }) that overlaps [from, to) to `acc` ({ cost, kwh, n }), each
+ * reading at the price when it started. Part of a reading counts pro rata; `n` is in half hours.
+ */
+export function addUsage(acc, usage, priceAt, from, to) {
+  for (const u of usage || []) {
+    const a = Math.max(u.start, from), b = Math.min(u.end, to);
+    if (!(b > a) || !Number.isFinite(u.kwh)) continue;
+    const p = priceAt(u.start);
+    if (p == null) continue;
+    const kwh = (u.kwh * (b - a)) / (u.end - u.start);
+    acc.cost += kwh * p;
+    acc.kwh += kwh;
+    acc.n += (b - a) / HALF;
+  }
+  return acc;
+}
+
 /** The local days from midnight `from` up to `to`: [{ key, start, end }] (23 or 25 hours on clock-change days). */
 export function daysBetween(from, to, tz = DEFAULT_TZ) {
   const out = [];
@@ -51,31 +92,18 @@ export function daysBetween(from, to, tz = DEFAULT_TZ) {
   return out;
 }
 
-const r2 = (x) => Math.round(x * 100) / 100;
-
-/** Each day's [Σ price × minutes, minutes] from `rates` (sorted by time). */
-export function dayTotals(rates, days) {
-  const out = {};
-  let i = 0;
-  for (const d of days) {
-    const acc = { sum: 0, min: 0 };
-    while (i < rates.length && rates[i].end <= d.start) i++;
-    for (let j = i; j < rates.length && rates[j].start < d.end; j++) addRates(acc, [rates[j]], d.start, d.end);
-    out[d.key] = [r2(acc.sum), r2(acc.min)];
-  }
-  return out;
-}
+const r4 = (x) => Math.round(x * 1e4) / 1e4;
 
 /**
  * Which tariff applied when: the account's agreements (so a year that started on another tariff
- * is priced with that tariff), else the one tariff known. A tariff typed into Settings wins.
+ * is priced with that tariff), else the one tariff known (typed in Settings, or found).
  */
 export function tariffSegments(settings) {
   const o = settings.octopus;
-  if (o.tariff) return [{ tariff: o.tariff, from: null, to: null }];
   const d = o.discovered;
   if (d?.history?.length) return d.history;
-  return d?.tariff ? [{ tariff: d.tariff, from: null, to: null }] : [];
+  const t = o.tariff || d?.tariff;
+  return t ? [{ tariff: t, from: null, to: null }] : [];
 }
 
 // Economy 7 and other two-rate tariffs have day and night prices in other lists: not covered.
@@ -83,45 +111,63 @@ const singleRate = (tariff) => /^E-1R-/.test(tariff);
 const segFrom = (x) => x.from ?? -Infinity;
 const segTo = (x) => x.to ?? Infinity;
 
-/** Consecutive days → runs, so each stretch is one request (or a few pages). */
-function runs(days) {
+/** Minutes of [from, to) that a single-price tariff covers (`skip`: tariffs Octopus didn't know). */
+function pricedMinutes(segs, from, to, skip) {
+  let m = 0;
+  for (const x of segs) {
+    if (singleRate(x.tariff) && !skip.has(x.tariff)) m += Math.max(0, Math.min(to, segTo(x)) - Math.max(from, segFrom(x))) / MIN;
+  }
+  return m;
+}
+
+/** Consecutive days → stretches of at most `max` days, so each is one request. */
+function stretches(days, max) {
   const out = [];
   for (const d of days) {
     const last = out[out.length - 1];
-    if (last && last[last.length - 1].end === d.start) last.push(d);
+    if (last && last.length < max && last[last.length - 1].end === d.start) last.push(d);
     else out.push([d]);
   }
   return out;
 }
 
+/** Does the list cover the whole day? */
+function coversDay(rates, d) {
+  return addRates({ sum: 0, min: 0 }, rates, d.start, d.end).min >= (d.end - d.start) / MIN;
+}
+
 export class PriceStats {
-  /** `octopus`: the Octopus client (for unitRates and the current tariff). */
+  /** `octopus`: the Octopus client (tariff(), unitRates(), consumption(), canReadUsage). */
   constructor({ octopus, settings, tz = DEFAULT_TZ, storage = globalThis.localStorage }) {
     this.o = octopus;
     this.s = settings;
     this.tz = tz;
     this.storage = storage;
     this.busy = null;
+    this.usageAt = 0;
     this.data = this.#load();
   }
 
   #load() {
     try {
       const d = JSON.parse(this.storage.getItem(STATS_KEY) || 'null');
-      if (d?.v === 1 && d.days && typeof d.days === 'object') return d;
+      if (d?.v === VERSION && d.days && typeof d.days === 'object') return d;
     } catch { /* unreadable: start again */ }
-    return { v: 1, sig: '', days: {} };
+    return { v: VERSION, sig: '', days: {} };
   }
 
-  #save() {
-    try { this.storage.setItem(STATS_KEY, JSON.stringify(this.data)); } catch { /* storage full: it just loads again next time */ }
+  #save(data) {
+    if (data !== this.data) return; // replaced while loading (see #segments)
+    try { this.storage.setItem(STATS_KEY, JSON.stringify(data)); } catch { /* storage full: it just loads again next time */ }
   }
 
-  /** The tariffs in use; a change (a new tariff, a corrected history) starts the saved days again. */
+  /** The tariffs in use. A change (new tariff, corrected history, another meter) starts the saved days again. */
   #segments() {
     const segs = tariffSegments(this.s);
-    const sig = segs.map((x) => `${x.tariff}@${x.from ?? ''}-${x.to ?? ''}`).join(',');
-    if (sig !== this.data.sig) this.data = { v: 1, sig, days: {} };
+    const d = this.s.octopus.discovered;
+    const meter = this.o.canReadUsage ? `${d.mpan}/${d.serial}` : '';
+    const sig = `${segs.map((x) => `${x.tariff}@${x.from ?? ''}-${x.to ?? ''}`).join(',')}|${meter}`;
+    if (sig !== this.data.sig) this.data = { v: VERSION, sig, days: {} };
     return segs;
   }
 
@@ -131,13 +177,17 @@ export class PriceStats {
     return daysBetween(Math.min(s.week, s.year), s.today, this.tz);
   }
 
-  /** How many past days aren't known yet. */
+  /** How many past days have no prices yet. */
   missing(now) {
     this.#segments();
-    return this.#needed(now).filter((d) => !(d.key in this.data.days)).length;
+    return this.#needed(now).filter((d) => !this.data.days[d.key]).length;
   }
 
-  /** Get whatever past days aren't known yet. `live`: the panel's own price list. One at a time. */
+  /**
+   * Get whatever the averages still need: prices for past days not seen yet, and meter readings
+   * that hadn't arrived last time. `live`: the panel's own list, { rates, tariff }. One at a time.
+   * Throws (after saving what it got) if Octopus fails; `err.what` is 'usage' for the readings.
+   */
   ensure(now, live) {
     this.busy ??= this.#fill(now, live).finally(() => { this.busy = null; });
     return this.busy;
@@ -145,67 +195,146 @@ export class PriceStats {
 
   async #fill(now, live) {
     const segs = this.#segments();
+    const data = this.data;
+    const gone = () => data !== this.data; // the tariff changed meanwhile: don't mix the two
     const need = this.#needed(now);
     // Forget days no period needs any more (last year's, once this week is past New Year).
-    for (const k of Object.keys(this.data.days)) if (!need.length || k < need[0].key) delete this.data.days[k];
-    let missing = need.filter((d) => !(d.key in this.data.days));
-    if (!missing.length) { this.#save(); return; }
+    for (const k of Object.keys(data.days)) if (!need.length || k < need[0].key) delete data.days[k];
+    const today = periodStarts(now, this.tz).today;
+    const usage = this.o.canReadUsage;
+    const noPrices = need.filter((d) => !data.days[d.key]);
+    const late = usage && now - this.usageAt >= USAGE_RECHECK ? need.filter((d) => data.days[d.key] && !data.days[d.key].u) : [];
+    if (!noPrices.length && !late.length) { this.#save(data); return; }
 
-    // Days the panel's own list covers in full, on the tariff it shows (yesterday, usually).
-    const cur = this.o.tariff();
-    const onCurrent = (d) => segs.some((x) => x.tariff === cur && segFrom(x) <= d.start && d.end <= segTo(x));
-    const fromLive = dayTotals(live || [], missing);
-    missing = missing.filter((d) => {
-      const whole = (d.end - d.start) / MIN;
-      if (!onCurrent(d) || fromLive[d.key][1] < whole) return true;
-      this.data.days[d.key] = fromLive[d.key];
-      return false;
-    });
-    this.#save();
-
-    // The rest from Octopus, a stretch at a time, saved as each one arrives.
-    for (const run of runs(missing)) {
-      const totals = Object.fromEntries(run.map((d) => [d.key, [0, 0]]));
-      for (const seg of segs) {
-        const from = Math.max(run[0].start, segFrom(seg)), to = Math.min(run[run.length - 1].end, segTo(seg));
-        if (to <= from || !singleRate(seg.tariff)) continue;
-        const rates = (await this.o.unitRates(seg.tariff, from, to))
-          .map((r) => ({ start: Math.max(r.start, from), end: Math.min(r.end, to), p: r.p }))
-          .filter((r) => r.end > r.start);
-        const t = dayTotals(rates, run);
-        for (const k of Object.keys(t)) { totals[k][0] = r2(totals[k][0] + t[k][0]); totals[k][1] = r2(totals[k][1] + t[k][1]); }
+    // Readings first, in one go: if they fail, the prices still load.
+    let readings = null, usageErr = null;
+    const wanted = [...noPrices, ...late].sort((a, b) => a.start - b.start);
+    if (usage && wanted.length) {
+      this.usageAt = now;
+      try {
+        readings = await this.o.consumption(wanted[0].start, wanted[wanted.length - 1].end);
+      } catch (e) {
+        usageErr = e;
+        e.what = 'usage';
       }
-      Object.assign(this.data.days, totals);
-      this.#save();
+      if (gone()) return;
     }
+    const work = readings ? wanted : noPrices;
+    const unknown = new Set(); // tariffs Octopus has no prices for: their days count as unpriced
+
+    const put = (d, rates) => {
+      const pr = addRates({ sum: 0, min: 0 }, rates, d.start, d.end);
+      const e = pricedMinutes(segs, d.start, d.end, unknown);
+      const old = data.days[d.key];
+      const day = { p: r4(pr.sum), m: r4(pr.min), e: r4(e) };
+      if (readings) {
+        const u = addUsage({ cost: 0, kwh: 0, n: 0 }, readings, priceFinder(rates), d.start, d.end);
+        // Done once every priced half hour has a reading, or it's too late to expect them.
+        Object.assign(day, { c: r4(u.cost), k: r4(u.kwh), n: r4(u.n), u: u.n >= pr.min / 30 - 0.01 || d.start < today - USAGE_GIVE_UP * 864e5 ? 1 : 0 });
+      } else if (old) Object.assign(day, { c: old.c, k: old.k, n: old.n, u: old.u });
+      else Object.assign(day, { c: 0, k: 0, n: 0, u: usage ? 0 : 1 });
+      data.days[d.key] = day;
+    };
+
+    // Prices: the panel's own list where it covers the whole day on the tariff it was fetched
+    // for (yesterday, usually); the rest from Octopus a month at a time, newest first, saved as
+    // each month arrives.
+    const onLive = (d) => !!live?.tariff && segs.some((x) => x.tariff === live.tariff && segFrom(x) <= d.start && d.end <= segTo(x)) && coversDay(live.rates, d);
+    for (const d of work.filter(onLive)) put(d, live.rates);
+    this.#save(data);
+    for (const days of stretches(work.filter((d) => !onLive(d)), CHUNK_DAYS).reverse()) {
+      const from = days[0].start, to = days[days.length - 1].end;
+      const rates = [];
+      for (const seg of segs) {
+        const a = Math.max(from, segFrom(seg)), b = Math.min(to, segTo(seg));
+        if (b <= a || !singleRate(seg.tariff) || unknown.has(seg.tariff)) continue;
+        let got;
+        try {
+          got = await this.o.unitRates(seg.tariff, a, b);
+        } catch (e) {
+          // Octopus doesn't know that tariff (an old or special one): those days have no price,
+          // rather than the whole year failing every time.
+          if (e instanceof HttpError && e.status >= 400 && e.status < 500 && e.status !== 429) { unknown.add(seg.tariff); continue; }
+          throw e;
+        }
+        if (gone()) return;
+        for (const r of got) {
+          const start = Math.max(r.start, a), end = Math.min(r.end, b);
+          if (end > start) rates.push({ start, end, p: r.p });
+        }
+      }
+      rates.sort((x, y) => x.start - y.start);
+      for (const d of days) put(d, rates);
+      this.#save(data);
+    }
+    if (usageErr) throw usageErr;
   }
 
   /**
-   * The averages. Each row: { id, from, avg (pence, or null), missing (past days not loaded),
-   * firstAt (when prices start, if after `from`), short (some of the period has no price) }.
+   * The averages. `live`: the panel's own prices ({ rates }); `tele`: today's Home Mini readings.
+   * Each row: { id, from, avg (pence) | null, paid (pence per kWh) | null, kwh, missing (past days
+   * with no prices yet), firstAt (when prices start, if after `from`), short (Octopus has no price
+   * for some half hours), gapDays (days, or parts, with no single price: Economy 7), usageShort
+   * (some half hours have no reading yet) }.
    */
-  rows(now, live) {
+  rows(now, live, tele) {
     this.#segments();
+    const rates = live?.rates || [];
+    const priceAt = priceFinder(rates);
     const s = periodStarts(now, this.tz);
-    const covered = (acc, from) => acc.min >= (now - from) / MIN - 1;
+    const usage = this.o.canReadUsage;
+    const readings = tele?.slots ? tele.slots.map((x) => ({ start: x.start, end: Math.min(x.start + HALF, now), kwh: x.kwh })).filter((x) => x.end > x.start) : null;
+    const half = (from) => (now - from) / HALF;
+
     const recent = (id, from) => {
-      const acc = addRates({ sum: 0, min: 0 }, live, from, now);
-      return { id, from, avg: acc.min ? acc.sum / acc.min : null, missing: 0, firstAt: null, short: !!acc.min && !covered(acc, from) };
+      const pr = addRates({ sum: 0, min: 0 }, rates, from, now);
+      const u = readings ? addUsage({ cost: 0, kwh: 0, n: 0 }, readings, priceAt, from, now) : null;
+      return {
+        id, from,
+        avg: pr.min ? pr.sum / pr.min : null,
+        paid: u?.kwh > 0 ? u.cost / u.kwh : null,
+        kwh: u ? u.kwh : null,
+        missing: 0, firstAt: null, gapDays: 0,
+        short: !!pr.min && pr.min < (now - from) / MIN - 1,
+        // The newest half hour can be a minute late from the Home Mini: allow one.
+        usageShort: id === 'today' && !!u && u.n < half(from) - 1,
+      };
     };
     const today = recent('today', s.today);
+
     const span = (id, from) => {
-      const acc = addRates({ sum: 0, min: 0 }, live, s.today, now);
-      let missing = 0, firstAt = null;
+      const pr = addRates({ sum: 0, min: 0 }, rates, s.today, now);
+      let expect = pr.min, missing = 0, firstAt = null, gapDays = 0, usageShort = today.usageShort || !readings;
+      const u = readings ? addUsage({ cost: 0, kwh: 0, n: 0 }, readings, priceAt, s.today, now) : { cost: 0, kwh: 0, n: 0 };
       for (const d of daysBetween(from, s.today, this.tz)) {
         const v = this.data.days[d.key];
         if (!v) { missing++; continue; }
-        acc.sum += v[0];
-        acc.min += v[1];
-        if (v[1] > 0 && firstAt == null) firstAt = d.start;
+        pr.sum += v.p;
+        pr.min += v.m;
+        expect += v.e;
+        u.cost += v.c;
+        u.kwh += v.k;
+        u.n += v.n;
+        if (!v.u || v.n < v.m / 30 - 0.01) usageShort = true;
+        if (v.m > 0 && firstAt == null) firstAt = d.start;
+        if (firstAt != null && v.e < (d.end - d.start) / MIN - 1) gapDays++;
       }
-      if (firstAt == null && today.avg != null) firstAt = s.today;
-      const avg = !missing && acc.min ? acc.sum / acc.min : null;
-      return { id, from, avg, missing, firstAt: firstAt > from ? firstAt : null, short: avg != null && !covered(acc, from) };
+      if (firstAt == null && pr.min) firstAt = s.today;
+      const avg = !missing && pr.min ? pr.sum / pr.min : null;
+      // A figure only once most of the period has readings: a week with yesterday's still to
+      // come shows a dash, a year with one day to come still shows (with a note).
+      const enough = u.n >= 0.9 * (pr.min / 30);
+      if (u.n < pr.min / 30 - 1) usageShort = true;
+      return {
+        id, from, avg,
+        paid: usage && !missing && enough && u.kwh > 0 ? u.cost / u.kwh : null,
+        kwh: usage && !missing && enough ? u.kwh : null,
+        missing,
+        firstAt: firstAt > from ? firstAt : null,
+        short: avg != null && pr.min < expect - 1,
+        gapDays,
+        usageShort: usage && usageShort,
+      };
     };
     return [recent('min30', s.min30), recent('hour', s.hour), today, span('week', s.week), span('month', s.month), span('year', s.year)];
   }
