@@ -164,3 +164,56 @@ export function renderChart({ rates, now, width, height, tz = DEFAULT_TZ, cheap 
   out.push('</svg>');
   return out.join('');
 }
+
+/** About four gridlines for a kWh axis. */
+function kwhStep(max) {
+  for (const s of [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50]) if (max / s <= 4) return s;
+  return 100;
+}
+
+/**
+ * Usage by hour of the day as an SVG string: 24 bars from midnight, each in the colour of the
+ * price band you paid at that hour, with full-height tap targets.
+ * @param {object} o
+ * @param {(number|null)[]} o.values kWh for each hour (null: no readings for that hour)
+ * @param {string[]} o.bands price band for each hour ('cheap', 'mid', 'high', 'plunge' or 'none')
+ * @param {number} [o.selected] the hour picked (the others fade)
+ */
+export function renderHours({ values, bands, width, height, fs = 12, selected = -1 }) {
+  const W = Math.max(160, Math.round(width));
+  const H = Math.max(80, Math.round(height));
+  const padL = Math.round(fs * 2.8), padR = 2, padT = Math.round(fs * 0.7), padB = Math.round(fs * 2);
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg uc-svg" role="img" aria-label="Electricity used in each hour of the day">`];
+  const max = Math.max(0, ...values.filter(Number.isFinite));
+  if (!(max > 0)) {
+    out.push(`<text x="${W / 2}" y="${H / 2}" text-anchor="middle" class="ch-empty">No usage to show yet</text></svg>`);
+    return out.join('');
+  }
+  const step = kwhStep(max);
+  const top = Math.ceil(max / step - 1e-9) * step;
+  const y = (v) => padT + (1 - v / top) * plotH;
+  const base = H - padB;
+  for (let v = 0; v <= top + 1e-9; v += step) {
+    const yy = Math.round(y(v)) + 0.5;
+    out.push(`<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" class="${v === 0 ? 'ch-zero' : 'ch-grid'}"/>`);
+    out.push(`<text x="${padL - Math.round(fs * 0.6)}" y="${f1(yy + fs * 0.35)}" text-anchor="end" class="ch-y">${+v.toFixed(2)}</text>`);
+  }
+  const slot = plotW / 24;
+  const w = Math.max(2, Math.min(28, slot - 2));
+  for (let hr = 0; hr < 24; hr++) {
+    const v = values[hr];
+    const x0 = padL + hr * slot;
+    if (Number.isFinite(v) && v > 0) {
+      const bx = x0 + (slot - w) / 2;
+      const b = bands[hr] || 'none';
+      out.push(`<path d="${barPath(bx, w, Math.min(y(v), base - 1.5), base, false)}" fill="${BAND_COLOURS[b]}" class="ch-bar band-${b}${hr === selected ? ' on' : ''}"/>`);
+    }
+    if (hr % 3 === 0) out.push(`<text x="${f1(x0 + slot / 2)}" y="${f1(H - fs * 0.45)}" text-anchor="middle" class="ch-x">${String(hr).padStart(2, '0')}:00</text>`);
+  }
+  for (let hr = 0; hr < 24; hr++) {
+    out.push(`<rect x="${f1(padL + hr * slot)}" y="${padT}" width="${f1(slot)}" height="${f1(base - padT)}" fill="transparent" class="uc-hit" data-h="${hr}"/>`);
+  }
+  out.push('</svg>');
+  return out.join('');
+}

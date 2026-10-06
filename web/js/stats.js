@@ -15,7 +15,7 @@ import { startOfDay, dayKey, partsInTz, DEFAULT_TZ } from './time.js';
 import { HttpError } from './util.js';
 
 export const STATS_KEY = 'wallpanel.stats.v1';
-const VERSION = 2;
+const VERSION = 3; // 3: each day also keeps its usage by hour of the day
 const MIN = 60e3;
 const HALF = 1800e3;
 const CHUNK_DAYS = 31;            // prices a month at a time (one request each), newest first
@@ -96,6 +96,26 @@ export function daysBetween(from, to, tz = DEFAULT_TZ) {
 }
 
 const r4 = (x) => Math.round(x * 1e4) / 1e4;
+
+/**
+ * A day's readings by hour of the day (local clock): kWh, cost (pence) and how many half hours
+ * had a reading, for readings with a price. The hour the clocks go back holds four half hours;
+ * the hour they skip, none.
+ */
+export function byHour(day, readings, priceAt, tz = DEFAULT_TZ) {
+  const k = Array(24).fill(0), c = Array(24).fill(0), n = Array(24).fill(0);
+  const plain = day.end - day.start === 864e5;
+  for (const r of readings || []) {
+    if (r.start < day.start || r.start >= day.end || !Number.isFinite(r.kwh)) continue;
+    const p = priceAt(r.start);
+    if (p == null) continue;
+    const hr = plain ? Math.floor((r.start - day.start) / 3600e3) : partsInTz(r.start, tz).h;
+    k[hr] += r.kwh;
+    c[hr] += r.kwh * p;
+    n[hr] += (Math.min(r.end, day.end) - r.start) / HALF;
+  }
+  return { k, c, n };
+}
 
 /**
  * Which tariff applied when: the account's agreements (so a year that started on another tariff
@@ -295,8 +315,14 @@ export class PriceStats {
         // Done once the meter has a reading for every priced half hour, or it's too late to
         // expect them (only decided when Octopus answered).
         const done = !!readings && (fromMeter >= pr.min / 30 - 0.01 || d.start < today - USAGE_GIVE_UP * 864e5);
-        Object.assign(day, { c: r4(u.cost), k: r4(u.kwh), n: r4(u.n), u: done ? 1 : 0 });
-      } else if (old) Object.assign(day, { c: old.c, k: old.k, n: old.n, u: old.u });
+        const hrs = byHour(d, [...own, ...mini], priceAt, this.tz);
+        Object.assign(day, {
+          c: r4(u.cost), k: r4(u.kwh), n: r4(u.n), u: done ? 1 : 0,
+          // By hour of the day, kept small: Wh, tenths of a penny, and half hours with a
+          // reading (a digit an hour).
+          h: hrs.k.map((x) => Math.round(x * 1e3)), hc: hrs.c.map((x) => Math.round(x * 10)), hn: hrs.n.map((x) => Math.min(9, Math.round(x))).join(''),
+        });
+      } else if (old) Object.assign(day, { c: old.c, k: old.k, n: old.n, u: old.u, h: old.h, hc: old.hc, hn: old.hn });
       else Object.assign(day, { c: 0, k: 0, n: 0, u: usage ? 0 : 1 });
       data.days[d.key] = day;
     };
@@ -409,5 +435,36 @@ export class PriceStats {
       };
     };
     return [recent('min30', s.min30), recent('hour', s.hour), today, span('week', s.week), span('month', s.month), span('year', s.year)];
+  }
+  /**
+   * Your usage by hour of the day over a period ('today', 'week', 'month' or 'year'): for each
+   * hour, kWh, cost (pence) and how many days it covers (a part day counts in part), so
+   * kWh ÷ days is the average a day at that hour. Today's comes from the Home Mini (`tele`).
+   * Also { total, missing (past days with no data yet), usageShort (readings still expected) }.
+   */
+  usageByHour(now, live, tele, id) {
+    this.#segments();
+    const s = periodStarts(now, this.tz);
+    const priceAt = priceFinder(live?.rates || []);
+    const kwh = Array(24).fill(0), cost = Array(24).fill(0), days = Array(24).fill(0);
+    const add = (k, c, n) => {
+      for (let h = 0; h < 24; h++) { kwh[h] += k[h]; cost[h] += c[h]; days[h] += Math.min(1, n[h] / 2); }
+    };
+    if (tele?.slots) {
+      const day = { start: s.today, end: startOfDay(now, this.tz, 1) };
+      const list = tele.slots.map((x) => ({ start: x.start, end: Math.min(x.start + HALF, now), kwh: x.kwh })).filter((x) => x.end > x.start);
+      const t = byHour(day, list, priceAt, this.tz);
+      add(t.k, t.c, t.n);
+    }
+    let missing = 0, usageShort = false;
+    if (id !== 'today') {
+      for (const d of daysBetween(s[id], s.today, this.tz)) {
+        const v = this.data.days[d.key];
+        if (!v) { missing++; continue; }
+        if (!v.u && v.n < v.m / 30 - 0.01) usageShort = true; // readings still expected
+        if (v.h) add(v.h.map((x) => x / 1e3), v.hc.map((x) => x / 10), [...v.hn].map(Number));
+      }
+    }
+    return { id, kwh, cost, days, total: kwh.reduce((a, b) => a + b, 0), missing, usageShort, usage: this.o.canReadUsage };
   }
 }

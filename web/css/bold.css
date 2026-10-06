@@ -248,7 +248,7 @@ svg { display: block; }
 .price[data-band="cheap"] { --band: var(--cheap); }
 .price[data-band="mid"] { --band: var(--mid); }
 .price[data-band="high"] { --band: var(--high); }
-.price > .dot { top: 0.9em; right: 3.2em; } /* beside the averages button */
+.price > .dot { top: 0.9em; right: 5.9em; } /* beside the two small buttons */
 .price .label { grid-area: label; margin-bottom: 0.1em; padding-right: 1.2em; }
 .price-main { grid-area: main; display: flex; align-items: baseline; gap: 0.9em; min-width: 0; }
 .price .big {
@@ -567,6 +567,30 @@ svg { display: block; }
 .st-note { margin: 0.6em 0 0; color: var(--faint); font-size: 0.85em; line-height: 1.45; }
 .st-note b { color: var(--muted); font-weight: 600; }
 .st-empty { grid-column: 1 / -1; padding: 0.8em 0; color: var(--muted); }
+
+/* ---------- When you use electricity: the clock button beside it, and its pop-up ---------- */
+.price .usage-btn {
+  position: absolute; top: 0.35em; right: calc(0.4em + 2.7em); width: 2.6em; height: 2.6em;
+  display: grid; place-items: center; color: var(--faint); border-radius: 50%;
+}
+.price .usage-btn svg { width: 1.25em; height: 1.25em; }
+.price .usage-btn:active { background: var(--card-2); }
+.uc-card { width: min(42em, 94vw); }
+.uc-seg { display: flex; gap: 0.25em; margin-top: 0.9em; padding: 0.25em; border-radius: 999px; background: var(--card-2); }
+.uc-seg button { flex: 1; display: flex; justify-content: center; padding: 0.5em 0.6em; border-radius: 999px; color: var(--muted); font-weight: 600; text-align: center; white-space: nowrap; }
+.uc-seg button[aria-pressed="true"] { background: var(--text); color: var(--bg); }
+.uc-sum { margin-top: 0.9em; color: var(--muted); }
+.uc-sum b { color: var(--text); font-weight: 650; }
+.uc-chart { position: relative; height: 13.5em; margin-top: 0.5em; font-size: max(11px, 0.82em); }
+.uc-chart > svg { position: absolute; inset: 0; }
+.uc-chart.empty { height: auto; font-size: 1em; }
+.uc-chart.has-sel .ch-bar:not(.on) { opacity: 0.38; }
+.uc-chart .uc-hit { cursor: pointer; }
+.uc-info { min-height: 1.4em; margin-top: 0.35em; color: var(--muted); font-size: 0.95em; }
+.uc-info b { color: var(--text); font-weight: 600; }
+.uc-info .band-dot { margin-left: 0.15em; }
+.uc-legend { margin-top: 0.4em; }
+@media (max-height: 640px) { .uc-chart { height: 10.5em; } }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */
 .cam.expanded.ring { z-index: 75; } /* above night (60), the music controls (65) and Settings (70); below toasts (80) */

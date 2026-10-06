@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { periodStarts, addRates, addUsage, priceFinder, daysBetween, tariffSegments, PriceStats, STATS_KEY } from '../../js/stats.js';
+import { periodStarts, addRates, addUsage, priceFinder, daysBetween, tariffSegments, byHour, PriceStats, STATS_KEY } from '../../js/stats.js';
 import { loadSettings } from '../../js/config.js';
 import { HttpError } from '../../js/util.js';
 
@@ -155,7 +155,8 @@ test('PriceStats: what you paid and the plain average, for every period, from on
   const n = octopus.calls.length;
   await again.ensure(NOW, live(NOW));
   assert.equal(octopus.calls.length, n);
-  assert.ok(storage.m.get(STATS_KEY).length < 40000, `${storage.m.get(STATS_KEY).length} bytes`);
+  // About 300 bytes a day (totals, and usage by hour): under 100 kB for a year, of the ~5 MB a site gets.
+  assert.ok(storage.m.get(STATS_KEY).length < 100000, `${storage.m.get(STATS_KEY).length} bytes`);
   const tomorrow = NOW + 864e5;
   await again.ensure(tomorrow, live(tomorrow));
   assert.deepEqual(octopus.calls.slice(n).map((c) => [c.what, new Date(c.from).toISOString()]), [['usage', '2026-10-05T23:00:00.000Z']]);
@@ -377,4 +378,61 @@ test('PriceStats: no "readings not in yet" note for gaps long past, or without a
   rows = byId(stats.rows(NOW, live(NOW), null));
   assert.equal(rows.month.usageShort, false);
   assert.equal(rows.today.paid, null);
+});
+
+test('byHour: half hours into clock hours, on ordinary and clock-change days', () => {
+  const priceAt = () => 10;
+  const day = { start: at('2026-10-06T00:00:00+01:00'), end: at('2026-10-07T00:00:00+01:00') };
+  const r = (iso, kwh) => ({ start: at(iso), end: at(iso) + HALF, kwh });
+  let h = byHour(day, [r('2026-10-06T18:00:00+01:00', 1), r('2026-10-06T18:30:00+01:00', 0.5), r('2026-10-05T23:30:00+01:00', 9)], priceAt, TZ);
+  assert.equal(h.k[18], 1.5);
+  assert.equal(h.c[18], 15);
+  assert.equal(h.n[18], 2);
+  assert.equal(h.k.reduce((a, b) => a + b), 1.5, 'nothing from another day');
+  // 25 October: 01:00-02:00 happens twice (four half hours).
+  const long = { start: at('2026-10-25T00:00:00+01:00'), end: at('2026-10-26T00:00:00Z') };
+  const halves = [];
+  for (let t = long.start; t < long.end; t += HALF) halves.push({ start: t, end: t + HALF, kwh: 1 });
+  h = byHour(long, halves, priceAt, TZ);
+  assert.equal(h.n[1], 4);
+  assert.equal(h.k[1], 4);
+  assert.equal(h.n.reduce((a, b) => a + b), 50);
+  // 29 March: 01:00-02:00 never happens.
+  const short = { start: at('2026-03-29T00:00:00Z'), end: at('2026-03-30T00:00:00+01:00') };
+  const fewer = [];
+  for (let t = short.start; t < short.end; t += HALF) fewer.push({ start: t, end: t + HALF, kwh: 1 });
+  h = byHour(short, fewer, priceAt, TZ);
+  assert.equal(h.n[1], 0);
+  assert.equal(h.n.reduce((a, b) => a + b), 46);
+});
+
+test('PriceStats.usageByHour: each hour\'s average a day, for today, the week, the month and the year', async () => {
+  const { stats } = setup();
+  await stats.ensure(NOW, live(NOW));
+  const s = periodStarts(NOW, TZ);
+  // The plain answer: every half hour from the start of the period to now, by clock hour.
+  const want = (from) => {
+    const kwh = Array(24).fill(0), cost = Array(24).fill(0), days = Array(24).fill(0);
+    for (let t = from; t < NOW; t += HALF) {
+      const hr = Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hourCycle: 'h23' }).format(t));
+      const part = Math.min(1, (NOW - t) / HALF);
+      kwh[hr] += used(t) * part; cost[hr] += used(t) * part * agile(t); days[hr] += part / 2;
+    }
+    return { kwh, cost, days };
+  };
+  for (const id of ['today', 'week', 'month', 'year']) {
+    const got = stats.usageByHour(NOW, live(NOW), tele(NOW), id);
+    const w = want(s[id]);
+    for (let h = 0; h < 24; h++) {
+      near(got.kwh[h], w.kwh[h], `${id} ${h}:00 kWh`);
+      // (Each stored day-hour's cost is to a tenth of a penny.)
+      assert.ok(Math.abs(got.cost[h] - w.cost[h]) <= 0.05 * Math.ceil(got.days[h]) + 1e-9, `${id} ${h}:00 cost ${got.cost[h]} vs ${w.cost[h]}`);
+      near(got.days[h], w.days[h], `${id} ${h}:00 days`);
+    }
+    near(got.total, w.kwh.reduce((a, b) => a + b), `${id} total`);
+    assert.equal(got.missing, 0);
+  }
+  // Before the year is loaded: the week says how many days are missing.
+  const fresh = setup().stats;
+  assert.equal(fresh.usageByHour(NOW, live(NOW), tele(NOW), 'week').missing, 1);
 });

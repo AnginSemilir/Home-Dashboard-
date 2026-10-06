@@ -1,0 +1,94 @@
+// When you use electricity: the clock button on the price card. Octopus is faked (mocks.js), so
+// the expected figures are worked out here from the same fake readings.
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { startBrowser, openPanel, NOW } from '../support/browser.js';
+import { usedKwh, agilePrice } from '../support/mocks.js';
+
+let env;
+before(async () => { env = await startBrowser(); });
+after(async () => { await env?.close(); });
+
+const HALF = 1800e3;
+const TODAY = Date.parse('2026-09-25T00:00:00+01:00'); // NOW is Friday 25 September 2026, 09:41 (BST)
+const YEAR = Date.parse('2026-01-01T00:00:00Z');
+const kwhText = (k) => (k < 1 ? k.toFixed(2) : k < 10 ? k.toFixed(1) : Math.round(k).toLocaleString('en-GB'));
+/** kWh from `from` to now (today's newest half hour, from the Home Mini, counts whole). */
+function total(from) {
+  let k = 0;
+  for (let t = from; t < NOW; t += HALF) k += usedKwh(t);
+  return k;
+}
+const bars = (page) => page.locator('#usage .uc-chart svg .ch-bar').count();
+const open = async (page) => {
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#price .usage-btn').click();
+  await page.locator('#usage .uc-chart svg .ch-bar').first().waitFor();
+};
+
+test('today by the hour; tap a bar for its numbers; switch to the year; the choice is remembered', async () => {
+  const { ctx, page, calls, problems } = await openPanel(env);
+  await open(page);
+  assert.equal(await page.locator('#price .usage-btn').getAttribute('aria-label'), 'When you use electricity');
+  assert.equal(await page.locator('#usage .uc-seg [aria-pressed="true"]').textContent(), 'Today');
+  assert.equal(await page.locator('#usage .st-sub').textContent(), 'kWh used in each hour today');
+  assert.equal(await bars(page), 10, 'midnight to 09:41: ten hours');
+  assert.equal(await page.locator('#usage .uc-hit').count(), 24);
+  assert.match(await page.locator('#usage .uc-sum').textContent(), new RegExp(`^${kwhText(total(TODAY)).replace('.', '\\.')} kWh so far · most at \\d\\d:00–\\d\\d:00$`));
+
+  // 03:00–04:00: two half hours.
+  await page.locator('#usage .uc-hit[data-h="3"]').click();
+  const t3 = Date.parse('2026-09-25T03:00:00+01:00');
+  const k3 = usedKwh(t3) + usedKwh(t3 + HALF);
+  const p3 = (usedKwh(t3) * agilePrice(t3) + usedKwh(t3 + HALF) * agilePrice(t3 + HALF)) / k3;
+  const share = Math.round((k3 / total(TODAY)) * 100);
+  assert.equal(await page.locator('#usage .uc-info').textContent(), `03:00–04:00 · ${kwhText(k3)} kWh · ${share}% of your use · paid ${(Math.round(p3 * 10) / 10).toFixed(1)}p a kWh`);
+  assert.equal(await page.locator('#usage .uc-chart.has-sel .ch-bar.on').count(), 1, 'the other bars fade');
+
+  // The year: the same cache as the average prices (one load for both).
+  await page.locator('#usage .uc-seg button[data-period="year"]').click();
+  assert.equal(await page.locator('#usage .st-sub').textContent(), 'Average kWh a day in each hour');
+  assert.equal(await bars(page), 24);
+  assert.match(await page.locator('#usage .uc-sum').textContent(), new RegExp(`^${kwhText(total(YEAR))} kWh · [\\d.]+ kWh a day · most at`));
+  const history = calls.filter((c) => /page_size=1500/.test(c.url)).length;
+  await page.locator('#usage .st-close').click();
+  await page.locator('#price .stats-btn').click();
+  await page.locator('#stats .st-row[data-id="year"] .st-paid:not(.none)').waitFor();
+  assert.equal(calls.filter((c) => /page_size=1500/.test(c.url)).length, history, 'the average prices need nothing more');
+  await page.locator('#stats .st-close').click();
+
+  // Remembered on this device.
+  await page.reload();
+  await open(page);
+  assert.equal(await page.locator('#usage .uc-seg [aria-pressed="true"]').textContent(), 'This year');
+  // It fits, with no scrolling.
+  const box = await page.locator('#usage .st-card').boundingBox();
+  assert.ok(box.y >= 0 && box.y + box.height <= 800, JSON.stringify(box));
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+test('the week and month, on a small screen; a tap outside closes it', async () => {
+  const { ctx, page } = await openPanel(env, { viewport: { width: 960, height: 600 } });
+  await open(page);
+  for (const [id, from] of [['week', Date.parse('2026-09-21T00:00:00+01:00')], ['month', Date.parse('2026-09-01T00:00:00+01:00')]]) {
+    await page.locator(`#usage .uc-seg button[data-period="${id}"]`).click();
+    assert.equal(await bars(page), 24, id);
+    assert.match(await page.locator('#usage .uc-sum').textContent(), new RegExp(`^${kwhText(total(from))} kWh · `), id);
+  }
+  const box = await page.locator('#usage .st-card').boundingBox();
+  assert.ok(box.y >= 0 && box.y + box.height <= 600 && box.x >= 0 && box.x + box.width <= 960, JSON.stringify(box));
+  assert.equal(await page.evaluate(() => { const c = document.querySelector('#usage .st-card'); return c.scrollHeight <= c.clientHeight + 1; }), true, 'no scrolling at 960×600');
+  await page.mouse.click(5, 5);
+  await page.locator('#usage').waitFor({ state: 'hidden' });
+  await ctx.close();
+});
+
+test('without the API key it says what to add', async () => {
+  const s = { weather: { lat: 51.5, lon: -0.12, place: 'Westminster' }, octopus: { tariff: 'E-1R-AGILE-24-10-01-C' } };
+  const { ctx, page } = await openPanel(env, { settings: s });
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#price .usage-btn').click();
+  await page.locator('#usage .st-empty', { hasText: 'Add your Octopus account number and API key in Settings to see your usage.' }).waitFor();
+  await ctx.close();
+});

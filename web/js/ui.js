@@ -5,7 +5,7 @@ import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
 import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
-import { renderChart } from './chart.js';
+import { renderChart, renderHours } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
 import { MUSIC_APPS, musicApp, ASSISTANTS, assistantApp } from './launcher.js';
@@ -99,11 +99,13 @@ export function buildPanel(root, on) {
   r.priceBig = h('div', { class: 'big' });
   r.priceBand = h('span', { class: 'band-chip hidden' });
   r.priceSub = h('div', { class: 'sub' });
-  // A small button in the corner opens the average prices (today, this week…).
+  // Small buttons in the corner: when you use electricity, and the average prices.
+  r.usageBtn = h('button', { class: 'usage-btn', 'aria-label': 'When you use electricity' }, icon('clock'));
+  r.usageBtn.addEventListener('click', () => on.usage?.());
   r.statsBtn = h('button', { class: 'stats-btn', 'aria-label': 'Average prices' }, icon('stats'));
   r.statsBtn.addEventListener('click', () => on.stats?.());
   r.price = h('section', { class: 'card price', id: 'price' }, h('div', { class: 'label' }, 'Agile price now'),
-    h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, r.statsBtn, (r.priceDot = dot()));
+    h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, r.usageBtn, r.statsBtn, (r.priceDot = dot()));
 
   const tile = (cls, ico, label) => {
     const t = { value: h('div', { class: 't-value' }), label: h('div', { class: 't-label' }, label), extra: h('div', { class: 'extra' }), dot: dot() };
@@ -176,7 +178,8 @@ export function buildPanel(root, on) {
   r.soundHint = h('div', { class: 'sound-hint hidden', role: 'status' }, icon('volume'), h('span', {}, 'Tap once to turn on the doorbell sound'));
   r.music = buildMusic(on);
   r.stats = buildStats(on);
-  root.replaceChildren(r.panel, r.music.sheet, r.stats.sheet, r.night, r.toast, r.soundHint);
+  r.usage = buildUsage(on);
+  root.replaceChildren(r.panel, r.music.sheet, r.stats.sheet, r.usage.sheet, r.night, r.toast, r.soundHint);
   return r;
 }
 
@@ -399,6 +402,112 @@ export function renderStats(r, rows, st = {}, opts = {}, tz = DEFAULT_TZ) {
     year.gapDays > 0 && [`${year.gapDays} day${year.gapDays === 1 ? '' : 's'} on a tariff with no single price (Economy 7, for example) ${year.gapDays === 1 ? 'is' : 'are'} left out.`],
     rows.some((x) => x.short) && ['Octopus has no price for a few half hours; they\'re left out.'],
     st.usage && !loadingOld && !st.usageError && rows.some((x) => x.usageShort) && ['Your newest meter readings aren\'t in yet (they usually arrive the next day), so “You paid” leaves those half hours out.'],
+  );
+}
+
+/** When you use electricity: usage by hour of the day, from the clock button on the price card. */
+export const USAGE_PERIODS = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['year', 'This year']];
+
+function buildUsage(on) {
+  const u = {};
+  u.buttons = USAGE_PERIODS.map(([id, label]) => {
+    const b = h('button', { 'data-period': id, 'aria-pressed': 'false' }, label);
+    b.addEventListener('click', () => on.usagePeriod?.(id));
+    return b;
+  });
+  u.seg = h('div', { class: 'uc-seg', role: 'group', 'aria-label': 'Period' }, ...u.buttons);
+  u.sub = h('div', { class: 'st-sub' });
+  u.sum = h('div', { class: 'uc-sum' });
+  u.box = h('div', { class: 'uc-chart' });
+  u.box.addEventListener('click', (e) => {
+    const hit = e.target.closest?.('.uc-hit');
+    if (hit) on.usageTap?.(Number(hit.dataset.h));
+  });
+  u.info = h('div', { class: 'uc-info', role: 'status' });
+  u.legend = h('div', { class: 'legend uc-legend' });
+  u.msg = h('div', { class: 'st-msg', role: 'status' });
+  const close = h('button', { class: 'st-close', 'aria-label': 'Close' }, icon('close'));
+  close.addEventListener('click', () => on.usageClose?.());
+  u.card = h('div', { class: 'st-card uc-card' }, close,
+    h('h2', {}, 'When you use electricity'), u.sub, u.seg, u.sum, u.box, u.info, u.legend, u.msg);
+  u.sheet = h('div', { class: 'stats-sheet hidden', id: 'usage', role: 'dialog', 'aria-label': 'When you use electricity' }, u.card);
+  u.sheet.addEventListener('pointerdown', (e) => { u.downOutside = e.target === u.sheet; });
+  u.sheet.addEventListener('click', (e) => { if (e.target === u.sheet && u.downOutside) on.usageClose?.(); u.downOutside = false; });
+  u.card.addEventListener('pointerdown', () => { u.touched = Date.now(); });
+  return u;
+}
+
+export const usageIsOpen = (r) => !r.usage.sheet.classList.contains('hidden');
+
+export function openUsage(r) {
+  r.usage.sheet.classList.remove('hidden');
+  r.usage.touched = Date.now();
+}
+
+export function closeUsage(r) { r.usage.sheet.classList.add('hidden'); }
+
+const kwhText = (k) => (k < 1 ? k.toFixed(2) : k < 10 ? k.toFixed(1) : Math.round(k).toLocaleString('en-GB'));
+const hourSpan = (hr) => `${String(hr).padStart(2, '0')}:00–${String((hr + 1) % 24).padStart(2, '0')}:00`;
+
+/**
+ * The usage chart. `data` from PriceStats.usageByHour (null: no tariff yet). `st`: { period,
+ * selected (hour, or -1), loading, error, usageError, usage, hasKey }.
+ */
+export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
+  const U = r.usage;
+  const today = st.period === 'today';
+  for (const b of U.buttons) b.setAttribute('aria-pressed', String(b.dataset.period === st.period));
+  U.sub.textContent = today ? 'kWh used in each hour today' : 'Average kWh a day in each hour';
+  const say = (...lines) => U.msg.replaceChildren(...lines.filter(Boolean).map(([text, bad]) => h('div', { class: bad ? 'bad' : '' }, text)));
+  const blank = (text) => {
+    U.sum.textContent = '';
+    U.box.replaceChildren(h('div', { class: 'st-empty' }, text));
+    U.box.classList.add('empty');
+    U.info.textContent = '';
+    U.legend.replaceChildren();
+  };
+  if (!data || !data.usage) {
+    blank(st.loading ? 'Looking up your meter…' : st.hasKey ? 'Your meter isn\'t known yet.' : 'Add your Octopus account number and API key in Settings to see your usage.');
+    say(st.error && [`Couldn't look up your tariff: ${st.error}`, true]);
+    return;
+  }
+  if (data.missing) {
+    blank(st.loading ? 'Getting your usage from Octopus (only the first time)…' : '–');
+    say(st.error && [`Couldn't get the older prices from Octopus: ${st.error}`, true],
+      st.usageError && [`Couldn't get your usage from Octopus: ${st.usageError}`, true]);
+    return;
+  }
+  U.box.classList.remove('empty');
+  // Each hour: kWh (today) or the average a day, and the band of what you paid then.
+  const values = data.kwh.map((k, hr) => (data.days[hr] > 0 ? (today ? k : k / data.days[hr]) : null));
+  const paid = data.kwh.map((k, hr) => (k > 0 ? data.cost[hr] / k : null));
+  const bands = paid.map((p) => (p == null ? 'none' : band(p, opts)));
+  const sel = st.selected >= 0 && Number.isFinite(values[st.selected]) ? st.selected : -1;
+  let peak = -1;
+  values.forEach((v, hr) => { if (Number.isFinite(v) && (peak < 0 || v > values[peak])) peak = hr; });
+  const perDay = values.reduce((a, v) => a + (Number.isFinite(v) ? v : 0), 0);
+  U.sum.replaceChildren(...(data.total > 0
+    ? [h('b', {}, `${kwhText(data.total)} kWh`), today ? ' so far' : ` · ${kwhText(perDay)} kWh a day`, ' · most at ', h('b', {}, hourSpan(peak))]
+    : ['No usage yet']));
+  // Measure after the sheet is on screen (the chart fills its box).
+  const box = U.box.getBoundingClientRect();
+  const fs = parseFloat(getComputedStyle(U.box).fontSize) || 12;
+  U.box.classList.toggle('has-sel', sel >= 0);
+  U.box.replaceChildren(svg(renderHours({ values, bands, width: box.width || 520, height: box.height || 220, fs, selected: sel })));
+  if (sel >= 0) {
+    const share = data.total > 0 ? Math.round((data.kwh[sel] / data.total) * 100) : 0;
+    U.info.replaceChildren(h('b', {}, hourSpan(sel)), ` · ${kwhText(values[sel])} kWh${today ? '' : ' a day'} · ${share}% of your use`,
+      ...(paid[sel] != null ? [' · paid ', bandDot(paid[sel], opts), h('b', {}, `${round1(paid[sel]).toFixed(1)}p`), ' a kWh'] : []));
+  } else U.info.textContent = 'Tap a bar for that hour. Colour: what you paid then.';
+  const shown = new Set(bands.filter((b, hr) => Number.isFinite(values[hr]) && b !== 'none'));
+  const item = (b, text) => h('span', { class: `lg lg-${b}` }, h('span', { class: `sw band-${b}` }), text);
+  U.legend.replaceChildren(...[
+    shown.has('plunge') ? item('plunge', 'Plunge ≤0') : null,
+    item('cheap', `Cheap <${opts.cheap ?? 15}p`), item('mid', 'Normal'), item('high', `Peak ${opts.pricey ?? 25}p+`),
+  ].filter(Boolean));
+  say(
+    st.usageError && [`Couldn't get your usage from Octopus: ${st.usageError}`, true],
+    data.usageShort && !st.loading && ['Your newest meter readings aren\'t in yet (they usually arrive the next day), so some hours may be low.'],
   );
 }
 

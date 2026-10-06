@@ -71,6 +71,7 @@ function renderAll() {
   renderMusic();
   ui.renderShopping(refs, state.shopping, state.status.shopping, shoppingInfo());
   renderStats();
+  renderUsage();
 }
 
 function shoppingInfo() {
@@ -90,14 +91,58 @@ function renderStats() {
   const now = Date.now();
   const rows = octopus.tariff() ? priceStats.rows(now, livePrices(), state.tele) : null;
   ui.renderStats(refs, rows, { ...statsLoad, standingP: state.standingP, usage: octopus.canReadUsage, hasKey: octopus.hasKey }, priceOpts(), tz);
-  // Left open past midnight: the new "yesterday" is needed (once a day; after an error, reopen to retry).
-  if (rows?.some((r) => r.missing) && !statsLoad.loading && statsLoad.day !== dayKey(now, tz)) loadStats();
+  if (rows?.some((r) => r.missing)) loadIfNewDay(now);
+}
+
+// Left open past midnight: the new "yesterday" is needed (once a day; after an error, reopen to retry).
+function loadIfNewDay(now) {
+  if (!statsLoad.loading && statsLoad.day !== dayKey(now, tz)) loadStats();
+}
+
+// ---------- When you use electricity (the clock button on the price card) ----------
+const USAGE_PERIOD = 'wallpanel.usage.period'; // the period last shown, on this device
+let usagePeriod = (() => {
+  try { const v = localStorage.getItem(USAGE_PERIOD); return ui.USAGE_PERIODS.some(([id]) => id === v) ? v : 'today'; } catch { return 'today'; }
+})();
+let usageHour = -1; // the bar tapped
+
+function renderUsage() {
+  if (!refs || !ui.usageIsOpen(refs)) return;
+  const now = Date.now();
+  const data = octopus.tariff() ? priceStats.usageByHour(now, livePrices(), state.tele, usagePeriod) : null;
+  ui.renderUsage(refs, data, { ...statsLoad, period: usagePeriod, selected: usageHour, hasKey: octopus.hasKey }, priceOpts(), tz);
+  if (data?.missing) loadIfNewDay(now);
+}
+
+function openUsage() {
+  closeMusic();
+  closeStats();
+  ui.openUsage(refs);
+  usageHour = -1;
+  statsLoad = { loading: false, error: '', usageError: '', day: '' };
+  if (octopus.tariff() || octopus.hasKey) loadStats();
+  else renderUsage();
+}
+
+function closeUsage() { ui.closeUsage(refs); }
+
+function setUsagePeriod(id) {
+  usagePeriod = id;
+  usageHour = -1;
+  try { localStorage.setItem(USAGE_PERIOD, id); } catch { /* fine: it just starts on Today */ }
+  renderUsage();
+}
+
+function tapUsageHour(hr) {
+  usageHour = usageHour === hr ? -1 : hr;
+  renderUsage();
 }
 
 /** The first time, the year's prices and usage come from Octopus (a few seconds); after that, very little. */
 async function loadStats() {
   statsLoad = { ...statsLoad, loading: true, error: '', usageError: '', day: dayKey(Date.now(), tz) };
   renderStats();
+  renderUsage();
   try {
     try {
       await ensureDiscovered({ history: true });
@@ -113,10 +158,12 @@ async function loadStats() {
   }
   statsLoad.loading = false;
   renderStats();
+  renderUsage();
 }
 
 function openStats() {
   closeMusic();
+  closeUsage();
   ui.openStats(refs);
   statsLoad = { loading: false, error: '', usageError: '', day: '' };
   if (octopus.tariff() || octopus.hasKey) loadStats();
@@ -363,6 +410,7 @@ let musicPausedByRing = false;
 function ring({ device } = {}) {
   closeMusic();
   closeStats();
+  closeUsage();
   // Music would drown the chime: pause Spotify, and carry on when the doorbell view closes.
   if (spotifyReady() && state.music?.playing && !musicPausedByRing) {
     musicPausedByRing = true;
@@ -606,6 +654,7 @@ function updateNight() {
   const show = nightNow() && Date.now() > nightSnoozeUntil && Date.now() - lastTouch > 90e3 && !live;
   if (show && ui.musicIsOpen(refs)) closeMusic(); // don't leave the bright pop-ups over the night screen
   if (show && ui.statsIsOpen(refs)) closeStats();
+  if (show && ui.usageIsOpen(refs)) closeUsage();
   refs.night.classList.toggle('hidden', !show);
 }
 
@@ -651,6 +700,10 @@ async function boot() {
     musicClose: closeMusic,
     stats: openStats,
     statsClose: closeStats,
+    usage: openUsage,
+    usageClose: closeUsage,
+    usagePeriod: setUsagePeriod,
+    usageTap: tapUsageHour,
     ringClose: closeCamera,
     shopTick: tickShopping,
     shopAdd: addShopping,
@@ -714,6 +767,7 @@ async function boot() {
       if (now - (refs.music.touched || 0) > 120e3) closeMusic();
     }
     if (ui.statsIsOpen(refs) && now - (refs.stats.touched || 0) > 120e3) closeStats();
+    if (ui.usageIsOpen(refs) && now - (refs.usage.touched || 0) > 120e3) closeUsage();
   }, 1000);
   setInterval(() => { for (const s of Object.values(sources)) s.staleCheck(); applyTheme(); renderAll(); updateNight(); }, 30e3);
   let lastW = innerWidth, lastH = innerHeight;

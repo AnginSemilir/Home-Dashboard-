@@ -27,6 +27,11 @@ Only want prices? You don't need the key: type your tariff code into **Tariff co
   - **Prices**: Octopus's public price list. If you changed tariff this year, each part of the year uses the tariff you were on. Periods on Economy 7 (or another tariff without a single price) are left out, and the pop-up says how many days.
   - **The first time** you open it, it fetches this year's prices (about ten requests) and readings (one request, plus one for the Home Mini's last few days if the meter's aren't in), which takes a few seconds. Each day's totals are kept on the tablet. After that it only asks Octopus for readings that hadn't arrived yet (at most every half hour), and for the days in between if it hasn't been opened for a few days.
 
+- **When you use electricity**: the small clock button next to it. A bar for each hour of the day showing how much you use then, for **today**, **this week**, **this month** or **this year** (the buttons along the top; it remembers your choice).
+  - Today shows the kWh used in each hour so far. The longer periods show the **average kWh a day** in each hour, so they compare with each other.
+  - Each bar is coloured by what you paid on average in that hour (green cheap, amber normal, red peak, blue plunge), so you can see whether your busiest hours fall in the expensive ones. Tap a bar for its kWh, its share of your use and the price you paid then.
+  - It uses the same readings and prices as the average prices (loaded once for both), so it needs your API key too.
+
 Colours: green below 15p, amber, red from 25p, **blue at or below 0p** (plunge pricing: you're paid to use power). Change the thresholds in ⚙ → Panel.
 
 > Octopus's Agile prices change every **half hour**. There isn't a 15-minute Agile price.
