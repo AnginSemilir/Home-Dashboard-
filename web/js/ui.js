@@ -381,7 +381,9 @@ export function renderStats(r, rows, st = {}, opts = {}, tz = DEFAULT_TZ) {
   S.rows.replaceChildren(
     h('div', { class: 'st-head' }, h('span'), h('span', {}, 'You paid'), h('span', {}, 'Agile price')),
     ...rows.map((row) => {
-      const since = pending(row) ? 'loading…' : `${statSince(row, tz)}${row.kwh != null && row.paid != null ? ` · ${fmtKwh(row.kwh)} kWh` : ''}`;
+      // Why there's no "You paid" figure, when there are prices.
+      const why = row.paid == null && st.usage && row.avg != null ? (row.usageShort ? ' · readings not in yet' : ' · too few readings') : '';
+      const since = pending(row) ? 'loading…' : `${statSince(row, tz)}${row.kwh != null && row.paid != null ? ` · ${fmtKwh(row.kwh)} kWh` : why}`;
       return h('div', { class: 'st-row', 'data-id': row.id },
         h('div', { class: 'st-what' }, h('div', { class: 'st-label' }, STAT_LABEL[row.id] || row.id), h('div', { class: 'st-since' }, since)),
         row.paid != null ? h('div', { class: 'st-paid' }, bandDot(row.paid, opts), ...pence(row.paid)) : h('div', { class: 'st-paid none' }, pending(row) ? '…' : '–'),

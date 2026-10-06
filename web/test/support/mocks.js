@@ -34,9 +34,9 @@ export function rateResults(from, to) {
 /** kWh used in the half hour starting at `t` (the Home Mini and the smart meter agree). */
 export const usedKwh = (t) => (180 + (Math.floor(t / 1800e3) % 5) * 60) / 1000;
 
-export function telemetry(now, dayStart, stopsAt = Infinity) {
+export function telemetry(now, dayStart, stopsAt = Infinity, end = Infinity) {
   const rows = [];
-  for (let t = dayStart; t <= Math.min(now, stopsAt); t += 1800e3) {
+  for (let t = dayStart; t <= Math.min(now, stopsAt) && t < end; t += 1800e3) {
     rows.push({ readAt: new Date(t).toISOString(), consumption: 1000, consumptionDelta: usedKwh(t) * 1000, demand: 520 + ((t / 1800e3) % 7) * 40, export: 0 });
   }
   return rows;
@@ -146,7 +146,11 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
         const token = `h.${Buffer.from(JSON.stringify({ exp })).toString('base64url')}.s`;
         return json(route, { data: { obtainKrakenToken: { token, refreshToken: 'krt', refreshExpiresIn: exp + 86400 } } });
       }
-      if (q.includes('smartMeterTelemetry')) return json(route, { data: { smartMeterTelemetry: telemetry(now, dayStart, homeMiniStopsAt) } });
+      if (q.includes('smartMeterTelemetry')) {
+        // Any range, like the real service (the panel asks for today; the averages for past days).
+        const from = Date.parse(/start: "([^"]+)"/.exec(q)?.[1]), to = Date.parse(/end: "([^"]+)"/.exec(q)?.[1]);
+        return json(route, { data: { smartMeterTelemetry: telemetry(now, Number.isFinite(from) ? from : dayStart, homeMiniStopsAt, Number.isFinite(to) ? to : Infinity) } });
+      }
       if (q.includes('electricityAgreements')) {
         return json(route, { data: { account: { electricityAgreements: [{ meterPoint: { mpan: '1900026354329', direction: 'IMPORT', meters: [{ serialNumber: '22L4132637', smartImportElectricityMeter: { deviceId: '00-11-22-33-44-55-66-77' } }], agreements: [{ validFrom: '2025-01-01T00:00:00+00:00', validTo: null, tariff: { productCode: 'AGILE-24-10-01', tariffCode: TARIFF } }] } }] } } });
       }

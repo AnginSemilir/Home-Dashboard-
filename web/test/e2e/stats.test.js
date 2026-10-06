@@ -101,14 +101,30 @@ test('what you paid and the plain average, last 30 minutes to this year, right t
   await ctx.close();
 });
 
-test('readings that are late or fail: dashes and a reason, never a wrong figure; prices still show', async () => {
-  // Yesterday's readings stop at 6am.
-  let { ctx, page } = await openPanel(env, { readingsUntil: Date.parse('2026-09-24T06:00:00+01:00') });
+test('readings that are late or fail: the Home Mini stands in; else dashes and a reason, never a wrong figure', async () => {
+  // The meter's readings stop at 6am on Wednesday: the Home Mini's history fills Wednesday and Thursday.
+  let { ctx, page, calls } = await openPanel(env, { readingsUntil: Date.parse('2026-09-23T06:00:00+01:00') });
   await page.locator('#price .big .num').waitFor();
   await page.locator('#price .stats-btn').click();
   await loaded(page);
   let got = Object.fromEntries((await rows(page)).map((r) => [r.id, r]));
-  assert.equal(got.week.paid, '–', 'four days, one mostly missing: no figure');
+  for (const id of ['week', 'month', 'year']) {
+    assert.ok(Math.abs(pence(got[id].paid) - expected(STARTS[id]).paid) <= 0.051, `${id}: ${got[id].paid} vs ${expected(STARTS[id]).paid.toFixed(3)}`);
+  }
+  // (Wednesday 00:00 to Friday 00:00, UK time.)
+  const history = calls.filter((c) => c.service === 'octopus' && (c.body || '').includes('smartMeterTelemetry') && c.body.includes('2026-09-22T23:00:00.000Z') && c.body.includes('2026-09-24T23:00:00.000Z'));
+  assert.equal(history.length, 1, 'one request for the Home Mini\'s Wednesday and Thursday');
+  assert.equal(await page.locator('#stats .st-msg').textContent(), '');
+  await ctx.close();
+
+  // The Home Mini stopped on Tuesday too: no stand-in, so the week waits for the meter.
+  ({ ctx, page } = await openPanel(env, { readingsUntil: Date.parse('2026-09-23T06:00:00+01:00'), homeMiniStopsAt: Date.parse('2026-09-22T12:00:00+01:00') }));
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#price .stats-btn').click();
+  await loaded(page);
+  got = Object.fromEntries((await rows(page)).map((r) => [r.id, r]));
+  assert.equal(got.week.paid, '–', 'two of the four days missing: no figure');
+  assert.match(got.week.since, /readings not in yet$/);
   assert.match(got.week.avg, /^\d+\.\dp$/);
   assert.match(got.year.paid, /^\d+\.\dp$/, 'the year is nearly all there');
   assert.match(await page.locator('#stats .st-msg').textContent(), /newest meter readings aren't in yet/);

@@ -219,7 +219,10 @@ function updateCost() {
 
 async function refreshHomeMini() {
   await ensureDiscovered();
+  const prev = state.tele;
   const tele = await octopus.telemetryToday(Date.now(), tz);
+  // A day just ended: keep its half hours for the average prices until the meter's own arrive.
+  if (prev?.slots?.length) priceStats.keepReadings(prev.slots, Date.now());
   state.tele = tele;
   if (tele.demandAt) state.lastDemandAt = Math.max(state.lastDemandAt || 0, tele.demandAt);
   if (Number.isFinite(tele.demandW) && Date.now() - tele.demandAt < HOME_MINI_STALE) {

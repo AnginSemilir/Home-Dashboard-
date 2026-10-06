@@ -22,9 +22,10 @@ Only want prices? You don't need the key: type your tariff code into **Tariff co
   - Neither includes the standing charge; the pop-up shows today's, so compare that with the fixed tariff's too.
 
   Where the figures come from:
-  - **Usage**: your smart meter's half-hourly readings from Octopus (this needs your API key), and the Home Mini for today. Octopus usually has a day's readings the next day. Until then, "You paid" leaves those half hours out and says so. A period that's mostly waiting on readings (this week, on a Tuesday morning) shows a dash rather than a figure built from too little.
+  - **Usage**: your smart meter's half-hourly readings from Octopus (this needs your API key), and the Home Mini for today. Octopus usually has a day's readings the next day, sometimes later. Until then, the Home Mini's readings stand in: the panel keeps each day's as it ends, and otherwise asks Octopus for the Home Mini's history (one request). The meter's own readings replace them when they arrive.
+  - If neither has a day's readings, "You paid" leaves those half hours out and says so. A period that's mostly missing them shows a dash ("readings not in yet") rather than a figure built from too little.
   - **Prices**: Octopus's public price list. If you changed tariff this year, each part of the year uses the tariff you were on. Periods on Economy 7 (or another tariff without a single price) are left out, and the pop-up says how many days.
-  - **The first time** you open it, it fetches this year's prices (about ten requests) and readings (one request), which takes a few seconds. Each day's totals are kept on the tablet. After that it only asks Octopus for readings that hadn't arrived yet (at most every half hour), and for the days in between if it hasn't been opened for a few days.
+  - **The first time** you open it, it fetches this year's prices (about ten requests) and readings (one request, plus one for the Home Mini's last few days if the meter's aren't in), which takes a few seconds. Each day's totals are kept on the tablet. After that it only asks Octopus for readings that hadn't arrived yet (at most every half hour), and for the days in between if it hasn't been opened for a few days.
 
 Colours: green below 15p, amber, red from 25p, **blue at or below 0p** (plunge pricing: you're paid to use power). Change the thresholds in ⚙ → Panel.
 

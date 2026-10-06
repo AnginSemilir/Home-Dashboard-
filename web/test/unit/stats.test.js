@@ -289,3 +289,92 @@ test('PriceStats: without an API key, the plain averages still work', async () =
   assert.equal(rows.today.paid, null);
   assert.equal(rows.year.usageShort, false);
 });
+
+test('PriceStats: until the meter\'s readings arrive, the Home Mini\'s stand in (kept at midnight, or its history)', async () => {
+  const lag = at('2026-10-05T00:00:00+01:00'); // nothing from yesterday (Monday) yet
+  const yesterday = (now) => tele(periodStarts(now, TZ).today - 1).slots; // Monday's, as the panel held them at midnight
+  // (a) The panel kept Monday's Home Mini readings when the day ended.
+  let { octopus, stats } = setup({ readingsUntil: lag });
+  stats.keepReadings([...yesterday(NOW), ...tele(NOW).slots], NOW); // today's are ignored
+  await stats.ensure(NOW, live(NOW));
+  let rows = byId(stats.rows(NOW, live(NOW), tele(NOW)));
+  near(rows.week.paid, brute(periodStarts(NOW, TZ).week, NOW).paid, 'week, with Monday from the Home Mini');
+  assert.equal(rows.week.usageShort, false);
+  // Still asks for the meter's own readings later (they're what Octopus bills).
+  octopus.readingsUntil = Infinity;
+  octopus.calls.length = 0;
+  await stats.ensure(NOW + 3600e3, live(NOW));
+  assert.deepEqual(octopus.calls.map((c) => c.what), ['usage']);
+  octopus.calls.length = 0;
+  await stats.ensure(NOW + 3 * 3600e3, live(NOW));
+  assert.deepEqual(octopus.calls, [], 'and then stops');
+
+  // (b) Nothing kept (the panel was off at midnight): one request for the Home Mini's history.
+  ({ octopus, stats } = setup({ readingsUntil: lag }));
+  octopus.hasHomeMini = true;
+  octopus.mini = [];
+  octopus.homeMiniReadings = async (from, to) => {
+    octopus.mini.push({ from, to });
+    const out = [];
+    for (let t = from; t < to; t += HALF) out.push({ start: t, end: t + HALF, kwh: used(t) });
+    return out;
+  };
+  await stats.ensure(NOW, live(NOW));
+  assert.deepEqual(octopus.mini, [{ from: at('2026-10-05T00:00:00+01:00'), to: at('2026-10-06T00:00:00+01:00') }], 'only the day the meter is missing');
+  rows = byId(stats.rows(NOW, live(NOW), tele(NOW)));
+  near(rows.week.paid, brute(periodStarts(NOW, TZ).week, NOW).paid, 'week, from the Home Mini');
+  near(rows.month.paid, brute(periodStarts(NOW, TZ).month, NOW).paid, 'month');
+  await stats.ensure(NOW + 3600e3, live(NOW));
+  assert.equal(octopus.mini.length, 1, 'not asked again once kept');
+
+  // (c) The Home Mini's history fails: the days wait for the meter, with a note.
+  ({ octopus, stats } = setup({ readingsUntil: lag }));
+  octopus.hasHomeMini = true;
+  octopus.homeMiniReadings = async () => { throw new HttpError(429, 'Octopus rate limit reached'); };
+  await stats.ensure(NOW, live(NOW));
+  rows = byId(stats.rows(NOW, live(NOW), tele(NOW)));
+  assert.equal(rows.week.paid, null);
+  assert.equal(rows.week.usageShort, true);
+});
+
+test('PriceStats: "Last hour" just after midnight uses the half hours kept from yesterday', async () => {
+  const now = at('2026-10-06T00:10:00+01:00');
+  const { stats } = setup();
+  const todayOnly = tele(now); // the Home Mini's list: today's 00:00 half hour so far
+  let rows = byId(stats.rows(now, live(now), todayOnly));
+  assert.equal(rows.hour.paid, null, 'only 10 minutes of the hour: no figure');
+  assert.equal(rows.hour.usageShort, true);
+  near(rows.min30.avg, brute(now - 30 * 60e3, now).avg, 'the prices are all there');
+  stats.keepReadings(tele(periodStarts(now, TZ).today - 1).slots, now);
+  rows = byId(stats.rows(now, live(now), todayOnly));
+  near(rows.hour.paid, brute(now - 3600e3, now).paid, 'last hour');
+  near(rows.min30.paid, brute(now - 1800e3, now).paid, 'last 30 minutes');
+  near(rows.today.paid, brute(periodStarts(now, TZ).today, now).paid, 'today is only today');
+});
+
+test('PriceStats: a passing error on a price request is tried again, not taken as "no prices"', async () => {
+  const { octopus, stats } = setup();
+  let once = true;
+  const real = octopus.unitRates;
+  octopus.unitRates = async (...a) => { if (once) { once = false; throw new HttpError(403, '403 Forbidden'); } return real(...a); };
+  await assert.rejects(stats.ensure(NOW, live(NOW)), /403/);
+  await stats.ensure(NOW + 60e3, live(NOW));
+  const year = byId(stats.rows(NOW, live(NOW), tele(NOW))).year;
+  near(year.avg, brute(periodStarts(NOW, TZ).year, NOW).avg, 'the whole year');
+  assert.equal(year.firstAt, null);
+});
+
+test('PriceStats: no "readings not in yet" note for gaps long past, or without a Home Mini', async () => {
+  // Readings missing for a week in August: given up on, and the note doesn't stay all year.
+  const { octopus, stats } = setup();
+  const real = octopus.consumption;
+  octopus.consumption = async (from, to) => (await real(from, to)).filter((r) => r.start < at('2026-08-01T00:00:00+01:00') || r.start >= at('2026-08-08T00:00:00+01:00'));
+  await stats.ensure(NOW, live(NOW));
+  let rows = byId(stats.rows(NOW, live(NOW), tele(NOW)));
+  assert.equal(rows.year.usageShort, false);
+  assert.ok(rows.year.paid > 0);
+  // No Home Mini: today has no usage; the past days still give a figure, without the note.
+  rows = byId(stats.rows(NOW, live(NOW), null));
+  assert.equal(rows.month.usageShort, false);
+  assert.equal(rows.today.paid, null);
+});

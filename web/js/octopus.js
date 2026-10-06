@@ -125,6 +125,9 @@ export class Octopus {
 
   get hasKey() { return !!(this.s.octopus.apiKey && this.s.octopus.account); }
 
+  /** Is there a Home Mini to read (the key, and its device found on the account)? */
+  get hasHomeMini() { return !!(this.hasKey && this.s.octopus.discovered?.deviceId); }
+
   /** Can it read the smart meter's half-hourly usage (the key, and the meter found on the account)? */
   get canReadUsage() {
     const d = this.s.octopus.discovered;
@@ -260,5 +263,19 @@ export class Octopus {
     const data = await this.graphql(`query { smartMeterTelemetry(deviceId: ${q(deviceId)} grouping: HALF_HOURLY start: ${q(start)} end: ${q(end)}) {
       readAt consumption consumptionDelta demand export } }`, { jwtPrefix: true });
     return parseTelemetry(data?.smartMeterTelemetry);
+  }
+
+  /** The Home Mini's half-hourly readings between two instants: [{ start, end, kwh }], oldest first; half hours with no figure are left out. */
+  async homeMiniReadings(from, to) {
+    const deviceId = this.s.octopus.discovered?.deviceId;
+    if (!deviceId) throw new Error('No Home Mini found on this account');
+    const data = await this.graphql(`query { smartMeterTelemetry(deviceId: ${q(deviceId)} grouping: HALF_HOURLY start: ${q(new Date(from).toISOString())} end: ${q(new Date(to).toISOString())}) {
+      readAt consumptionDelta } }`, { jwtPrefix: true });
+    const out = [];
+    for (const r of data?.smartMeterTelemetry || []) {
+      const start = Date.parse(r.readAt), wh = r.consumptionDelta == null ? NaN : Number(r.consumptionDelta);
+      if (Number.isFinite(start) && Number.isFinite(wh) && start >= from && start < to) out.push({ start, end: start + 1800e3, kwh: wh / 1000 });
+    }
+    return out.sort((a, b) => a.start - b.start);
   }
 }
