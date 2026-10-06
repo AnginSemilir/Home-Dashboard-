@@ -407,6 +407,7 @@ export function renderStats(r, rows, st = {}, opts = {}, tz = DEFAULT_TZ) {
 
 /** When you use electricity: usage by hour of the day, from the clock button on the price card. */
 export const USAGE_PERIODS = [['today', 'Today'], ['week', 'This week'], ['month', 'This month'], ['year', 'This year']];
+export const USAGE_VIEWS = [['chart', 'Chart'], ['table', 'Table']];
 
 function buildUsage(on) {
   const u = {};
@@ -418,10 +419,22 @@ function buildUsage(on) {
   u.seg = h('div', { class: 'uc-seg', role: 'group', 'aria-label': 'Period' }, ...u.buttons);
   u.sub = h('div', { class: 'st-sub' });
   u.sum = h('div', { class: 'uc-sum' });
+  // Chart or table, at the end of the summary line.
+  u.viewButtons = USAGE_VIEWS.map(([id, label]) => {
+    const b = h('button', { 'data-view': id, 'aria-pressed': 'false' }, label);
+    b.addEventListener('click', () => on.usageView?.(id));
+    return b;
+  });
+  u.sumRow = h('div', { class: 'uc-sumrow' }, u.sum, h('div', { class: 'uc-view', role: 'group', 'aria-label': 'Show as' }, ...u.viewButtons));
   u.box = h('div', { class: 'uc-chart' });
   u.box.addEventListener('click', (e) => {
     const hit = e.target.closest?.('.uc-hit');
     if (hit) on.usageTap?.(Number(hit.dataset.h));
+  });
+  u.table = h('div', { class: 'uc-table hidden' });
+  u.table.addEventListener('click', (e) => {
+    const row = e.target.closest?.('tr[data-h]');
+    if (row) on.usageTap?.(Number(row.dataset.h));
   });
   u.info = h('div', { class: 'uc-info', role: 'status' });
   u.legend = h('div', { class: 'legend uc-legend' });
@@ -429,7 +442,7 @@ function buildUsage(on) {
   const close = h('button', { class: 'st-close', 'aria-label': 'Close' }, icon('close'));
   close.addEventListener('click', () => on.usageClose?.());
   u.card = h('div', { class: 'st-card uc-card' }, close,
-    h('h2', {}, 'When you use electricity'), u.sub, u.seg, u.sum, u.box, u.info, u.legend, u.msg);
+    h('h2', {}, 'When you use electricity'), u.sub, u.seg, u.sumRow, u.box, u.table, u.info, u.legend, u.msg);
   u.sheet = h('div', { class: 'stats-sheet hidden', id: 'usage', role: 'dialog', 'aria-label': 'When you use electricity' }, u.card);
   u.sheet.addEventListener('pointerdown', (e) => { u.downOutside = e.target === u.sheet; });
   u.sheet.addEventListener('click', (e) => { if (e.target === u.sheet && u.downOutside) on.usageClose?.(); u.downOutside = false; });
@@ -449,20 +462,40 @@ export function closeUsage(r) { r.usage.sheet.classList.add('hidden'); }
 const kwhText = (k) => (k < 1 ? k.toFixed(2) : k < 10 ? k.toFixed(1) : Math.round(k).toLocaleString('en-GB'));
 const hourSpan = (hr) => `${String(hr).padStart(2, '0')}:00–${String((hr + 1) % 24).padStart(2, '0')}:00`;
 
+/** The table view: the 24 hours in two halves side by side (so it fits without scrolling). */
+function usageTable({ values, paid, share, peak, sel, today, opts }) {
+  const half = (from) => h('table', {},
+    h('thead', {}, h('tr', {}, h('th', {}, 'Hour'), h('th', {}, today ? 'kWh' : 'kWh a day'), h('th', {}, 'Share'), h('th', {}, 'Paid'))),
+    h('tbody', {}, ...Array.from({ length: 12 }, (_, i) => {
+      const hr = from + i;
+      const v = values[hr];
+      return h('tr', { 'data-h': hr, class: [hr === sel ? 'on' : '', hr === peak ? 'peak' : ''].filter(Boolean).join(' ') || null },
+        h('th', { scope: 'row' }, `${String(hr).padStart(2, '0')}:00`),
+        h('td', {}, Number.isFinite(v) ? kwhText(v) : '–'),
+        h('td', {}, Number.isFinite(v) ? `${share[hr]}%` : '–'),
+        h('td', {}, ...(paid[hr] != null ? [bandDot(paid[hr], opts), `${round1(paid[hr]).toFixed(1)}p`] : ['–'])));
+    })));
+  return [half(0), half(12)];
+}
+
 /**
- * The usage chart. `data` from PriceStats.usageByHour (null: no tariff yet). `st`: { period,
- * selected (hour, or -1), loading, error, usageError, usage, hasKey }.
+ * The usage chart (or table). `data` from PriceStats.usageByHour (null: no tariff yet). `st`:
+ * { period, view ('chart' | 'table'), selected (hour, or -1), loading, error, usageError, hasKey }.
  */
 export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
   const U = r.usage;
   const today = st.period === 'today';
+  const asTable = st.view === 'table';
   for (const b of U.buttons) b.setAttribute('aria-pressed', String(b.dataset.period === st.period));
+  for (const b of U.viewButtons) b.setAttribute('aria-pressed', String(b.dataset.view === (asTable ? 'table' : 'chart')));
   U.sub.textContent = today ? 'kWh used in each hour today' : 'Average kWh a day in each hour';
   const say = (...lines) => U.msg.replaceChildren(...lines.filter(Boolean).map(([text, bad]) => h('div', { class: bad ? 'bad' : '' }, text)));
   const blank = (text) => {
     U.sum.textContent = '';
     U.box.replaceChildren(h('div', { class: 'st-empty' }, text));
     U.box.classList.add('empty');
+    U.box.classList.remove('hidden');
+    U.table.classList.add('hidden');
     U.info.textContent = '';
     U.legend.replaceChildren();
   };
@@ -489,16 +522,22 @@ export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
   U.sum.replaceChildren(...(data.total > 0
     ? [h('b', {}, `${kwhText(data.total)} kWh`), today ? ' so far' : ` · ${kwhText(perDay)} kWh a day`, ' · most at ', h('b', {}, hourSpan(peak))]
     : ['No usage yet']));
-  // Measure after the sheet is on screen (the chart fills its box).
-  const box = U.box.getBoundingClientRect();
-  const fs = parseFloat(getComputedStyle(U.box).fontSize) || 12;
-  U.box.classList.toggle('has-sel', sel >= 0);
-  U.box.replaceChildren(svg(renderHours({ values, bands, width: box.width || 520, height: box.height || 220, fs, selected: sel })));
+  const share = data.kwh.map((k) => (data.total > 0 ? Math.round((k / data.total) * 100) : 0));
+  U.box.classList.toggle('hidden', asTable);
+  U.table.classList.toggle('hidden', !asTable);
+  if (asTable) {
+    U.table.replaceChildren(...usageTable({ values, paid, share, peak, sel, today, opts }));
+  } else {
+    // Measure after the sheet is on screen (the chart fills its box).
+    const box = U.box.getBoundingClientRect();
+    const fs = parseFloat(getComputedStyle(U.box).fontSize) || 12;
+    U.box.classList.toggle('has-sel', sel >= 0);
+    U.box.replaceChildren(svg(renderHours({ values, bands, width: box.width || 520, height: box.height || 220, fs, selected: sel })));
+  }
   if (sel >= 0) {
-    const share = data.total > 0 ? Math.round((data.kwh[sel] / data.total) * 100) : 0;
-    U.info.replaceChildren(h('b', {}, hourSpan(sel)), ` · ${kwhText(values[sel])} kWh${today ? '' : ' a day'} · ${share}% of your use`,
+    U.info.replaceChildren(h('b', {}, hourSpan(sel)), ` · ${kwhText(values[sel])} kWh${today ? '' : ' a day'} · ${share[sel]}% of your use`,
       ...(paid[sel] != null ? [' · paid ', bandDot(paid[sel], opts), h('b', {}, `${round1(paid[sel]).toFixed(1)}p`), ' a kWh'] : []));
-  } else U.info.textContent = 'Tap a bar for that hour. Colour: what you paid then.';
+  } else U.info.textContent = asTable ? 'The busiest hour is in bold. Dot: what you paid then.' : 'Tap a bar for that hour. Colour: what you paid then.';
   const shown = new Set(bands.filter((b, hr) => Number.isFinite(values[hr]) && b !== 'none'));
   const item = (b, text) => h('span', { class: `lg lg-${b}` }, h('span', { class: `sw band-${b}` }), text);
   U.legend.replaceChildren(...[

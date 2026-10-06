@@ -92,3 +92,41 @@ test('without the API key it says what to add', async () => {
   await page.locator('#usage .st-empty', { hasText: 'Add your Octopus account number and API key in Settings to see your usage.' }).waitFor();
   await ctx.close();
 });
+
+test('the table view: every hour in two halves, the busiest in bold, rows tap like bars; remembered', async () => {
+  const { ctx, page, problems } = await openPanel(env, { viewport: { width: 960, height: 600 } });
+  await open(page);
+  assert.equal(await page.locator('#usage .uc-view [aria-pressed="true"]').textContent(), 'Chart');
+  await page.locator('#usage .uc-view button[data-view="table"]').click();
+  assert.equal(await page.locator('#usage .uc-view [aria-pressed="true"]').textContent(), 'Table');
+  assert.equal(await page.locator('#usage .uc-chart').isVisible(), false);
+  assert.equal(await page.locator('#usage .uc-table table').count(), 2);
+  assert.equal(await page.locator('#usage .uc-table tbody tr').count(), 24);
+  assert.deepEqual(await page.$$eval('#usage .uc-table table:first-child thead th', (t) => t.map((x) => x.textContent)), ['Hour', 'kWh', 'Share', 'Paid']);
+  // Today, 03:00: the same figures as the chart's tap.
+  const t3 = Date.parse('2026-09-25T03:00:00+01:00');
+  const k3 = usedKwh(t3) + usedKwh(t3 + HALF);
+  const p3 = (usedKwh(t3) * agilePrice(t3) + usedKwh(t3 + HALF) * agilePrice(t3 + HALF)) / k3;
+  const row3 = await page.$$eval('#usage .uc-table tr[data-h="3"] > *', (c) => c.map((x) => x.textContent));
+  assert.deepEqual(row3, ['03:00', kwhText(k3), `${Math.round((k3 / total(TODAY)) * 100)}%`, `${(Math.round(p3 * 10) / 10).toFixed(1)}p`]);
+  assert.ok(await page.locator('#usage .uc-table tr[data-h="3"] .band-dot').count(), 'the price band dot');
+  assert.deepEqual(await page.$$eval('#usage .uc-table tr[data-h="15"] td', (c) => c.map((x) => x.textContent)), ['–', '–', '–'], 'later today: nothing yet');
+  assert.equal(await page.locator('#usage .uc-table tr.peak').count(), 1);
+  // A tap on a row picks that hour.
+  await page.locator('#usage .uc-table tr[data-h="3"]').click();
+  assert.equal(await page.locator('#usage .uc-table tr.on').getAttribute('data-h'), '3');
+  assert.match(await page.locator('#usage .uc-info').textContent(), /^03:00–04:00 · /);
+  // Another period keeps the table.
+  await page.locator('#usage .uc-seg button[data-period="month"]').click();
+  assert.equal(await page.locator('#usage .uc-table thead th').nth(1).textContent(), 'kWh a day');
+  assert.equal(await page.locator('#usage .uc-table tbody td:has-text("–")').count(), 0, 'every hour has a figure this month');
+  // It fits, and it's remembered.
+  assert.equal(await page.evaluate(() => { const c = document.querySelector('#usage .st-card'); return c.scrollHeight <= c.clientHeight + 1; }), true, 'no scrolling at 960×600');
+  await page.reload();
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#price .usage-btn').click();
+  await page.locator('#usage .uc-table tbody tr').first().waitFor();
+  assert.equal(await page.locator('#usage .uc-view [aria-pressed="true"]').textContent(), 'Table');
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});

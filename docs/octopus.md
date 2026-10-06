@@ -30,6 +30,7 @@ Only want prices? You don't need the key: type your tariff code into **Tariff co
 - **When you use electricity**: the small clock button next to it. A bar for each hour of the day showing how much you use then, for **today**, **this week**, **this month** or **this year** (the buttons along the top; it remembers your choice).
   - Today shows the kWh used in each hour so far. The longer periods show the **average kWh a day** in each hour, so they compare with each other.
   - Each bar is coloured by what you paid on average in that hour (green cheap, amber normal, red peak, blue plunge), so you can see whether your busiest hours fall in the expensive ones. Tap a bar for its kWh, its share of your use and the price you paid then.
+  - **Chart / Table** at the end of the summary line switches to a table of all 24 hours (kWh, share and price paid, the busiest hour in bold). It remembers which you used last.
   - It uses the same readings and prices as the average prices (loaded once for both), so it needs your API key too.
 
 Colours: green below 15p, amber, red from 25p, **blue at or below 0p** (plunge pricing: you're paid to use power). Change the thresholds in ⚙ → Panel.

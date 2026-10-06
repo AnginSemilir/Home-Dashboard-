@@ -105,12 +105,14 @@ let usagePeriod = (() => {
   try { const v = localStorage.getItem(USAGE_PERIOD); return ui.USAGE_PERIODS.some(([id]) => id === v) ? v : 'today'; } catch { return 'today'; }
 })();
 let usageHour = -1; // the bar tapped
+const USAGE_VIEW = 'wallpanel.usage.view'; // chart or table, on this device
+let usageView = (() => { try { return localStorage.getItem(USAGE_VIEW) === 'table' ? 'table' : 'chart'; } catch { return 'chart'; } })();
 
 function renderUsage() {
   if (!refs || !ui.usageIsOpen(refs)) return;
   const now = Date.now();
   const data = octopus.tariff() ? priceStats.usageByHour(now, livePrices(), state.tele, usagePeriod) : null;
-  ui.renderUsage(refs, data, { ...statsLoad, period: usagePeriod, selected: usageHour, hasKey: octopus.hasKey }, priceOpts(), tz);
+  ui.renderUsage(refs, data, { ...statsLoad, period: usagePeriod, view: usageView, selected: usageHour, hasKey: octopus.hasKey }, priceOpts(), tz);
   if (data?.missing) loadIfNewDay(now);
 }
 
@@ -130,6 +132,12 @@ function setUsagePeriod(id) {
   usagePeriod = id;
   usageHour = -1;
   try { localStorage.setItem(USAGE_PERIOD, id); } catch { /* fine: it just starts on Today */ }
+  renderUsage();
+}
+
+function setUsageView(view) {
+  usageView = view;
+  try { localStorage.setItem(USAGE_VIEW, view); } catch { /* fine: it just starts as a chart */ }
   renderUsage();
 }
 
@@ -704,6 +712,7 @@ async function boot() {
     usageClose: closeUsage,
     usagePeriod: setUsagePeriod,
     usageTap: tapUsageHour,
+    usageView: setUsageView,
     ringClose: closeCamera,
     shopTick: tickShopping,
     shopAdd: addShopping,
