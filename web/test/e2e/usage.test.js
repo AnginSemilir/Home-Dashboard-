@@ -23,6 +23,7 @@ const bars = (page) => page.locator('#usage .uc-chart svg .ch-bar').count();
 /** Pick a period and wait for its bars (the year may still be loading from Octopus). */
 const period = async (page, id, n = 24) => {
   await page.locator(`#usage .uc-seg button[data-period="${id}"]`).click();
+  await page.locator('#usage:not([data-loading="1"])').waitFor();
   await page.waitForFunction((want) => document.querySelectorAll('#usage .uc-chart svg .ch-bar').length === want, n);
 };
 const open = async (page) => {
@@ -30,6 +31,8 @@ const open = async (page) => {
   await page.locator('#price .usage-btn').click();
   await page.locator('#usage .uc-chart svg .ch-bar').first().waitFor();
 };
+/** Wait until the year has finished loading (the chart is redrawn when it does). */
+const settled = (page) => page.locator('#usage:not([data-loading="1"])').waitFor();
 
 test('today by the hour; tap a bar for its numbers; switch to the year; the choice is remembered', async () => {
   const { ctx, page, calls, problems } = await openPanel(env);
@@ -42,6 +45,7 @@ test('today by the hour; tap a bar for its numbers; switch to the year; the choi
   assert.match(await page.locator('#usage .uc-sum').textContent(), new RegExp(`^${kwhText(total(TODAY)).replace('.', '\\.')} kWh so far · most at \\d\\d:00–\\d\\d:00$`));
 
   // 03:00–04:00: two half hours.
+  await settled(page);
   await page.locator('#usage .uc-hit[data-h="3"]').click();
   const t3 = Date.parse('2026-09-25T03:00:00+01:00');
   const k3 = usedKwh(t3) + usedKwh(t3 + HALF);
@@ -100,6 +104,7 @@ test('the table view: every hour in two halves, the busiest in bold, rows tap li
   const { ctx, page, problems } = await openPanel(env, { viewport: { width: 960, height: 600 } });
   await open(page);
   assert.equal(await page.locator('#usage .uc-view [aria-pressed="true"]').textContent(), 'Chart');
+  await settled(page);
   await page.locator('#usage .uc-view button[data-view="table"]').click();
   assert.equal(await page.locator('#usage .uc-view [aria-pressed="true"]').textContent(), 'Table');
   assert.equal(await page.locator('#usage .uc-chart').isVisible(), false);
@@ -139,11 +144,12 @@ test('slide a finger along the bars to pick an hour; tap the picked one again to
   const { ctx, page } = await openPanel(env, { touch: true });
   await open(page);
   await period(page, 'month');
+  await settled(page);
   const box = await page.locator('#usage .uc-chart').boundingBox();
-  const at = async (hr) => {
-    const r = await page.locator(`#usage .uc-hit[data-h="${hr}"]`).boundingBox();
+  const at = (hr) => page.evaluate((h) => {
+    const r = document.querySelector(`#usage .uc-hit[data-h="${h}"]`).getBoundingClientRect();
     return [r.x + r.width / 2, r.y + r.height / 2];
-  };
+  }, hr);
   const [x3, y] = await at(3), [x9] = await at(9);
   await page.mouse.move(x3, y);
   await page.mouse.down();

@@ -505,6 +505,7 @@ function usageTable({ values, paid, share, peak, sel, today, opts }) {
  */
 export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
   const U = r.usage;
+  U.sheet.dataset.loading = st.loading ? '1' : ''; // (also lets the tests wait for the year)
   const asTable = st.view === 'table';
   // Today, or the first day of a week, month or year (nothing to average yet): kWh as used.
   const asUsed = st.period === 'today' || !!data?.partial;
@@ -528,8 +529,10 @@ export function renderUsage(r, data, st = {}, opts = {}, tz = DEFAULT_TZ) {
     say(st.error && [`Couldn't look up your tariff: ${st.error}`, true]);
     return;
   }
-  if (data.missing && !data.held) { // nothing loaded yet: the first time
-    blank(st.loading ? 'Getting your usage from Octopus (only the first time)…' : '–');
+  // Days still to load: wait unless nearly all the period is here already (the newest day, on
+  // the morning after), so a part-loaded period never passes for the whole of it.
+  if (data.missing && data.missing >= Math.max(1, 0.1 * (data.missing + data.held))) {
+    blank(!st.loading ? '–' : data.held ? 'Getting the newest days from Octopus…' : 'Getting your usage from Octopus (only the first time)…');
     say(st.error && [`Couldn't get the older prices from Octopus: ${st.error}`, true], usageFailed);
     return;
   }
