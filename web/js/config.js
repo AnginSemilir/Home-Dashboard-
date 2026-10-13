@@ -14,6 +14,19 @@ export const DEFAULTS = Object.freeze({
     discovered: null,   // { tariff, product, mpan, serial, deviceId, at }
     proxy: '',          // only if the browser can't reach Octopus directly: https://….workers.dev (docs/octopus.md)
   },
+  // Where electricity usage comes from: 'octopus' (Agile prices and the Octopus Home Mini) or
+  // 'bright' (Hildebrand's Bright app: any supplier, with a fixed price per kWh).
+  energy: {
+    source: 'octopus',
+    unitRate: 0,        // p/kWh including VAT (fixed tariff, for "today so far" in pounds)
+    standing: 0,        // p/day including VAT
+  },
+  bright: {
+    username: '',       // the Bright app's email
+    password: '',
+    proxy: '',          // only if this browser can't reach Bright directly: https://….workers.dev (docs/bright.md)
+    discovered: null,   // { ve, consumption, cost, live, at }
+  },
   google: {
     clientId: '',
     clientSecret: '',

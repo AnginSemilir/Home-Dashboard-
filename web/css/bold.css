@@ -35,6 +35,7 @@
   --accent: #a58bff;    /* "now" only */
   /* Price bands: validated (dataviz validate_palette, --mode dark --surface #0a0b0d). */
   --plunge: #338ef0;
+  --use: #4f9cf0;    /* usage bars (Bright) */
   --cheap: #2aa87e;
   --mid: #ce8109;
   --high: #d22e2c;
@@ -82,6 +83,7 @@
   --faint: #6c737e;
   --accent: #6a4be0;
   --plunge: #1f6fd6;
+  --use: #2f6fd0;    /* usage bars (Bright) */
   --cheap: #11805a;
   --mid: #c47f00;
   --high: #bf2a22;
@@ -611,6 +613,12 @@ svg { display: block; }
 .uc-table tbody tr.on th, .uc-table tbody tr.on td { color: var(--text); }
 .uc-table td .band-dot { margin: 0 0.35em 0.08em 0; }
 @media (max-height: 640px) { .uc-table th, .uc-table td { padding-top: 0.08em; padding-bottom: 0.08em; } }
+
+/* ---------- Bright (any supplier, fixed price): today's usage instead of Agile prices ---------- */
+.chart-svg .ch-bar.ch-use { fill: var(--use); }
+/* The average-prices and by-hour buttons are about Agile prices: not shown here. */
+.src-bright .price .stats-btn, .src-bright .price .usage-btn { display: none; }
+.src-bright .price > .dot { right: 0.9em; }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */
 .cam.expanded.ring { z-index: 75; } /* above night (60), the music controls (65) and Settings (70); below toasts (80) */

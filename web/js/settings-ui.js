@@ -16,6 +16,7 @@ import { LOCATION_WHY } from './sun.js';
 import { checkSubName } from './doorbell.js';
 import { Chime } from './chime.js';
 import { Octopus, regionFromTariff } from './octopus.js';
+import { Bright } from './bright.js';
 
 const ENV_LABEL = {
   webview: 'Kiosk app (all buttons work)',
@@ -35,8 +36,13 @@ export function checklist(s, st) {
   const signed = !!s.google.refreshToken;
   return [
     item(s.weather.lat != null ? res('weather') : 'todo', 'Weather location', s.weather.place, 'weather'),
-    item(s.octopus.tariff || s.octopus.discovered ? res('rates') : 'todo', 'Octopus Agile prices', s.octopus.discovered?.tariff || s.octopus.tariff, 'rates'),
-    item(s.octopus.apiKey ? res('homemini') : 'todo', 'Octopus Home Mini (live usage)', '', 'homemini'),
+    ...(s.energy.source === 'bright' ? [
+      item(s.bright.username && s.bright.password ? res('bright') : 'todo', 'Electricity usage (Bright)', s.energy.unitRate > 0 ? `${s.energy.unitRate}p a kWh + ${s.energy.standing}p a day` : 'add your unit rate for £', 'bright'),
+      item(s.bright.discovered?.live ? res('brightlive') : 'off', 'Live usage (Glow display)', s.bright.discovered?.live ? '' : 'optional: needs a Glow display/CAD', 'brightlive'),
+    ] : [
+      item(s.octopus.tariff || s.octopus.discovered ? res('rates') : 'todo', 'Octopus Agile prices', s.octopus.discovered?.tariff || s.octopus.tariff, 'rates'),
+      item(s.octopus.apiKey ? res('homemini') : 'todo', 'Octopus Home Mini (live usage)', '', 'homemini'),
+    ]),
     item(signed ? 'ok' : 'todo', 'Google sign-in', signed ? '' : 'needed for Nest and Calendar'),
     item(s.google.thermostatId ? res('thermostat') : s.google.projectId ? 'todo' : 'off', 'Nest thermostat', '', 'thermostat'),
     item(s.google.cameraId ? 'ok' : s.google.projectId ? 'todo' : 'off', 'Nest camera (tap for live view)', st.status.camera?.error || ''),
@@ -114,6 +120,33 @@ export function openSettings(root, ctx) {
       say(`Found ${p.place}`);
     }));
 
+  // Electricity: where usage comes from
+  const brightInfo = h('div', { class: 'help' });
+  const showBright = () => {
+    const d = draft.bright.discovered;
+    brightInfo.textContent = d ? `Connected: meter found${d.live ? ', with live usage from a Glow display' : ' (half-hourly readings; live usage needs a Glow display)'}.` : 'Not connected yet.';
+  };
+  showBright();
+  const brightFields = h('div', {},
+    field('Bright email', input(draft.bright, 'username', { placeholder: 'the email you use in the Bright app' })),
+    field('Bright password', input(draft.bright, 'password', { type: 'password' }), 'Stays on this tablet and goes only to Bright.'),
+    brightInfo,
+    btn('Connect', async () => {
+      draft.bright.discovered = await new Bright(draft).discover();
+      showBright();
+      say(draft.bright.discovered.live ? 'Bright connected, with live usage' : 'Bright connected');
+    }),
+    field('Unit rate (p/kWh, including VAT)', input(draft.energy, 'unitRate', { type: 'number', step: 0.01 }), 'From your Fuse (or other supplier) tariff details. For "today so far" in pounds.'),
+    field('Standing charge (p/day, including VAT)', input(draft.energy, 'standing', { type: 'number', step: 0.01 })),
+    field('Relay URL (only if needed)', input(draft.bright, 'proxy', { placeholder: 'https://bright-relay.<you>.workers.dev' }),
+      'Leave empty. Only if the checklist says Bright is blocking this browser: see docs/bright.md (the address also has to be added to web/index.html).'));
+  const sourceSel = h('select', {},
+    h('option', { value: 'octopus', selected: draft.energy.source !== 'bright' }, 'Octopus: Agile prices and the Octopus Home Mini'),
+    h('option', { value: 'bright', selected: draft.energy.source === 'bright' }, 'Bright app: any supplier, fixed price (e.g. Fuse)'));
+  const energy = h('section', {}, h('h2', {}, 'Electricity'),
+    field('Usage comes from', sourceSel, 'Left Octopus? Choose Bright: it reads your smart meter whoever supplies you (set up in the free Bright app first; docs/bright.md).'),
+    brightFields);
+
   // Octopus
   const octoInfo = h('div', { class: 'help' });
   const showOcto = () => {
@@ -144,6 +177,14 @@ export function openSettings(root, ctx) {
       'Octopus allows about 100 requests an hour. 60 is safe.'),
     field('Proxy URL (only if needed)', input(draft.octopus, 'proxy', { placeholder: 'https://octopus-proxy.<you>.workers.dev' }),
       'Leave empty. Only if the checklist says Octopus is blocked in this browser: see docs/octopus.md (the address also has to be added to web/index.html).'));
+  // Only the chosen source's details show.
+  const showSource = () => {
+    brightFields.classList.toggle('hidden', draft.energy.source !== 'bright');
+    octo.classList.toggle('hidden', draft.energy.source === 'bright');
+    renderList();
+  };
+  sourceSel.addEventListener('change', () => { draft.energy.source = sourceSel.value; showSource(); });
+  showSource();
 
   // Google
   const redirect = redirectUri();
@@ -384,7 +425,7 @@ export function openSettings(root, ctx) {
   const overlay = h('div', { class: 'settings', id: 'settings' }, h('div', { class: 'wrap' },
     h('h1', {}, 'Panel settings', h('span', {}, cancel, close)),
     h('section', {}, h('h2', {}, 'Setup checklist'), list, msg),
-    weather, octo, google_, spotify_, kia, panel, move,
+    weather, energy, octo, google_, spotify_, kia, panel, move,
     h('div', { class: 'help' }, 'Everything here is stored only in this browser on this tablet.'), version));
   root.append(overlay);
   return overlay;

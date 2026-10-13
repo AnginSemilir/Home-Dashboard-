@@ -5,6 +5,7 @@ import { backoffMs, describeError, HttpError } from './util.js';
 import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort, dayKey } from './time.js';
 import { Octopus, costToday } from './octopus.js';
 import { PriceStats } from './stats.js';
+import { Bright, usageBetween, fixedCost } from './bright.js';
 import { Google, redirectUri } from './google.js';
 import { Spotify, spotifyEnded } from './spotify.js';
 import { DoorbellListener, SUB_RE } from './doorbell.js';
@@ -41,17 +42,22 @@ export const state = {
   status: {},
   music: null, // what Spotify is playing (not kept: it's out of date within seconds)
   place: cache.place || null, // { lat, lon, at }: where the tablet is, for sunrise and sunset
+  brightSlots: cache.brightSlots || [], // half-hourly kWh from Bright, yesterday and today
+  brightLive: cache.brightLive || null, // { w, at } from a Glow display, if there is one
 };
 
 const persist = () => saveCache({
   rates: state.rates, ratesTariff: state.ratesTariff, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
   thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia, shopping: state.shopping,
-  place: state.place,
+  place: state.place, brightSlots: state.brightSlots, brightLive: state.brightLive,
 });
 
 const google = new Google(settings, save);
 const spotify = new Spotify(settings);
 const octopus = new Octopus(settings);
+const bright = new Bright(settings);
+// Usage from Bright (any supplier, a fixed price) instead of Octopus (Agile and the Home Mini).
+const useBright = () => settings.energy.source === 'bright';
 const priceStats = new PriceStats({ octopus, settings, tz });
 const nest = new Nest(google, settings);
 let refs;
@@ -64,8 +70,10 @@ function renderAll() {
   ui.renderClock(refs, now, tz);
   ui.renderWeather(refs, state.weather, state.status.weather, tz);
   ui.renderCalendar(refs, state.events, now, state.status.calendar, tz, 9, google.signedIn);
-  ui.renderPrice(refs, state.rates, now, state.status.rates, priceOpts(), tz);
-  ui.renderTiles(refs, state, settings, now, tz);
+  const bv = useBright() ? brightView(now) : null;
+  if (bv) ui.renderBright(refs, bv, now, tz);
+  else ui.renderPrice(refs, state.rates, now, state.status.rates, priceOpts(), tz);
+  ui.renderTiles(refs, state, settings, now, tz, bv);
   ui.renderCamera(refs, settings, state, live);
   ui.renderDock(refs, settings);
   renderMusic();
@@ -81,6 +89,65 @@ function shoppingInfo() {
       : !list?.id ? 'Choose your Google Tasks shopping list in Settings' : '';
   return { listName: list?.name, ready: !why, why };
 }
+
+// ---------- Bright: usage for any supplier, on a fixed price ----------
+/** What the Bright cards show: today and yesterday from the half-hourly readings, priced at the fixed rate. */
+function brightView(now = Date.now()) {
+  const dayStart = startOfDay(now, tz), dayEnd = startOfDay(now, tz, 1), yStart = startOfDay(now, tz, -1);
+  const today = usageBetween(state.brightSlots, dayStart, now);
+  const yesterday = usageBetween(state.brightSlots, yStart, dayStart);
+  yesterday.complete = yesterday.last >= dayStart;
+  const rates = { unitRate: Number(settings.energy.unitRate) || 0, standing: Number(settings.energy.standing) || 0 };
+  const priced = rates.unitRate > 0;
+  const lastHalf = [...state.brightSlots].reverse().find((x) => x.kwh != null) || null;
+  return {
+    today, yesterday, priced, rates, dayStart, dayEnd, lastHalf,
+    todayP: priced ? fixedCost(today.kwh, rates) : null,
+    yesterdayP: priced ? fixedCost(yesterday.kwh, rates) : null,
+    slots: state.brightSlots, live: state.brightLive, demand: state.demand,
+    status: state.status.bright, liveStatus: state.status.brightlive,
+  };
+}
+
+/** Find the meter in the Bright account (once a day), and whether a Glow display gives live usage. */
+async function ensureBrightFound() {
+  const d = settings.bright.discovered;
+  if (d && Date.now() - d.at < 24 * 3600e3) return d;
+  const found = await bright.discover();
+  settings.bright.discovered = found;
+  save();
+  if (found.live && !d?.live) setTimeout(() => sources.brightlive?.run(), 0); // a Glow display has appeared
+  return found;
+}
+
+let brightCatchupAt = 0;
+async function refreshBright() {
+  const d = await ensureBrightFound();
+  const now = Date.now();
+  // Ask Bright to fetch the newest half hours from the meter, at most every half hour (as
+  // Hildebrand asks); the readings arrive a few minutes later, at the next refresh.
+  if (now - brightCatchupAt >= 30 * 60e3) {
+    brightCatchupAt = now;
+    try { await bright.catchup(d.consumption); } catch (e) { console.warn('[bright] catch-up', e); }
+  }
+  state.brightSlots = await bright.readings(d.consumption, startOfDay(now, tz, -1), now);
+}
+
+async function refreshBrightLive() {
+  const c = await bright.current(settings.bright.discovered.consumption);
+  if (!c) throw new Error('The Glow display sent no live reading. Check it\'s on and connected.');
+  state.brightLive = c;
+  if (Date.now() - c.at < 15 * 60e3) {
+    state.demand.push({ t: c.at, w: c.w });
+    state.demand = state.demand.filter((p) => p.t > Date.now() - 2 * 3600e3);
+  }
+}
+
+/** When Bright's newest reading ends (to turn the dot amber when readings stop coming). */
+const brightDataAt = () => {
+  const last = [...state.brightSlots].reverse().find((x) => x.kwh != null);
+  return last ? last.end : null;
+};
 
 // ---------- Average prices (the small button on the price card) ----------
 let statsLoad = { loading: false, error: '', usageError: '', day: '' };
@@ -704,12 +771,14 @@ async function boot() {
     settings: () => openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
+      if (key === 'usage' && useBright()) return explain(state.brightLive ? state.status.brightlive : state.status.bright, 'No new readings from Bright for a few hours. The Bright app shows the same.');
+      if (key === 'cost' && useBright()) return explain(state.status.bright, 'No new readings from Bright for a few hours. The Bright app shows the same.');
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
       if (key === 'cost') return explain(ui.worst(state.status.homemini, state.status.rates), homeMiniStaleWhy());
       explain(state.status[{ indoor: 'thermostat', car: 'kia' }[key]]);
     },
-    status: (key) => explain(state.status[key]),
-    chartTap: (hit) => ui.showChartTip(refs, hit, priceOpts(), tz),
+    status: (key) => (key === 'rates' && useBright() ? explain(state.status.bright, 'No new readings from Bright for a few hours. The Bright app shows the same.') : explain(state.status[key])),
+    chartTap: (hit) => (useBright() ? ui.showUsageTip(refs, hit, tz) : ui.showChartTip(refs, hit, priceOpts(), tz)),
     musicCmd,
     musicClose: closeMusic,
     stats: openStats,
@@ -742,18 +811,27 @@ async function boot() {
     ui.toast(refs, `Google sign-in: ${result.slice(7)}`, 7000);
   }
 
-  const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.google.refreshToken;
+  const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.bright.username && !settings.google.refreshToken;
   if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
   source('rates', refreshRates, minutes(15), {
-    staleAfter: 3 * 3600e3, enabled: () => !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)),
+    staleAfter: 3 * 3600e3, enabled: () => !useBright() && !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)),
     clear: () => { state.rates = []; state.ratesTariff = null; state.standingP = null; state.costP = null; },
   })();
   source('homemini', refreshHomeMini, () => (nightNow() ? 300e3 : Math.max(30, settings.octopus.pollSeconds) * 1000), {
-    staleAfter: HOME_MINI_STALE, dataAt: homeMiniDataAt, enabled: () => !!(settings.octopus.apiKey && settings.octopus.account),
+    staleAfter: HOME_MINI_STALE, dataAt: homeMiniDataAt, enabled: () => !useBright() && !!(settings.octopus.apiKey && settings.octopus.account),
     clear: () => { state.tele = null; state.demand = []; state.lastDemandAt = null; state.costP = null; },
+  })();
+  // Bright: half-hourly readings every 10 minutes (30 at night); live usage every 30 s with a Glow display.
+  source('bright', refreshBright, () => (nightNow() ? 30 : 10) * 60e3, {
+    staleAfter: 4 * 3600e3, dataAt: brightDataAt, enabled: () => useBright() && bright.configured,
+    clear: () => { state.brightSlots = []; state.brightLive = null; },
+  })();
+  source('brightlive', refreshBrightLive, () => (nightNow() ? 300e3 : 30e3), {
+    staleAfter: 10 * 60e3, dataAt: () => state.brightLive?.at, enabled: () => useBright() && bright.configured && !!settings.bright.discovered?.live,
+    clear: () => { state.brightLive = null; },
   })();
   source('thermostat', refreshNest, minutes(5), {
     staleAfter: 30 * 60e3, enabled: () => !!(google.signedIn && settings.google.thermostatId),

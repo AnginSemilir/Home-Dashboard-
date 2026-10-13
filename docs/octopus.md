@@ -1,5 +1,7 @@
 # Octopus: Agile prices and Home Mini
 
+> **Left Octopus?** The Home Mini only reports to Octopus, so it stops working after a switch. Use the free Bright app instead, with any supplier: [bright.md](bright.md).
+
 ## Set up
 
 1. Get your **API key**: <https://octopus.energy/dashboard/new/accounts/personal-details/api-access> (it starts `sk_live_`). Your **account number** is on the same site and your bills (`A-` followed by 8 characters).

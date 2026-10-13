@@ -5,7 +5,7 @@ import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
 import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
-import { renderChart, renderHours } from './chart.js';
+import { renderChart, renderHours, renderUsageDay } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
 import { MUSIC_APPS, musicApp, ASSISTANTS, assistantApp } from './launcher.js';
@@ -92,8 +92,9 @@ export function buildPanel(root, on) {
     on.chartTap?.(hit);
   });
   r.legend = h('div', { class: 'legend' });
+  r.chartLabel = h('div', { class: 'label' }, 'Agile price ', h('span', { class: 'unit' }, 'p/kWh'));
   r.chart = h('section', { class: 'card chart', id: 'chart' },
-    h('div', { class: 'chart-head' }, h('div', { class: 'label' }, 'Agile price ', h('span', { class: 'unit' }, 'p/kWh')), r.legend),
+    h('div', { class: 'chart-head' }, r.chartLabel, r.legend),
     r.chartBox, r.chartTip, (r.chartDot = dot()));
 
   r.priceBig = h('div', { class: 'big' });
@@ -104,7 +105,8 @@ export function buildPanel(root, on) {
   r.usageBtn.addEventListener('click', () => on.usage?.());
   r.statsBtn = h('button', { class: 'stats-btn', 'aria-label': 'Average prices' }, icon('stats'));
   r.statsBtn.addEventListener('click', () => on.stats?.());
-  r.price = h('section', { class: 'card price', id: 'price' }, h('div', { class: 'label' }, 'Agile price now'),
+  r.priceLabel = h('div', { class: 'label' }, 'Agile price now');
+  r.price = h('section', { class: 'card price', id: 'price' }, r.priceLabel,
     h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, r.usageBtn, r.statsBtn, (r.priceDot = dot()));
 
   const tile = (cls, ico, label) => {
@@ -803,26 +805,9 @@ function sparkline(points, now, minutes = 60) {
 
 const fmtKw = (w) => (w >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`);
 
-export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
-  // Using now (Home Mini)
-  setDot(r.tUsage.dot, st.status.homemini);
-  if (Number.isFinite(st.tele?.demandW)) {
-    r.tUsage.value.textContent = fmtKw(st.tele.demandW);
-    r.tUsage.extra.replaceChildren(sparkline(st.demand || [], now) || '');
-  } else {
-    r.tUsage.value.textContent = '–';
-    r.tUsage.extra.replaceChildren(h('span', { class: 'muted' }, s.octopus.apiKey ? '' : 'Add Octopus key'));
-  }
-
-  // Today so far
-  setDot(r.tCost.dot, worst(st.status.homemini, st.status.rates));
-  if (st.costP != null && st.tele) {
-    r.tCost.value.textContent = `£${(st.costP / 100).toFixed(2)}`;
-    r.tCost.extra.replaceChildren(h('div', { class: 'muted' }, `${st.tele.todayKWh.toFixed(1)} kWh used`));
-  } else {
-    r.tCost.value.textContent = '–';
-    r.tCost.extra.replaceChildren();
-  }
+export function renderTiles(r, st, s, now, tz = DEFAULT_TZ, bright = null) {
+  if (bright) renderBrightTiles(r, bright, now, tz);
+  else renderOctopusTiles(r, st, s, now);
 
   // Indoor (Nest)
   setDot(r.tIndoor.dot, st.status.thermostat);
@@ -848,6 +833,96 @@ export function renderTiles(r, st, s, now, tz = DEFAULT_TZ) {
   } else {
     r.tCar.value.textContent = s.kia.url ? '–' : 'Kia app';
     r.tCar.extra.replaceChildren(h('span', { class: 'muted' }, s.kia.url ? '' : 'Tap to open'));
+  }
+}
+
+/** Using now and Today so far, from the Octopus Home Mini. */
+function renderOctopusTiles(r, st, s, now) {
+  // Using now (Home Mini)
+  setDot(r.tUsage.dot, st.status.homemini);
+  if (Number.isFinite(st.tele?.demandW)) {
+    r.tUsage.value.textContent = fmtKw(st.tele.demandW);
+    r.tUsage.extra.replaceChildren(sparkline(st.demand || [], now) || '');
+  } else {
+    r.tUsage.value.textContent = '–';
+    r.tUsage.extra.replaceChildren(h('span', { class: 'muted' }, s.octopus.apiKey ? '' : 'Add Octopus key'));
+  }
+
+  // Today so far
+  setDot(r.tCost.dot, worst(st.status.homemini, st.status.rates));
+  if (st.costP != null && st.tele) {
+    r.tCost.value.textContent = `£${(st.costP / 100).toFixed(2)}`;
+    r.tCost.extra.replaceChildren(h('div', { class: 'muted' }, `${st.tele.todayKWh.toFixed(1)} kWh used`));
+  } else {
+    r.tCost.value.textContent = '–';
+    r.tCost.extra.replaceChildren();
+  }
+}
+
+const kwhShort = (k) => (k < 10 ? k.toFixed(1) : Math.round(k).toLocaleString('en-GB'));
+const pounds = (p) => `£${(p / 100).toFixed(2)}`;
+
+/**
+ * Bright (any supplier, fixed price): the hero says what today has cost so far, the chart shows
+ * today's half hours. `v` from main.js brightView: { today, yesterday ({ kwh, slots, last }),
+ * priced, todayP, yesterdayP, rates, slots, live, lastHalf, status, liveStatus, dayStart, dayEnd }.
+ */
+export function renderBright(r, v, now, tz = DEFAULT_TZ) {
+  r.panel.classList.add('src-bright');
+  r.priceLabel.textContent = 'Today so far';
+  setDot(r.priceDot, v.status);
+  setDot(r.chartDot, v.status);
+  delete r.price.dataset.band;
+  const t = v.today;
+  if (!t.slots && !v.slots.length) {
+    r.priceBig.className = 'big none';
+    r.priceBig.textContent = '–';
+    r.priceBand.className = 'band-chip hidden';
+    r.priceSub.replaceChildren(v.status?.error ? 'Usage unavailable (tap for why)' : 'Waiting for Bright…');
+  } else {
+    r.priceBig.className = 'big';
+    r.priceBig.replaceChildren(...(v.priced ? [h('span', { class: 'num' }, pounds(v.todayP))] : [h('span', { class: 'num' }, kwhShort(t.kwh)), h('small', {}, 'kWh')]));
+    r.priceBand.className = v.priced ? 'band-chip chip-use' : 'band-chip hidden';
+    r.priceBand.textContent = `${t.kwh.toFixed(1)} kWh`;
+    r.priceSub.replaceChildren(
+      h('div', {}, t.last ? ['readings to ', h('b', {}, hhmm(t.last, tz))] : 'no readings yet today', ' · Bright is about half an hour behind'),
+      h('div', {}, v.priced ? [h('b', {}, `${round1(v.rates.unitRate).toFixed(1)}p`), ' a kWh + ', h('b', {}, `${round1(v.rates.standing).toFixed(1)}p`), ' a day'] : 'Add your unit rate in Settings (⚙ → Electricity) for £'));
+  }
+  r.chartLabel.replaceChildren('Usage today ', h('span', { class: 'unit' }, 'kWh per half hour'));
+  r.legend.dataset.key = '';
+  r.legend.replaceChildren();
+  const box = r.chartBox.getBoundingClientRect();
+  const fs = parseFloat(getComputedStyle(r.chartBox).fontSize) || 12;
+  r.chartBox.replaceChildren(svg(renderUsageDay({ slots: v.slots, now, dayStart: v.dayStart, dayEnd: v.dayEnd, width: box.width || 500, height: box.height || 260, fs, tz })));
+}
+
+/** Using now (live with a Glow display, else the newest half hour) and Yesterday. */
+function renderBrightTiles(r, v, now, tz) {
+  const live = v.live && now - v.live.at < 15 * 60e3 ? v.live : null;
+  setDot(r.tUsage.dot, live ? v.liveStatus : v.status);
+  if (live) {
+    r.tUsage.label.textContent = 'Using now';
+    r.tUsage.value.textContent = fmtKw(live.w);
+    r.tUsage.extra.replaceChildren(sparkline(v.demand || [], now) || '');
+  } else if (v.lastHalf) {
+    // No live reading without a Glow display: the newest half hour's average instead.
+    r.tUsage.label.textContent = 'Last half hour';
+    r.tUsage.value.textContent = fmtKw(v.lastHalf.kwh * 2000);
+    r.tUsage.extra.replaceChildren(h('div', { class: 'muted' }, `${hhmm(v.lastHalf.start, tz)}–${hhmm(v.lastHalf.end, tz)} average`));
+  } else {
+    r.tUsage.label.textContent = 'Using now';
+    r.tUsage.value.textContent = '–';
+    r.tUsage.extra.replaceChildren(h('span', { class: 'muted' }, v.status?.error ? '' : 'Waiting for Bright'));
+  }
+  setDot(r.tCost.dot, v.status);
+  r.tCost.label.textContent = 'Yesterday';
+  const y = v.yesterday;
+  if (y.slots) {
+    r.tCost.value.textContent = v.priced ? pounds(v.yesterdayP) : `${kwhShort(y.kwh)} kWh`;
+    r.tCost.extra.replaceChildren(h('div', { class: 'muted' }, v.priced ? `${y.kwh.toFixed(1)} kWh` : '', y.complete ? '' : `${v.priced ? ' · ' : ''}readings to ${hhmm(y.last, tz)}`));
+  } else {
+    r.tCost.value.textContent = '–';
+    r.tCost.extra.replaceChildren();
   }
 }
 
@@ -907,6 +982,18 @@ export function showChartTip(r, hit, opts, tz = DEFAULT_TZ) {
     h('b', {}, `${round1(p).toFixed(1)}p`),
     ` ${hhmm(start, tz)}–${hhmm(end, tz)}`,
     h('span', { class: 'tip-band' }, ` · ${BAND_WORD[b] || ''}`));
+  placeTip(r, hit);
+}
+
+/** The pop-up over a tapped half hour of today's usage: "13:00–13:30 · 0.42 kWh · about 0.84 kW". */
+export function showUsageTip(r, hit, tz = DEFAULT_TZ) {
+  const start = Number(hit.dataset.start), end = Number(hit.dataset.end), kwh = Number(hit.dataset.kwh);
+  r.chartTip.replaceChildren(h('b', {}, `${kwh.toFixed(2)} kWh`), ` ${hhmm(start, tz)}–${hhmm(end, tz)}`,
+    h('span', { class: 'tip-band' }, ` · about ${fmtKw((kwh * 3600e3) / (end - start) * 1000)}`));
+  placeTip(r, hit);
+}
+
+function placeTip(r, hit) {
   // Highlight the half hour, and sit the pop-up just above its bar (bars and tap targets are
   // drawn in the same order), with its pointer on the bar even when it's pushed off an edge.
   const hits = [...r.chartBox.querySelectorAll('.ch-hit')];

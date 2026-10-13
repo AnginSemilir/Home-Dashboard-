@@ -109,6 +109,15 @@ export function camera() {
   };
 }
 
+/** Settings for a household that left Octopus: usage from Bright, on a fixed price. */
+export function brightSettings(now) {
+  const s = fullSettings(now);
+  s.octopus = { account: '', apiKey: '', discovered: null };
+  s.energy = { source: 'bright', unitRate: 26.64, standing: 47.35 };
+  s.bright = { username: 'sam@example.com', password: 'bright-pass', proxy: '', discovered: null };
+  return s;
+}
+
 /** Settings as they'd look after a complete setup. */
 export function fullSettings(now) {
   return {
@@ -125,7 +134,7 @@ export function fullSettings(now) {
  * Install fake network for a Playwright page. Returns a log of calls, and `fail` to make a
  * service return errors (e.g. fail.add('octopus')).
  */
-export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil } = {}) {
+export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil, brightUntil, glow = false } = {}) {
   const calls = [];
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
   const kiaPayload = await encryptReading(kiaReading || { battery: 78, range: 182, charging: false, plugged: false, updated: now - 2 * 3600e3 }, KIA_KEY);
@@ -179,6 +188,43 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     }
     if (url.pathname.includes('/standing-charges/')) return json(route, { results: [{ value_exc_vat: 45.6, value_inc_vat: 47.88, valid_from: '2025-04-01T00:00:00Z', valid_to: null }] });
     return json(route, { detail: 'Not found' }, 404);
+  });
+
+  // Hildebrand's Glowmarkt API (the Bright app). Readings are about 40 minutes behind, as Bright's
+  // usually are; with \`glow\`, a Glow display gives live watts.
+  await page.route(/^https:\/\/api\.glowmarkt\.com\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const h = req.headers();
+    calls.push({ service: 'bright', url: req.url(), path: url.pathname.replace('/api/v0-1', ''), method: req.method(), headers: h, body: req.postData() });
+    if (fail.has('bright-blocked')) return route.abort('failed'); // as a browser sees a missing CORS header
+    if (h.applicationid !== 'b0f1b774-a586-4f72-9edd-27ead8aa7a8d') return json(route, { error: 'unknown application' }, 400);
+    if (url.pathname === '/api/v0-1/auth') {
+      const b = JSON.parse(req.postData() || '{}');
+      if (fail.has('bright-auth') || b.password !== 'bright-pass') return json(route, { valid: false, error: 'invalid credentials' }, 401);
+      return json(route, { valid: true, token: 'glow-token-1', exp: Math.floor(now / 1000) + 7 * 86400 });
+    }
+    if (h.token !== 'glow-token-1') return json(route, { error: 'invalid token' }, 401);
+    if (fail.has('bright')) return json(route, { error: 'Service unavailable' }, 503);
+    if (url.pathname === '/api/v0-1/virtualentity') {
+      return json(route, [{ veId: 've-1', name: 'DCC Sourced', applicationId: 'b0f1b774-a586-4f72-9edd-27ead8aa7a8d', resources: [
+        { resourceId: 'res-gas', classifier: 'gas.consumption', name: 'gas consumption' },
+        { resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption' },
+        { resourceId: 'res-elec-cost', classifier: 'electricity.consumption.cost', name: 'electricity cost' },
+      ] }]);
+    }
+    const m = /^\/api\/v0-1\/resource\/([^/]+)\/(readings|current|catchup)$/.exec(url.pathname);
+    if (m && m[1] === 'res-elec') {
+      if (m[2] === 'catchup') return json(route, { data: { valid: true } });
+      if (m[2] === 'current') return json(route, glow ? { data: [[Math.floor((now - 8e3) / 1000), 742]], units: 'W' } : { data: [], units: 'W' });
+      // offset=0: times are UTC with no zone.
+      const from = Date.parse(`${url.searchParams.get('from')}Z`), to = Date.parse(`${url.searchParams.get('to')}Z`);
+      const until = brightUntil ?? now - 40 * 60e3;
+      const data = [];
+      for (let t = from; t < to; t += 1800e3) data.push([t / 1000, t + 1800e3 <= until ? usedKwh(t) : null]);
+      return json(route, { data, units: 'kWh', resource: 'res-elec' });
+    }
+    return json(route, { error: 'Not found' }, 404);
   });
 
   await page.route(/^https:\/\/(oauth2\.googleapis\.com\/token|www\.googleapis\.com\/oauth2\/v4\/token)/, async (route) => {

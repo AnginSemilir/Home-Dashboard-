@@ -217,3 +217,72 @@ export function renderHours({ values, bands, width, height, fs = 12, selected = 
   out.push('</svg>');
   return out.join('');
 }
+
+/**
+ * Today's usage as an SVG string: a bar for each half hour from midnight to midnight (local
+ * clock; 46 or 50 of them on clock-change days), the "now" line, and a faint box where readings
+ * haven't arrived yet (Bright is about half an hour behind). Built only from numbers.
+ * @param {{start:number,end:number,kwh:number|null}[]} o.slots half-hourly readings
+ * @param {number} o.dayStart, o.dayEnd local midnight to midnight (epoch ms)
+ */
+export function renderUsageDay({ slots, now, dayStart, dayEnd, width, height, fs = 12, tz = DEFAULT_TZ }) {
+  const W = Math.max(160, Math.round(width));
+  const H = Math.max(80, Math.round(height));
+  const padL = Math.round(fs * 2.8), padR = 2, padT = Math.round(fs * 1.9), padB = Math.round(fs * 2);
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg use-svg" role="img" aria-label="Electricity used in each half hour today">`];
+  const shown = (slots || []).filter((s) => s.start >= dayStart && s.start < dayEnd && Number.isFinite(s.kwh));
+  const x = (t) => padL + ((t - dayStart) / (dayEnd - dayStart)) * plotW;
+  const base = H - padB;
+  const max = Math.max(0.2, ...shown.map((s) => s.kwh));
+  const step = kwhStep(max);
+  const top = Math.ceil(max / step - 1e-9) * step;
+  const y = (v) => padT + (1 - v / top) * plotH;
+  for (let v = 0; v <= top + 1e-9; v += step) {
+    const yy = Math.round(y(v)) + 0.5;
+    out.push(`<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" class="${v === 0 ? 'ch-zero' : 'ch-grid'}"/>`);
+    out.push(`<text x="${padL - Math.round(fs * 0.6)}" y="${f1(yy + fs * 0.35)}" text-anchor="end" class="ch-y">${+v.toFixed(2)}</text>`);
+  }
+  // X labels every 3 hours on the local clock.
+  for (let t = Math.ceil(dayStart / 3600e3) * 3600e3; t < dayEnd; t += 3600e3) {
+    const p = partsInTz(t, tz);
+    if (p.min !== 0 || p.h % 3 !== 0) continue;
+    const xx = x(t);
+    if (xx > W - padR - fs * 1.6) continue;
+    out.push(`<text x="${f1(Math.max(xx, padL + fs * 1.4))}" y="${f1(H - fs * 0.45)}" text-anchor="middle" class="ch-x">${String(p.h).padStart(2, '0')}:00</text>`);
+  }
+  // Readings still to come: a faint box from the newest reading to now.
+  const lastEnd = shown.length ? Math.max(...shown.map((s) => s.end)) : dayStart;
+  if (now - lastEnd > 3600e3 && now > dayStart) {
+    const px = x(lastEnd) + 2, nx = x(Math.min(now, dayEnd));
+    out.push(`<rect x="${f1(px)}" y="${padT}" width="${f1(Math.max(0, nx - px))}" height="${f1(base - padT)}" rx="6" class="ch-pending"/>`);
+    if (nx - px > fs * 9) out.push(`<text x="${f1((px + nx) / 2)}" y="${f1(padT + plotH * 0.45)}" text-anchor="middle" class="ch-note">Readings due</text>`);
+  }
+  // Bars, a 2px gap between neighbours; the biggest gets its value.
+  let biggest = null;
+  for (const s of shown) {
+    const x0 = x(s.start), x1 = x(Math.min(s.end, dayEnd));
+    const w = Math.max(1, Math.min(24, x1 - x0 - 2));
+    const bx = x0 + (x1 - x0 - w) / 2;
+    const yTop = Math.min(y(s.kwh), base - 1.5);
+    out.push(`<path d="${barPath(bx, w, yTop, base, false)}" fill="#4f9cf0" class="ch-bar ch-use"/>`);
+    if (!biggest || s.kwh > biggest.s.kwh) biggest = { s, cx: bx + w / 2, yTop };
+  }
+  if (!shown.length) out.push(`<text x="${f1(padL + plotW / 2)}" y="${f1(padT + plotH * 0.45)}" text-anchor="middle" class="ch-empty">No readings yet today</text>`);
+  // Now marker.
+  if (now >= dayStart && now < dayEnd) {
+    const nx = Math.round(x(now)) + 0.5;
+    out.push(`<line x1="${nx}" x2="${nx}" y1="${padT - Math.round(fs * 0.5)}" y2="${base}" class="ch-now"/>`);
+    out.push(`<text x="${Math.min(nx, W - padR - fs)}" y="${padT - Math.round(fs * 0.85)}" text-anchor="middle" class="ch-now-label">now</text>`);
+  }
+  if (biggest && biggest.yTop - fs * 0.8 > padT - fs * 0.2) {
+    out.push(`<text x="${f1(biggest.cx)}" y="${f1(biggest.yTop - fs * 0.45)}" text-anchor="middle" class="ch-val">${biggest.s.kwh.toFixed(2)}</text>`);
+  }
+  // Tap targets: a half hour's kWh and average power.
+  for (const s of shown) {
+    const x0 = Math.max(padL, x(s.start)), x1 = Math.min(W - padR, x(Math.min(s.end, dayEnd)));
+    out.push(`<rect x="${f1(x0)}" y="${padT}" width="${f1(x1 - x0)}" height="${f1(base - padT)}" fill="transparent" class="ch-hit" data-start="${s.start}" data-end="${s.end}" data-kwh="${s.kwh}"/>`);
+  }
+  out.push('</svg>');
+  return out.join('');
+}
