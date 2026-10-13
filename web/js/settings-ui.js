@@ -76,9 +76,9 @@ export function openSettings(root, ctx) {
     el.classList.toggle('bad', bad);
   };
 
-  const input = (obj, key, { type = 'text', placeholder = '', step } = {}) => {
+  const input = (obj, key, { type = 'text', placeholder = '', step, trim = true } = {}) => {
     const el = h('input', { type, placeholder, step, value: obj[key] ?? '', autocomplete: 'off', spellcheck: 'false' });
-    el.addEventListener('input', () => { obj[key] = type === 'number' ? Number(el.value) : el.value.trim(); });
+    el.addEventListener('input', () => { obj[key] = type === 'number' ? Number(el.value) : trim ? el.value.trim() : el.value; });
     return el;
   };
   const field = (label, el, help) => h('div', {}, h('label', {}, label, el), help ? h('div', { class: 'help' }, help) : null);
@@ -124,15 +124,20 @@ export function openSettings(root, ctx) {
   const brightInfo = h('div', { class: 'help' });
   const showBright = () => {
     const d = draft.bright.discovered;
-    brightInfo.textContent = d ? `Connected: meter found${d.live ? ', with live usage from a Glow display' : ' (half-hourly readings; live usage needs a Glow display)'}.` : 'Not connected yet.';
+    brightInfo.textContent = d && (d.user ?? draft.bright.username) === draft.bright.username ? `Connected: meter found${d.live ? ', with live usage from a Glow display' : ' (half-hourly readings; live usage needs a Glow display)'}.` : 'Not connected yet.';
   };
   showBright();
+  const brightEmail = input(draft.bright, 'username', { placeholder: 'the email you use in the Bright app' });
+  brightEmail.addEventListener('input', showBright);
   const brightFields = h('div', {},
-    field('Bright email', input(draft.bright, 'username', { placeholder: 'the email you use in the Bright app' })),
-    field('Bright password', input(draft.bright, 'password', { type: 'password' }), 'Stays on this tablet and goes only to Bright.'),
+    field('Bright email', brightEmail),
+    field('Bright password', input(draft.bright, 'password', { type: 'password', trim: false }), 'Stays on this tablet and goes only to Bright.'),
     brightInfo,
     btn('Connect', async () => {
-      draft.bright.discovered = await new Bright(draft).discover();
+      // A fresh sign-in, so a wrong password shows now rather than when the saved one runs out.
+      const b = new Bright(draft);
+      b.forget();
+      draft.bright.discovered = await b.discover();
       showBright();
       say(draft.bright.discovered.live ? 'Bright connected, with live usage' : 'Bright connected');
     }),

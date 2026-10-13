@@ -135,3 +135,82 @@ test('switching from Octopus to Bright in Settings', async () => {
   assert.equal(calls.filter((c) => c.service === 'octopus').length - before <= 0, true, 'Octopus no longer asked after the switch');
   await ctx.close();
 });
+
+// Settings as the panel saves them once Bright has been connected (with a Glow display, if `live`).
+const connected = (live, user = 'sam@example.com', consumption = 'res-elec') => {
+  const s = brightSettings(NOW);
+  s.bright.discovered = { ve: 've-1', consumption, cost: 'res-elec-cost', live, at: NOW, user };
+  return s;
+};
+const brightCalls = (calls, end) => calls.filter((c) => c.service === 'bright' && c.path.endsWith(end));
+
+test('a Glow display that stops: back to the last half hour, it says why, and asks less and less often', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: connected(true), glow: NOW - 20 * 60e3, clock: 'install' });
+  await page.locator('.tile.usage .t-label', { hasText: 'Last half hour' }).waitFor();
+  await page.clock.runFor(10 * 60e3);
+  const n = brightCalls(calls, '/current').length;
+  assert.ok(n >= 2 && n <= 6, `backing off, not every 30 seconds (${n} in 10 minutes)`);
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText(/Live usage \(Glow display\) · The Glow display's newest reading is from 09:21\. Check it's on and connected\./).waitFor();
+  await ctx.close();
+});
+
+test('the live sparkline stays when the screen goes off and on', async () => {
+  const { ctx, page } = await openPanel(env, { settings: connected(true), glow: true, clock: 'install' });
+  await page.locator('.tile.usage .t-label', { hasText: 'Using now' }).waitFor();
+  await page.clock.runFor(31e3);
+  await page.locator('.tile.usage svg.spark').waitFor();
+  await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
+  await page.clock.runFor(1000);
+  assert.equal(await page.locator('.tile.usage svg.spark').count(), 1);
+  await ctx.close();
+});
+
+test('Connect checks the password, even with the panel already signed in', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: connected(false) });
+  await page.locator('#price .big .num', { hasText: '£' }).waitFor();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByLabel('Bright password').fill('wrong');
+  await set.getByRole('button', { name: 'Connect', exact: true }).first().click();
+  await set.getByText(/didn't accept the email and password/).waitFor();
+  // A password with a space at the end is sent as typed.
+  await set.getByLabel('Bright password').fill('bright-pass ');
+  await set.getByRole('button', { name: 'Connect', exact: true }).first().click();
+  await set.getByText(/didn't accept the email and password/).waitFor();
+  assert.equal(JSON.parse(brightCalls(calls, '/auth').at(-1).body).password, 'bright-pass ');
+  await ctx.close();
+});
+
+test('a new Bright email: the meter is looked up again, without pressing Connect', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: connected(true, 'old@example.com', 'res-old') });
+  await page.locator('#price .big .num', { hasText: '£' }).waitFor();
+  assert.equal(brightCalls(calls, '/virtualentity').length, 1);
+  assert.equal(calls.filter((c) => c.service === 'bright' && c.path.includes('res-old')).length, 0, 'the old account\'s meter is never asked');
+  assert.ok(brightCalls(calls, '/res-elec/readings').length >= 1);
+  await ctx.close();
+});
+
+test('asking Bright to catch up: at most every half hour, even across reloads', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: connected(false) });
+  await page.locator('#price .big .num', { hasText: '£' }).waitFor();
+  assert.equal(brightCalls(calls, '/catchup').length, 1);
+  const r = brightCalls(calls, '/readings').length;
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#price .big .num')?.textContent.includes('£'));
+  await page.waitForTimeout(300);
+  assert.ok(brightCalls(calls, '/readings').length > r, 'read again after the reload');
+  assert.equal(brightCalls(calls, '/catchup').length, 1, 'no second catch-up');
+  await ctx.close();
+});
+
+test('after days off: no old half hour passed off as the last one', async () => {
+  // The newest reading kept from last Sunday, and Bright not answering now.
+  const { ctx, page } = await openPanel(env, { settings: connected(false), fail: new Set(['bright']), initScript: () => {
+    const start = Date.parse('2026-09-20T18:00:00+01:00');
+    if (!sessionStorage.getItem('cached')) { localStorage.setItem('wallpanel.cache.v1', JSON.stringify({ brightSlots: [{ start, end: start + 1800e3, kwh: 0.4 }] })); sessionStorage.setItem('cached', '1'); }
+  } });
+  await page.locator('#price .sub', { hasText: 'Usage unavailable' }).waitFor();
+  assert.equal(await text(page, '.tile.usage .t-value'), '–');
+  await ctx.close();
+});

@@ -44,18 +44,20 @@ export const state = {
   place: cache.place || null, // { lat, lon, at }: where the tablet is, for sunrise and sunset
   brightSlots: cache.brightSlots || [], // half-hourly kWh from Bright, yesterday and today
   brightLive: cache.brightLive || null, // { w, at } from a Glow display, if there is one
+  brightDemand: cache.brightDemand || [], // the Glow display's last two hours, for the sparkline
 };
 
 const persist = () => saveCache({
   rates: state.rates, ratesTariff: state.ratesTariff, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
   thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia, shopping: state.shopping,
-  place: state.place, brightSlots: state.brightSlots, brightLive: state.brightLive,
+  place: state.place, brightSlots: state.brightSlots, brightLive: state.brightLive, brightDemand: state.brightDemand,
 });
 
 const google = new Google(settings, save);
 const spotify = new Spotify(settings);
 const octopus = new Octopus(settings);
 const bright = new Bright(settings);
+if (!bright.configured) bright.forget(); // the Bright email or password was cleared: so is its sign-in
 // Usage from Bright (any supplier, a fixed price) instead of Octopus (Agile and the Home Mini).
 const useBright = () => settings.energy.source === 'bright';
 const priceStats = new PriceStats({ octopus, settings, tz });
@@ -94,53 +96,80 @@ function shoppingInfo() {
 /** What the Bright cards show: today and yesterday from the half-hourly readings, priced at the fixed rate. */
 function brightView(now = Date.now()) {
   const dayStart = startOfDay(now, tz), dayEnd = startOfDay(now, tz, 1), yStart = startOfDay(now, tz, -1);
-  const today = usageBetween(state.brightSlots, dayStart, now);
-  const yesterday = usageBetween(state.brightSlots, yStart, dayStart);
+  // Only yesterday and today count (readings kept from before a few days off don't).
+  const slots = state.brightSlots.filter((x) => x.start >= yStart);
+  const today = usageBetween(slots, dayStart, now);
+  const yesterday = usageBetween(slots, yStart, dayStart);
   yesterday.complete = yesterday.last >= dayStart;
   const rates = { unitRate: Number(settings.energy.unitRate) || 0, standing: Number(settings.energy.standing) || 0 };
   const priced = rates.unitRate > 0;
-  const lastHalf = [...state.brightSlots].reverse().find((x) => x.kwh != null) || null;
+  const lastHalf = [...slots].reverse().find((x) => x.kwh != null) || null;
   return {
     today, yesterday, priced, rates, dayStart, dayEnd, lastHalf,
     todayP: priced ? fixedCost(today.kwh, rates) : null,
     yesterdayP: priced ? fixedCost(yesterday.kwh, rates) : null,
-    slots: state.brightSlots, live: state.brightLive, demand: state.demand,
+    slots, live: state.brightLive, demand: state.brightDemand,
     status: state.status.bright, liveStatus: state.status.brightlive,
   };
 }
 
-/** Find the meter in the Bright account (once a day), and whether a Glow display gives live usage. */
+const LIVE_FRESH = 15 * 60e3; // a Glow display reading older than this means the display has stopped
+
+/** Find the meter in the Bright account (once a day, or when the email changes), and whether a Glow display gives live usage. */
 async function ensureBrightFound() {
   const d = settings.bright.discovered;
-  if (d && Date.now() - d.at < 24 * 3600e3) return d;
-  const found = await bright.discover();
+  // Lookups from before the account was noted belong to whichever account is set up now.
+  const mine = !!d && (d.user ?? settings.bright.username) === settings.bright.username;
+  if (mine && d.user && Date.now() - d.at < 24 * 3600e3) return d;
+  let found;
+  try {
+    found = await bright.discover();
+  } catch (e) {
+    // Keep reading the meter already found; a wrong password still shows, as readings fail too.
+    if (!mine) throw e;
+    console.warn('[bright] account lookup failed; using the meter already found', e);
+    return d;
+  }
   settings.bright.discovered = found;
   save();
-  if (found.live && !d?.live) setTimeout(() => sources.brightlive?.run(), 0); // a Glow display has appeared
+  if (found.live) setTimeout(() => sources.brightlive?.run(), 0); // a Glow display (perhaps new, or another account's)
   return found;
 }
 
-let brightCatchupAt = 0;
+// When the panel last asked Bright to catch up, kept across reloads (Hildebrand asks for at most every half hour).
+const CATCHUP_KEY = 'wallpanel.bright.catchup';
+const catchupAt = () => { try { return Number(localStorage.getItem(CATCHUP_KEY)) || 0; } catch { return 0; } };
+
 async function refreshBright() {
   const d = await ensureBrightFound();
   const now = Date.now();
-  // Ask Bright to fetch the newest half hours from the meter, at most every half hour (as
-  // Hildebrand asks); the readings arrive a few minutes later, at the next refresh.
-  if (now - brightCatchupAt >= 30 * 60e3) {
-    brightCatchupAt = now;
+  // Ask Bright to fetch the newest half hours from the meter; the readings arrive a few minutes
+  // later, at the next refresh.
+  if (now - catchupAt() >= 30 * 60e3) {
+    try { localStorage.setItem(CATCHUP_KEY, String(now)); } catch { /* fine */ }
     try { await bright.catchup(d.consumption); } catch (e) { console.warn('[bright] catch-up', e); }
   }
   state.brightSlots = await bright.readings(d.consumption, startOfDay(now, tz, -1), now);
+  // No live usage: look again every few hours, for a new Glow display or one that was off at the daily lookup.
+  if (!d.live && now - (d.liveCheckedAt || d.at) >= 3 * 3600e3) {
+    d.liveCheckedAt = now;
+    try {
+      const c = await bright.current(d.consumption);
+      if (c && now - c.at < LIVE_FRESH) { d.live = true; setTimeout(() => sources.brightlive?.run(), 0); }
+    } catch { /* still no Glow display */ }
+    save();
+  }
 }
 
 async function refreshBrightLive() {
   const c = await bright.current(settings.bright.discovered.consumption);
   if (!c) throw new Error('The Glow display sent no live reading. Check it\'s on and connected.');
   state.brightLive = c;
-  if (Date.now() - c.at < 15 * 60e3) {
-    state.demand.push({ t: c.at, w: c.w });
-    state.demand = state.demand.filter((p) => p.t > Date.now() - 2 * 3600e3);
-  }
+  // A display that has stopped: an error, so the panel slows down and says so (and the daily
+  // lookup turns live usage off if it stays that way).
+  if (Date.now() - c.at >= LIVE_FRESH) throw new Error(`The Glow display's newest reading is from ${hhmm(c.at, tz)}. Check it's on and connected.`);
+  state.brightDemand.push({ t: c.at, w: c.w });
+  state.brightDemand = state.brightDemand.filter((p) => p.t > Date.now() - 2 * 3600e3);
 }
 
 /** When Bright's newest reading ends (to turn the dot amber when readings stop coming). */
@@ -830,8 +859,8 @@ async function boot() {
     clear: () => { state.brightSlots = []; state.brightLive = null; },
   })();
   source('brightlive', refreshBrightLive, () => (nightNow() ? 300e3 : 30e3), {
-    staleAfter: 10 * 60e3, dataAt: () => state.brightLive?.at, enabled: () => useBright() && bright.configured && !!settings.bright.discovered?.live,
-    clear: () => { state.brightLive = null; },
+    staleAfter: 10 * 60e3, dataAt: () => state.brightLive?.at, enabled: () => useBright() && bright.configured && !!settings.bright.discovered?.live && settings.bright.discovered.user === settings.bright.username,
+    clear: () => { state.brightLive = null; state.brightDemand = []; },
   })();
   source('thermostat', refreshNest, minutes(5), {
     staleAfter: 30 * 60e3, enabled: () => !!(google.signedIn && settings.google.thermostatId),

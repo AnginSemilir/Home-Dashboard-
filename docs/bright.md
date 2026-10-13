@@ -25,7 +25,7 @@ The average-prices and "when you use electricity" buttons are about Agile prices
 
 The checklist in ⚙ has a line, **Electricity usage (Bright)**, that says what's wrong if something isn't working.
 
-Your Bright email and password are stored only on this tablet and are sent only to Bright (or to your own relay, below). The panel keeps Bright's sign-in for a week at a time and signs in again by itself.
+Your Bright email and password are stored only on this tablet and are sent only to Bright (or to your own relay, below). The panel keeps Bright's sign-in for a week at a time and signs in again by itself. If Bright refuses the password (say you changed it in the Bright app), the panel waits a few hours before trying it again, so it doesn't keep knocking: type the new one in ⚙ → Electricity and press **Connect**, which always checks it straight away.
 
 ## Live usage: a Glow display
 
@@ -33,7 +33,8 @@ Bright alone can't tell what you're using right now: the meter network only give
 
 - About **£69.99**. In October 2026 it was sold out, with a £15 deposit or a free waiting list on [shop.glowmarkt.com](https://shop.glowmarkt.com).
 - Set it up with the same Bright account. Hildebrand connects it to your meter, which can take a few hours.
-- The panel notices it within a day (or straight away: ⚙ → Electricity → **Connect**). The tile then says **Using now** with live watts and a sparkline of the last hour, and the checklist shows **Live usage (Glow display)** ✓.
+- The panel notices it within a few hours (or straight away: ⚙ → Electricity → **Connect**). The tile then says **Using now** with live watts and a sparkline of the last hour, and the checklist shows **Live usage (Glow display)** ✓.
+- If the display stops sending (unplugged, or off the Wi-Fi), the tile goes back to **Last half hour**, the checklist says when its last reading was, and the panel asks less and less often. A display that stays off for a day is switched off on the panel, and switched back on when it reappears.
 
 ## If Bright is blocked in the browser
 

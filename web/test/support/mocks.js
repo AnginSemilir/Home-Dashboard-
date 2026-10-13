@@ -216,7 +216,8 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     const m = /^\/api\/v0-1\/resource\/([^/]+)\/(readings|current|catchup)$/.exec(url.pathname);
     if (m && m[1] === 'res-elec') {
       if (m[2] === 'catchup') return json(route, { data: { valid: true } });
-      if (m[2] === 'current') return json(route, glow ? { data: [[Math.floor((now - 8e3) / 1000), 742]], units: 'W' } : { data: [], units: 'W' });
+      // glow: true = a reading 8 s old; a number = the time of the display's newest reading (it has stopped).
+      if (m[2] === 'current') return json(route, glow ? { data: [[Math.floor((typeof glow === 'number' ? glow : now - 8e3) / 1000), 742]], units: 'W' } : { data: [], units: 'W' });
       // offset=0: times are UTC with no zone.
       const from = Date.parse(`${url.searchParams.get('from')}Z`), to = Date.parse(`${url.searchParams.get('to')}Z`);
       const until = brightUntil ?? now - 40 * 60e3;

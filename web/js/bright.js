@@ -14,6 +14,7 @@ export const GLOW_API = 'https://api.glowmarkt.com';
 export const BRIGHT_APP_ID = 'b0f1b774-a586-4f72-9edd-27ead8aa7a8d';
 const TOKEN_KEY = 'wallpanel.bright.v1'; // { token, exp, user }
 const HALF = 1800e3;
+const HOUR = 3600e3;
 
 /** Glowmarkt wants times as UTC without a zone: 2026-10-13T23:00:00. */
 export const glowTime = (ms) => new Date(ms).toISOString().slice(0, 19);
@@ -59,6 +60,9 @@ export class Bright {
     this.s = settings;
     this.storage = storage;
     this.signing = null;
+    this.mem = null; // the sign-in, also kept here in case storage is full or blocked
+    this.signedAt = 0; // when this tab last signed in
+    this.refused = null; // { user, pass, at }: Bright said no to these, so don't ask again for a while
   }
 
   get configured() { return !!(this.s.bright.username && this.s.bright.password); }
@@ -73,43 +77,70 @@ export class Bright {
   }
 
   #saved() {
-    try {
-      const t = JSON.parse(this.storage.getItem(TOKEN_KEY) || 'null');
-      // A sign-in belongs to the account it was made with.
-      return t?.token && t.user === this.s.bright.username ? t : null;
-    } catch { return null; }
+    // A sign-in belongs to the account it was made with.
+    const mine = (t) => (t?.token && t.user === this.s.bright.username ? t : null);
+    if (mine(this.mem)) return this.mem;
+    try { return mine(JSON.parse(this.storage.getItem(TOKEN_KEY) || 'null')); } catch { return null; }
   }
 
-  forget() { try { this.storage.removeItem(TOKEN_KEY); } catch { /* fine */ } }
+  forget() {
+    this.mem = null;
+    try { this.storage.removeItem(TOKEN_KEY); } catch { /* fine */ }
+  }
 
   /** A sign-in token (a week long), reused until a day before it runs out. One sign-in at a time. */
   async token(now = Date.now()) {
     const t = this.#saved();
     if (t && t.exp - 864e5 > now) return t.token;
+    const { username: user, password: pass } = this.s.bright;
+    // A refused email and password aren't tried again for a few hours (or until they're changed),
+    // so a password changed in the Bright app doesn't mean a failed sign-in every few minutes.
+    const r = this.refused;
+    if (r && r.user === user && r.pass === pass && now - r.at < 6 * HOUR) throw new HttpError(401, 'Bright sign-in refused');
     this.signing ??= (async () => {
-      const body = await fetchJSON(`${this.base}/auth`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', applicationId: BRIGHT_APP_ID },
-        body: JSON.stringify({ username: this.s.bright.username, password: this.s.bright.password }),
-      });
-      if (!body?.valid || !body.token) throw new HttpError(401, 'Bright sign-in refused');
+      let body;
+      try {
+        body = await fetchJSON(`${this.base}/auth`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', applicationId: BRIGHT_APP_ID },
+          body: JSON.stringify({ username: user, password: pass }),
+        });
+        if (!body?.valid || !body.token) throw new HttpError(401, 'Bright sign-in refused');
+      } catch (e) {
+        if (e instanceof HttpError && (e.status === 401 || e.status === 403)) this.refused = { user, pass, at: now };
+        throw e;
+      }
+      this.refused = null;
       const exp = Number(body.exp) > 1e12 ? Number(body.exp) : Number(body.exp) * 1000;
-      const saved = { token: body.token, exp: Number.isFinite(exp) && exp > now ? exp : now + 6 * 864e5, user: this.s.bright.username };
-      try { this.storage.setItem(TOKEN_KEY, JSON.stringify(saved)); } catch { /* it signs in again next time */ }
+      const saved = { token: body.token, exp: Number.isFinite(exp) && exp > now ? exp : now + 6 * 864e5, user };
+      this.mem = saved;
+      this.signedAt = Date.now();
+      try { this.storage.setItem(TOKEN_KEY, JSON.stringify(saved)); } catch { /* kept in memory instead */ }
       return saved.token;
     })().finally(() => { this.signing = null; });
     return this.signing;
   }
 
-  /** A Glowmarkt call; an expired or revoked sign-in is renewed once. */
+  /**
+   * A Glowmarkt call. A refused sign-in from earlier (run out or revoked) is dropped and renewed
+   * once; one from the last hour is kept, as signing in again wouldn't change Bright's answer.
+   */
   async api(path, { params, method = 'GET' } = {}) {
     const qs = params ? `?${new URLSearchParams(params)}` : '';
     for (let attempt = 0; ; attempt++) {
+      const old = !!this.#saved() && Date.now() - this.signedAt > HOUR;
+      let token;
+      try { token = await this.token(); } catch (e) { throw explainBrightError(e); }
       try {
-        const token = await this.token();
         return await fetchJSON(`${this.base}/${path}${qs}`, { method, headers: { 'Content-Type': 'application/json', applicationId: BRIGHT_APP_ID, token } });
       } catch (e) {
-        if (attempt === 0 && e instanceof HttpError && e.status === 401 && this.#saved()) { this.forget(); continue; }
+        const refused = e instanceof HttpError && (e.status === 401 || e.status === 403);
+        if (refused && old) {
+          this.forget();
+          if (attempt === 0) continue;
+        }
+        // Signed in just now, yet refused: the password is fine, it's this meter (another account's?).
+        if (refused) throw new Error("Bright accepted the sign-in but won't share this meter's readings. Press Connect in ⚙ → Electricity to look the meter up again.");
         throw explainBrightError(e);
       }
     }
@@ -132,7 +163,7 @@ export class Bright {
     if (!found) throw new Error('Bright has no electricity readings for this account yet. Open the Bright app and finish connecting your meter.');
     let live = false;
     try { const c = await this.current(found.consumption); live = !!c && now - c.at < 15 * 60e3; } catch { /* no Glow: no live usage */ }
-    return { ...found, live, at: now };
+    return { ...found, live, at: now, user: this.s.bright.username };
   }
 
   /** Half-hourly kWh from `from` to `to` (Bright's own clock is UTC; the panel works out the days). */

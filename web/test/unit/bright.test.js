@@ -79,11 +79,17 @@ test('Bright: signs in once a week, sends the app ID and token, and renews a ref
   calls.length = 0;
   await new Bright(s, storage).api('virtualentity');
   assert.equal(calls.length, 1);
-  // Bright refuses the token: sign in again, once.
+  // Bright refuses a sign-in saved days ago: sign in again, once.
   token = 'tok-2';
   calls.length = 0;
-  await b.api('virtualentity');
+  const later = new Bright(s, storage);
+  await later.api('virtualentity');
   assert.deepEqual(calls.map((c) => c.url.split('/').pop()), ['virtualentity', 'auth', 'virtualentity']);
+  // Refused straight after signing in: signing in again wouldn't help, so it doesn't.
+  token = 'tok-3';
+  calls.length = 0;
+  await assert.rejects(later.api('virtualentity'), /accepted the sign-in but won't share this meter's readings/);
+  assert.deepEqual(calls.map((c) => c.url.split('/').pop()), ['virtualentity']);
   // Another account: its own sign-in.
   s.bright.username = 'other@example.com';
   calls.length = 0;
@@ -91,12 +97,57 @@ test('Bright: signs in once a week, sends the app ID and token, and renews a ref
   assert.equal(calls[0].url.split('/').pop(), 'auth');
 });
 
+test('Bright: a refused password isn\'t tried again for hours, unless it\'s changed', async () => {
+  const { s, b } = setup();
+  fakeFetch((url, opts) => {
+    if (url.endsWith('/auth')) return JSON.parse(opts.body).password === 'right' ? { body: { valid: true, token: 't', exp: Math.floor(Date.now() / 1000) + 7 * 86400 } } : { status: 401, body: { valid: false } };
+    return { body: [] };
+  });
+  for (let i = 0; i < 3; i++) await assert.rejects(b.api('virtualentity'), /didn't accept the email and password/);
+  assert.equal(calls.length, 1, 'one sign-in, then no more');
+  await assert.rejects(b.token(Date.now() + 7 * 3600e3));
+  assert.equal(calls.length, 2, 'tried again a few hours later');
+  s.bright.password = 'right';
+  await b.api('virtualentity');
+  assert.deepEqual(calls.slice(2).map((c) => c.url.split('/').pop()), ['auth', 'virtualentity'], 'a changed password is tried at once');
+});
+
+test('Bright: the sign-in is kept in memory when storage is full', async () => {
+  const { s } = setup();
+  const full = { getItem: () => null, setItem: () => { throw new Error('QuotaExceededError'); }, removeItem: () => {} };
+  const b = new Bright(s, full);
+  fakeFetch((url) => (url.endsWith('/auth') ? { body: { valid: true, token: 't', exp: Math.floor(Date.now() / 1000) + 7 * 86400 } } : { body: [] }));
+  for (let i = 0; i < 4; i++) await b.api('virtualentity');
+  assert.equal(calls.filter((c) => c.url.endsWith('/auth')).length, 1);
+});
+
+test('Bright: a sign-in refused with 403 is dropped, and forget() clears it everywhere', async () => {
+  const { s, storage } = setup();
+  storage.setItem('wallpanel.bright.v1', JSON.stringify({ token: 'old', exp: Date.now() + 5 * 864e5, user: 'sam@example.com' }));
+  fakeFetch((url, opts) => {
+    if (url.endsWith('/auth')) return { status: 401, body: { valid: false } }; // the password was changed too
+    return opts.headers.token === 'old' ? { status: 403, body: {} } : { body: [] };
+  });
+  const b = new Bright(s, storage);
+  await assert.rejects(b.api('virtualentity'), /didn't accept/);
+  assert.equal(storage.getItem('wallpanel.bright.v1'), null, 'the refused sign-in is gone, so a fixed password can work');
+  fakeFetch((url) => (url.endsWith('/auth') ? { body: { valid: true, token: 'new', exp: Math.floor(Date.now() / 1000) + 7 * 86400 } } : { body: [] }));
+  s.bright.password = 'fixed';
+  await b.api('virtualentity');
+  assert.equal(JSON.parse(storage.getItem('wallpanel.bright.v1')).token, 'new');
+  b.forget();
+  assert.equal(storage.getItem('wallpanel.bright.v1'), null);
+  calls.length = 0;
+  await b.api('virtualentity');
+  assert.equal(calls[0].url.split('/').pop(), 'auth', 'nothing left in memory either');
+});
+
 test('Bright: plain words for a wrong password and for a browser that\'s blocked', async () => {
   const { b } = setup();
   fakeFetch(() => ({ status: 401, body: { valid: false } }));
   await assert.rejects(b.discover(), /didn't accept the email and password/);
   globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
-  await assert.rejects(b.discover(), /Bright didn't answer this browser.*docs\/bright\.md/);
+  await assert.rejects(setup().b.discover(), /Bright didn't answer this browser.*docs\/bright\.md/);
 });
 
 test('Bright: finds the meter, checks for a Glow display, and asks for readings in UTC', async () => {
@@ -111,7 +162,7 @@ test('Bright: finds the meter, checks for a Glow display, and asks for readings 
     return { status: 404, body: {} };
   });
   const d = await b.discover(now);
-  assert.deepEqual({ ...d, at: 0 }, { ve: 've-1', consumption: 'e', cost: '', live: false, at: 0 });
+  assert.deepEqual({ ...d, at: 0 }, { ve: 've-1', consumption: 'e', cost: '', live: false, at: 0, user: 'sam@example.com' });
   const r = await b.readings('e', at('2026-10-13T00:00:00+01:00'), now);
   const q = new URL(calls.at(-1).url);
   assert.equal(q.pathname, '/api/v0-1/resource/e/readings');
