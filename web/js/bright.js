@@ -19,10 +19,14 @@ const HOUR = 3600e3;
 /** Glowmarkt wants times as UTC without a zone: 2026-10-13T23:00:00. */
 export const glowTime = (ms) => new Date(ms).toISOString().slice(0, 19);
 
-/** Bright's times are Unix seconds; milliseconds and ISO strings are read too, just in case. */
+/**
+ * Bright's times are Unix seconds; milliseconds and ISO strings are read too, just in case (an ISO
+ * time without a zone is UTC, as Glowmarkt writes them).
+ */
 const toMs = (ts) => {
   if (ts == null || ts === '') return NaN;
-  const n = typeof ts === 'string' && /[^\d.]/.test(ts) ? Date.parse(ts) : Number(ts);
+  if (typeof ts === 'string' && /[^\d.]/.test(ts)) return Date.parse(/^\d{4}-\d\d-\d\dT\d\d:\d\d(:\d\d(\.\d+)?)?$/.test(ts) ? `${ts}Z` : ts);
+  const n = Number(ts);
   return Number.isFinite(n) && n < 1e12 ? n * 1000 : n;
 };
 
@@ -51,7 +55,10 @@ export function parseCurrent(body) {
  * one consumption resource; the smart meter's half hours come from the DCC (Bright's "DCC Sourced",
  * "…profile reads"), while "adhoc" ones are one-off reads.
  */
-export function electricityResources(entities) {
+export const electricityResources = (entities) => rankedResources(entities).map(({ rank, ...r }) => r);
+
+/** The same, each with its `rank` (higher is likelier). */
+function rankedResources(entities) {
   const out = [];
   for (const ve of entities || []) {
     const res = ve.resources || [];
@@ -59,11 +66,11 @@ export function electricityResources(entities) {
     for (const r of res) {
       if (r.classifier !== 'electricity.consumption') continue;
       const words = `${r.name || ''} ${r.description || ''} ${ve.name || ''}`.toLowerCase();
-      const score = (/dcc|profile/.test(words) ? 2 : 0) - (/adhoc|ad hoc/.test(words) ? 3 : 0);
-      out.push({ ve: ve.veId, veName: ve.name || '', consumption: r.resourceId, cost, name: r.name || '', score, order: out.length });
+      const rank = (/dcc|profile/.test(words) ? 2 : 0) - (/adhoc|ad hoc/.test(words) ? 3 : 0);
+      out.push({ ve: ve.veId, veName: ve.name || '', consumption: r.resourceId, cost, name: r.name || '', rank, order: out.length });
     }
   }
-  return out.sort((a, b) => b.score - a.score || a.order - b.order).map(({ score, order, ...r }) => r);
+  return out.sort((a, b) => b.rank - a.rank || a.order - b.order).map(({ order, ...r }) => r);
 }
 
 /** The likeliest electricity resources (kept for callers that want just one). */
@@ -170,35 +177,48 @@ export class Bright {
 
   /**
    * Find the meter's electricity readings in the account, and whether a Glow display/CAD gives live
-   * usage. With more than one candidate, the one with the newest readings wins.
+   * usage. With more than one candidate the ranking decides (the DCC half hours over one-off reads);
+   * the newest readings only choose between equals, and a lower-ranked one is used only when no
+   * better one has any reading in 10 days.
    */
   async discover(now = Date.now()) {
     let found;
     try {
       const list = (await this.api('virtualentity')) || [];
-      // The list usually names each place's resources without saying what they are, so ask each place.
+      // The list usually names each place's resources without saying what they are, so ask each
+      // place. One that can't answer (an old place, say) doesn't stop the others.
       const full = [];
+      let placeError = null;
       for (const ve of list) {
         const inline = ve.resources || [];
-        const known = inline.length && inline.every((r) => r.classifier);
-        full.push({ ...ve, resources: known ? inline : ((await this.api(`virtualentity/${encodeURIComponent(ve.veId)}/resources`))?.resources || []) });
-      }
-      const all = electricityResources(full);
-      found = all[0];
-      if (all.length > 1) {
-        // Daily totals for the last 10 days (one small call each): the newest reading picks the meter.
-        let best = -1;
-        for (const c of all.slice(0, 4)) {
-          let newest = -1;
+        let resources = inline;
+        if (!(inline.length && inline.every((r) => r.classifier))) {
           try {
-            const days = await this.readings(c.consumption, now - 10 * 864e5, now, 'P1D');
-            newest = Math.max(-1, ...days.filter((d) => d.kwh > 0).map((d) => d.start));
+            resources = (await this.api(`virtualentity/${encodeURIComponent(ve.veId)}/resources`))?.resources || [];
           } catch (e) {
             if (e instanceof HttpError && e.status === 429) throw e;
+            placeError ??= e;
+            resources = [];
           }
-          if (newest > best) { best = newest; found = c; }
         }
+        full.push({ ...ve, resources });
       }
+      const all = rankedResources(full);
+      if (!all.length && placeError) throw placeError;
+      let best = all.length === 1 ? { c: all[0] } : null;
+      for (const c of all.length > 1 ? all.slice(0, 4) : []) {
+        if (best && c.rank < best.c.rank) break;
+        // Daily totals for the last 10 days: one small call each.
+        let newest = -1;
+        try {
+          const days = await this.readings(c.consumption, now - 10 * 864e5, now, 'P1D');
+          newest = Math.max(-1, ...days.filter((d) => d.kwh > 0).map((d) => d.start));
+        } catch (e) {
+          if (e instanceof HttpError && e.status === 429) throw e;
+        }
+        if (newest >= 0 && (!best || newest > best.newest)) best = { c, newest };
+      }
+      if (best || all.length) { const { rank, ...c } = (best || { c: all[0] }).c; found = c; }
     } catch (e) {
       throw explainBrightError(e);
     }

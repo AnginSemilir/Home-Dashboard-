@@ -209,7 +209,8 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     // As the real API: the list names each place's resources by ID only; what they are comes from
     // /virtualentity/{id}/resources. brightAccount: 'one' (the usual "DCC Sourced"), 'two-places'
     // (another place listed first, whose meter has no readings), 'adhoc' (an "adhoc" consumption
-    // resource listed before the DCC one).
+    // resource listed before the DCC one, with readings right up to now even while the DCC ones lag),
+    // 'broken-place' (an old place listed first whose resource list fails).
     const places = {
       one: [{ veId: 've-1', name: 'DCC Sourced', resources: [
         { resourceId: 'res-gas', classifier: 'gas.consumption', name: 'gas consumption', description: 'DCC SM profile reads' },
@@ -219,6 +220,10 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
       'two-places': [
         { veId: 've-0', name: 'Flat', resources: [{ resourceId: 'res-empty', classifier: 'electricity.consumption', name: 'electricity consumption' }] },
         { veId: 've-1', name: 'House', resources: [{ resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption' }] },
+      ],
+      'broken-place': [
+        { veId: 've-old', name: 'Old flat', resources: [{ resourceId: 'res-gone', classifier: 'electricity.consumption' }] },
+        { veId: 've-1', name: 'DCC Sourced', resources: [{ resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption', description: 'DCC SM profile reads' }] },
       ],
       adhoc: [{ veId: 've-1', name: 'DCC Sourced', resources: [
         { resourceId: 'res-adhoc', classifier: 'electricity.consumption', name: 'adhoc electricity consumption' },
@@ -230,6 +235,7 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     }
     const ve = /^\/api\/v0-1\/virtualentity\/([^/]+)\/resources$/.exec(url.pathname);
     if (ve) {
+      if (ve[1] === 've-old') return json(route, { error: 'Not found' }, 404);
       const place = places.find((p) => p.veId === ve[1]);
       return place ? json(route, { veId: place.veId, name: place.name, resources: place.resources.map((r) => ({ ...r, baseUnit: 'kWh', active: true })) }) : json(route, { error: 'Not found' }, 404);
     }
@@ -242,7 +248,7 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
       const from = Date.parse(`${url.searchParams.get('from')}Z`), to = Date.parse(`${url.searchParams.get('to')}Z`);
       const period = url.searchParams.get('period');
       const until = brightUntil ?? now - 40 * 60e3;
-      const has = (t) => m[1] !== 'res-empty' && t + 1800e3 <= until;
+      const has = (t) => m[1] !== 'res-empty' && t + 1800e3 <= (m[1] === 'res-adhoc' ? now - 40 * 60e3 : until);
       const query = { from: url.searchParams.get('from'), to: url.searchParams.get('to'), period, function: 'sum' };
       if (fail.has('bright-empty')) return json(route, { status: 'OK', name: 'electricity consumption', resourceId: m[1], query, data: [], units: 'kWh' });
       const data = [];

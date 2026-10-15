@@ -183,3 +183,21 @@ Sources: https://raw.githubusercontent.com/api-evangelist/hildebrand/main/review
 - **The right meter:** every place (virtual entity) is asked for its full resource list. Then every `electricity.consumption` resource is ranked: DCC or "profile reads" first, "adhoc" last. With more than one, a small daily-totals call picks the one with the newest readings. The ⚙ note names the meter.
 - **Sturdier reading:** times in seconds, milliseconds or ISO are all read, and junk rows are skipped. An answer whose `status` isn't OK is an error.
 - **Tests:** the fake Glowmarkt now matches the real one: IDs only in the place list, full resources from a separate call, `status`/`query` in readings, daily totals, accounts with two places or an "adhoc" resource, and an empty-answer mode.
+
+## Review of the fix, and what changed after it
+
+An independent review ran three angles (dates and times, what you see and tap, requests and security), with a second agent trying to refute each finding. Confirmed, and fixed in the next commit:
+
+- **The probe beat the ranking.** A one-off "adhoc" resource with a read today won over the DCC profile, which normally runs a day behind. Now the rank decides. The newest reading only picks between equals, and a lower rank is used only when nothing better has any reading in 10 days.
+- **One failing place stopped discovery.** One place whose `/resources` call fails (an old place, say) no longer stops discovery. It's skipped, and only blamed if no meter is found. A failed lookup with a saved meter is retried hourly, not at every refresh.
+- **Connect saved too much.** It saved the source and unit rate, so Cancel couldn't undo switching back to Octopus. Now it saves only the sign-in and "use Bright". Cancel keeps the source the page shows.
+- **The card blamed Bright for the panel's own failures.** It said "Bright is N hours behind" when the panel's own requests were failing. It now says "Usage unavailable (tap for why)".
+- **A tap on the usage tile talked about a stopped Glow display.** It now explains Bright's lag, which is what the tile shows.
+- **The checklist contradicted Connect.** After Connect it showed the old error; it now shows the Connect result.
+- **The checklist's "newest reading" was frozen text.** It is now worked out when shown, so it stays right after midnight.
+- **A new day didn't reset the look-back memo.** The look-back is now keyed by its window as well.
+- **ISO times without a zone were read as local time.** They are now read as UTC (only a fallback; Bright sends seconds).
+
+Rejected by the verifiers:
+- "Last half hour" showing yesterday's half hour without a date: it is up to about 2 days old. It was already like that before the change, and the card now dates it.
+- The midnight memo gap: it is the same as the look-back finding above.

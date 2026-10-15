@@ -21,7 +21,7 @@ The average-prices and "when you use electricity" buttons are about Agile prices
 
 1. Install **Bright** on your phone, create an account, and connect your smart meter. Bright asks you to confirm your details (verification). Wait until Bright shows your half-hourly use; that can take a day or so.
 2. On the panel: ⚙ → **Electricity** → **Usage comes from**: *Bright app*.
-3. Type your **Bright email** and **password** → **Connect**. It should say *Bright connected and saved* (Connect saves them straight away).
+3. Type your **Bright email** and **password** → **Connect**. It should say *Bright connected and saved*. Connect saves the sign-in and the switch to Bright straight away; the rest of the page still needs **Save & close**.
 4. Type your **unit rate** and **standing charge**, both in pence and including VAT. They're in your supplier's app or on your bill (Fuse: tariff details). Without a unit rate the panel shows kWh instead of pounds.
 5. **Save & close**.
 
@@ -38,7 +38,7 @@ The card always says why. Tap it for more.
 - **"Usage unavailable (tap for why)":** the tap says what went wrong, and so does ⚙ (the checklist line **Electricity usage (Bright)**).
   - *Bright hasn't sent any readings for over a week:* open the Bright app. It may ask you to confirm access to your meter again (this can happen after a password change or a supplier switch).
 
-⚙ → Electricity names the meter the panel reads (for example *electricity consumption, DCC Sourced*), and the checklist gives its newest reading. If your account lists more than one, the panel uses the one with the newest readings.
+⚙ → Electricity names the meter the panel reads (for example *electricity consumption, DCC Sourced*), and the checklist gives its newest reading. If your account lists more than one, the panel prefers the meter's own half hours (Bright's "DCC" ones) over one-off "adhoc" reads, and otherwise the one with the newest readings.
 
 ## Live usage: a Glow display
 

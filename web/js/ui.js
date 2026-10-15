@@ -911,7 +911,8 @@ export function renderBright(r, v, now, tz = DEFAULT_TZ) {
     r.priceBand.className = v.priced ? 'band-chip chip-use' : 'band-chip hidden';
     r.priceBand.textContent = `${t.kwh.toFixed(1)} kWh`;
     r.priceSub.replaceChildren(
-      h('div', {}, 'readings to ', h('b', {}, hhmm(t.last, tz)), now - t.last <= 90 * 60e3 ? ' · Bright is about half an hour behind' : ` · Bright is ${Math.round((now - t.last) / 3600e3)} hours behind`),
+      // Bright's lag, unless it's the panel's own requests failing (then the tap says why).
+      h('div', {}, 'readings to ', h('b', {}, hhmm(t.last, tz)), v.status?.error ? ' · Usage unavailable (tap for why)' : now - t.last <= 90 * 60e3 ? ' · Bright is about half an hour behind' : ` · Bright is ${Math.round((now - t.last) / 3600e3)} hours behind`),
       h('div', {}, v.priced ? [h('b', {}, `${round1(v.rates.unitRate).toFixed(1)}p`), ' a kWh + ', h('b', {}, `${round1(v.rates.standing).toFixed(1)}p`), ' a day'] : 'Add your unit rate in Settings (⚙ → Electricity) for £'));
   }
   const day = dayWords(v.shown.start, now, tz);

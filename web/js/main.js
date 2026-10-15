@@ -140,7 +140,8 @@ async function ensureBrightFound() {
   const d = settings.bright.discovered;
   // Lookups from before the account was noted belong to whichever account is set up now.
   const mine = !!d && (d.user ?? settings.bright.username) === settings.bright.username;
-  if (mine && d.user && Date.now() - d.at < 24 * 3600e3) return d;
+  // Daily; after a failed lookup (the saved meter still in use), hourly rather than at every refresh.
+  if (mine && d.user && (Date.now() - d.at < 24 * 3600e3 || Date.now() - (d.lookupFailedAt || 0) < 3600e3)) return d;
   let found;
   try {
     found = await bright.discover();
@@ -148,6 +149,8 @@ async function ensureBrightFound() {
     // Keep reading the meter already found; a wrong password still shows, as readings fail too.
     if (!mine) throw e;
     console.warn('[bright] account lookup failed; using the meter already found', e);
+    d.lookupFailedAt = Date.now();
+    save();
     return d;
   }
   settings.bright.discovered = found;
@@ -158,7 +161,7 @@ async function ensureBrightFound() {
 
 // When the panel last asked Bright to catch up, kept across reloads (Hildebrand asks for at most every half hour).
 const CATCHUP_KEY = 'wallpanel.bright.catchup';
-let olderLook = null; // { for, at, slots }: the last look further back, when Bright is behind
+let olderLook = null; // { for, at, until, slots }: the last look further back, when Bright is behind
 const catchupAt = () => { try { return Number(localStorage.getItem(CATCHUP_KEY)) || 0; } catch { return 0; } };
 
 async function refreshBright() {
@@ -176,14 +179,14 @@ async function refreshBright() {
   if (!recent.some((x) => x.kwh != null)) {
     // Nothing for yesterday or today (Bright can be a day or more behind): look back over the
     // week before for its newest readings, at most once an hour.
-    if (olderLook?.for !== d.consumption || now - olderLook.at >= 3600e3) {
-      olderLook = { for: d.consumption, at: now, slots: await bright.readings(d.consumption, startOfDay(now, tz, -9), yStart) };
+    if (olderLook?.for !== d.consumption || olderLook.until !== yStart || now - olderLook.at >= 3600e3) {
+      olderLook = { for: d.consumption, at: now, until: yStart, slots: await bright.readings(d.consumption, startOfDay(now, tz, -9), yStart) };
     }
     slots = [...olderLook.slots, ...recent];
   }
   state.brightSlots = slots;
   const newest = [...slots].reverse().find((x) => x.kwh != null);
-  state.brightNewest = newest ? ui.slotWhen(newest, now, tz) : ''; // for the ⚙ checklist
+  state.brightNewest = newest || null; // for the ⚙ checklist
   // No live usage: look again every few hours, for a new Glow display or one that was off at the daily lookup.
   if (!d.live && now - (d.liveCheckedAt || d.at) >= 3 * 3600e3) {
     d.liveCheckedAt = now;
@@ -837,7 +840,8 @@ async function boot() {
     settings: () => openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
-      if (key === 'usage' && useBright()) return state.brightLive && settings.bright.discovered?.live ? explain(state.status.brightlive) : explainBright();
+      // The live reading only while the tile shows it (a stopped Glow display: the tile and its tap are Bright's).
+      if (key === 'usage' && useBright()) return settings.bright.discovered?.live && state.brightLive && Date.now() - state.brightLive.at < LIVE_FRESH ? explain(state.status.brightlive) : explainBright();
       if (key === 'cost' && useBright()) return explainBright();
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
       if (key === 'cost') return explain(ui.worst(state.status.homemini, state.status.rates), homeMiniStaleWhy());

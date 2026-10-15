@@ -17,6 +17,7 @@ import { checkSubName } from './doorbell.js';
 import { Chime } from './chime.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 import { Bright } from './bright.js';
+import { slotWhen } from './ui.js';
 
 const ENV_LABEL = {
   webview: 'Kiosk app (all buttons work)',
@@ -38,7 +39,7 @@ export function checklist(s, st) {
     item(s.weather.lat != null ? res('weather') : 'todo', 'Weather location', s.weather.place, 'weather'),
     ...(s.energy.source === 'bright' ? [
       item(s.bright.username && s.bright.password ? res('bright') : 'todo', 'Electricity usage (Bright)', s.bright.username && s.bright.password
-        ? [s.energy.unitRate > 0 ? `${s.energy.unitRate}p a kWh + ${s.energy.standing}p a day` : 'add your unit rate for £', st.brightNewest ? `newest reading ${st.brightNewest}` : ''].filter(Boolean).join(' · ')
+        ? [s.energy.unitRate > 0 ? `${s.energy.unitRate}p a kWh + ${s.energy.standing}p a day` : 'add your unit rate for £', st.brightNewest ? `newest reading ${slotWhen(st.brightNewest, Date.now(), s.tz)}` : ''].filter(Boolean).join(' · ')
         : 'type your Bright email and password, then Save & close', 'bright'),
       item(s.bright.discovered?.live ? res('brightlive') : 'off', 'Live usage (Glow display)', s.bright.discovered?.live ? '' : 'optional: needs a Glow display/CAD', 'brightlive'),
     ] : [
@@ -66,7 +67,8 @@ export function checklist(s, st) {
 export function openSettings(root, ctx) {
   const { settings: s, save, state, google } = ctx;
   const draft = JSON.parse(JSON.stringify(s));
-  let savedEarly = false;
+  let savedEarly = false; // Bright's Connect saved its details at once
+  let connected = false; // …and Bright answered, so its checklist line shows that, not the panel's last try
   // Test buttons use clients bound to the unsaved draft, so Cancel really discards it.
   const draftGoogle = () => new Google(draft, () => {});
   const msg = h('div', { class: 'help' });
@@ -107,7 +109,10 @@ export function openSettings(root, ctx) {
 
   // Checklist
   const list = h('ul', { class: 'checklist' });
-  const renderList = () => list.replaceChildren(...checklist(draft, state).map((i) => h('li', {},
+  const listState = () => (connected && draft.energy.source === 'bright'
+    ? { ...state, brightNewest: null, status: { ...state.status, bright: { ok: true }, brightlive: draft.bright.discovered?.live ? { ok: true } : null } }
+    : state);
+  const renderList = () => list.replaceChildren(...checklist(draft, listState()).map((i) => h('li', {},
     h('span', { class: i.state === 'ok' ? 'ok' : i.state === 'bad' ? 'bad' : 'off' }, i.state === 'ok' ? '✓' : i.state === 'bad' ? '✗' : i.state === 'pending' ? '…' : '○'),
     h('span', {}, i.text, i.detail ? h('span', { class: 'muted' }, ` · ${i.detail}`) : ''))));
   renderList();
@@ -132,21 +137,27 @@ export function openSettings(root, ctx) {
   };
   showBright();
   const brightEmail = input(draft.bright, 'username', { placeholder: 'the email you use in the Bright app' });
-  brightEmail.addEventListener('input', showBright);
+  const brightPass = input(draft.bright, 'password', { type: 'password', trim: false });
+  const brightEdited = () => { connected = false; showBright(); renderList(); };
+  brightEmail.addEventListener('input', brightEdited);
+  brightPass.addEventListener('input', brightEdited);
   const brightFields = h('div', {},
     field('Bright email', brightEmail),
-    field('Bright password', input(draft.bright, 'password', { type: 'password', trim: false }), 'Stays on this tablet and goes only to Bright.'),
+    field('Bright password', brightPass, 'Stays on this tablet and goes only to Bright.'),
     brightInfo,
     btn('Connect', async () => {
       // A fresh sign-in, so a wrong password shows now rather than when the saved one runs out.
+      connected = false;
       const b = new Bright(draft);
       b.forget();
       draft.bright.discovered = await b.discover();
-      // Saved straight away: a working Bright sign-in shouldn't be lost to Cancel.
-      s.energy = { ...s.energy, ...draft.energy };
+      // Saved straight away (the sign-in and the switch to Bright), so Cancel can't lose a working
+      // sign-in; the rest of the page (unit rate…) still waits for Save & close.
       s.bright = { ...draft.bright };
+      s.energy = { ...s.energy, source: 'bright' };
       save();
       savedEarly = true;
+      connected = true;
       showBright();
       renderList();
       say(draft.bright.discovered.live ? 'Bright connected and saved, with live usage' : 'Bright connected and saved');
@@ -198,7 +209,7 @@ export function openSettings(root, ctx) {
     octo.classList.toggle('hidden', draft.energy.source === 'bright');
     renderList();
   };
-  sourceSel.addEventListener('change', () => { draft.energy.source = sourceSel.value; showSource(); });
+  sourceSel.addEventListener('change', () => { draft.energy.source = sourceSel.value; connected = false; showSource(); });
   showSource();
 
   // Google
@@ -431,7 +442,12 @@ export function openSettings(root, ctx) {
     location.reload();
   });
   // Something was saved straight away (Bright's Connect): reload so the panel starts using it.
-  const cancel = btn('Cancel', async () => { if (savedEarly) { location.reload(); return; } overlay.remove(); ctx.onClose?.(); }, true);
+  // After Connect saved Bright: keep the choice the page shows (Octopus again, if switched back), and reload.
+  const cancel = btn('Cancel', async () => {
+    if (savedEarly) { s.energy = { ...s.energy, source: draft.energy.source }; save(); location.reload(); return; }
+    overlay.remove();
+    ctx.onClose?.();
+  }, true);
 
   // Which published version this is (written by the publish workflow), to check an update arrived.
   const version = h('div', { class: 'help' });

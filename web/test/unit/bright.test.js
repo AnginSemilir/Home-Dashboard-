@@ -218,3 +218,54 @@ test('Bright: an answer marked as failed is an error, not "no readings"', async 
   fakeFetch((url) => (url.endsWith('/auth') ? { body: { valid: true, token: 't', exp: Math.floor(Date.now() / 1000) + 86400 * 7 } } : { body: { status: 'ERROR', data: [] } }));
   await assert.rejects(b.readings('e', Date.now() - 3600e3, Date.now()), /Bright didn't send the readings \(it said "ERROR"\)/);
 });
+
+test('Bright: the DCC half hours beat a fresher one-off ("adhoc") resource, unless they have nothing at all', async () => {
+  const now = at('2026-10-15T14:17:00+01:00');
+  const day = (d) => at(`${d}T00:00:00Z`) / 1000;
+  const run = async (dcc) => {
+    const { b } = setup();
+    fakeFetch((url) => {
+      if (url.endsWith('/auth')) return { body: { valid: true, token: 't', exp: Math.floor(now / 1000) + 86400 * 7 } };
+      if (url.endsWith('/virtualentity')) return { body: [{ veId: 'v', name: 'DCC Sourced', resources: [{ resourceId: 'adhoc' }, { resourceId: 'dcc' }] }] };
+      if (url.includes('/virtualentity/v/resources')) return { body: { resources: [
+        { resourceId: 'adhoc', classifier: 'electricity.consumption', name: 'adhoc electricity consumption' },
+        { resourceId: 'dcc', classifier: 'electricity.consumption', name: 'electricity consumption', description: 'DCC SM profile reads' },
+      ] } };
+      if (url.includes('/resource/adhoc/readings')) return { body: { status: 'OK', data: [[day('2026-10-15'), 0.6]] } };
+      if (url.includes('/resource/dcc/readings')) return { body: { status: 'OK', data: dcc } };
+      if (url.includes('/current')) return { body: { data: [] } };
+      return { status: 404, body: {} };
+    });
+    return (await b.discover(now)).consumption;
+  };
+  assert.equal(await run([[day('2026-10-13'), 12.1], [day('2026-10-14'), 13.4], [day('2026-10-15'), null]]), 'dcc', 'a day behind, but the meter\'s own half hours');
+  assert.equal(await run([[day('2026-10-14'), null], [day('2026-10-15'), null]]), 'adhoc', 'nothing from the DCC in 10 days: whatever has readings');
+});
+
+test('Bright: a place whose resource list fails is skipped (and only blamed when nothing else is left)', async () => {
+  const now = at('2026-10-15T14:17:00+01:00');
+  const { b } = setup();
+  let places = [{ veId: 'gone' }, { veId: 'v' }];
+  fakeFetch((url) => {
+    if (url.endsWith('/auth')) return { body: { valid: true, token: 't', exp: Math.floor(now / 1000) + 86400 * 7 } };
+    if (url.endsWith('/virtualentity')) return { body: places };
+    if (url.includes('/virtualentity/gone/resources')) return { status: 404, body: { error: 'Not found' } };
+    if (url.includes('/virtualentity/v/resources')) return { body: { resources: [{ resourceId: 'e', classifier: 'electricity.consumption' }] } };
+    if (url.includes('/current')) return { body: { data: [] } };
+    return { status: 404, body: {} };
+  });
+  assert.equal((await b.discover(now)).consumption, 'e');
+  places = [{ veId: 'gone' }];
+  await assert.rejects(b.discover(now), /404/);
+});
+
+test('parseReadings: an ISO time without a zone is UTC, as Glowmarkt writes them (on a UK clock too)', () => {
+  const was = process.env.TZ;
+  process.env.TZ = 'Europe/London'; // October: BST, where reading it as local time would be an hour out
+  try {
+    assert.equal(parseReadings({ data: [['2026-10-14T23:00:00', 1]] })[0].start, Date.parse('2026-10-14T23:00:00Z'));
+    assert.equal(parseReadings({ data: [['2026-10-14T23:00:00+01:00', 1]] })[0].start, Date.parse('2026-10-14T22:00:00Z'));
+  } finally {
+    if (was === undefined) delete process.env.TZ; else process.env.TZ = was;
+  }
+});

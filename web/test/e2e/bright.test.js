@@ -308,3 +308,81 @@ test('early morning, before today\'s first reading: yesterday on the chart, and 
   assert.equal(await text(page, '.tile.usage .t-label'), 'Last half hour');
   await ctx.close();
 });
+
+// ---------- Found by the review of the fix above ----------
+
+test('the meter\'s own half hours are used even when a one-off ("adhoc") reading is newer', async () => {
+  const until = Date.parse('2026-09-24T21:00:00+01:00'); // the DCC half hours stop at 21:00 yesterday
+  const { ctx, page, calls } = await openPanel(env, { settings: brightSettings(NOW), brightAccount: 'adhoc', brightUntil: until });
+  await page.locator('#price .sub', { hasText: 'No readings for today yet' }).waitFor();
+  const halfHours = calls.filter((c) => c.service === 'bright' && c.path.endsWith('/readings') && new URL(c.url).searchParams.get('period') === 'PT30M');
+  assert.ok(halfHours.length && halfHours.every((c) => c.path === '/resource/res-elec/readings'));
+  assert.match(await text(page, '#price .sub'), /Bright's newest: yesterday 20:30–21:00/);
+  await ctx.close();
+});
+
+test('an old place in the account that can\'t answer doesn\'t hide the meter', async () => {
+  const { ctx, page } = await openPanel(env, { settings: brightSettings(NOW), brightAccount: 'broken-place' });
+  await page.locator('#price .big .num', { hasText: pounds(kwh(TODAY, NOW)) }).waitFor();
+  await ctx.close();
+});
+
+test('Connect, then back to Octopus and Cancel: still Octopus (the Bright sign-in is kept)', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fullSettings(NOW) });
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByLabel('Usage comes from').selectOption('bright');
+  await set.getByLabel('Bright email').fill('sam@example.com');
+  await set.getByLabel('Bright password').fill('bright-pass');
+  await set.getByLabel('Unit rate (p/kWh, including VAT)').fill('30');
+  await set.getByRole('button', { name: 'Connect', exact: true }).first().click();
+  await set.getByText('Bright connected and saved').waitFor();
+  await set.getByLabel('Usage comes from').selectOption('octopus');
+  await set.getByRole('button', { name: 'Cancel' }).click();
+  await page.waitForLoadState('load');
+  await page.locator('#price .big .num').waitFor();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.settings.v1')));
+  assert.equal(saved.energy.source, 'octopus');
+  assert.equal(saved.energy.unitRate, 0, 'the unit rate waited for Save & close');
+  assert.equal(saved.bright.username, 'sam@example.com');
+  assert.notEqual(await text(page, '#price .label'), 'Today so far');
+  await ctx.close();
+});
+
+test('after Connect fixes a refused password, the checklist says so too', async () => {
+  const s = connected(false);
+  s.bright.password = 'old-pass';
+  const { ctx, page } = await openPanel(env, { settings: s });
+  await page.locator('#price .sub', { hasText: 'Usage unavailable' }).waitFor();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  const line = set.locator('.checklist li', { hasText: 'Electricity usage (Bright)' });
+  await line.getByText(/didn't accept the email and password/).waitFor();
+  await set.getByLabel('Bright password').fill('bright-pass');
+  await set.getByRole('button', { name: 'Connect', exact: true }).first().click();
+  await set.getByText('Bright connected and saved').waitFor();
+  assert.equal(await line.locator('.ok').count(), 1);
+  assert.doesNotMatch(await line.innerText(), /didn't accept/);
+  await ctx.close();
+});
+
+test('readings from this morning, then the panel\'s own requests fail: it says unavailable, not "Bright is behind"', async () => {
+  const { ctx, page } = await openPanel(env, { settings: connected(false), fail: new Set(['bright-auth']), initScript: () => {
+    const day = Date.parse('2026-09-25T00:00:00+01:00');
+    const slots = Array.from({ length: 12 }, (_, i) => ({ start: day + i * 1800e3, end: day + (i + 1) * 1800e3, kwh: 0.2 }));
+    if (!sessionStorage.getItem('cached')) { localStorage.setItem('wallpanel.cache.v1', JSON.stringify({ brightSlots: slots })); sessionStorage.setItem('cached', '1'); }
+  } });
+  await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
+  assert.match(await text(page, '#price .sub'), /readings to 06:00 · Usage unavailable \(tap for why\)/);
+  assert.doesNotMatch(await text(page, '#price .sub'), /hours behind/);
+  await ctx.close();
+});
+
+test('a stopped Glow display and Bright behind: the usage tile\'s tap explains Bright', async () => {
+  const { ctx, page } = await openPanel(env, { settings: connected(true), glow: NOW - 20 * 60e3, brightUntil: Date.parse('2026-09-23T21:00:00+01:00') });
+  await page.locator('.tile.usage .extra', { hasText: 'Bright is behind · tap' }).waitFor();
+  await page.locator('.tile.usage').click();
+  await page.locator('.toast', { hasText: "Bright's newest half hour is Wed 23 September 20:30–21:00" }).waitFor();
+  await ctx.close();
+});
