@@ -19,10 +19,18 @@ const HOUR = 3600e3;
 /** Glowmarkt wants times as UTC without a zone: 2026-10-13T23:00:00. */
 export const glowTime = (ms) => new Date(ms).toISOString().slice(0, 19);
 
+/** Bright's times are Unix seconds; milliseconds and ISO strings are read too, just in case. */
+const toMs = (ts) => {
+  if (ts == null || ts === '') return NaN;
+  const n = typeof ts === 'string' && /[^\d.]/.test(ts) ? Date.parse(ts) : Number(ts);
+  return Number.isFinite(n) && n < 1e12 ? n * 1000 : n;
+};
+
 /** Readings → [{ start, end, kwh }] (kwh null where Bright has nothing yet), oldest first. */
 export function parseReadings(body, periodMs = HALF) {
-  const rows = (body?.data || [])
-    .map(([ts, v]) => ({ start: Number(ts) * 1000, end: Number(ts) * 1000 + periodMs, kwh: v == null || !Number.isFinite(Number(v)) ? null : Number(v) }))
+  const rows = (Array.isArray(body?.data) ? body.data : [])
+    .filter(Array.isArray)
+    .map(([ts, v]) => ({ start: toMs(ts), end: toMs(ts) + periodMs, kwh: v == null || !Number.isFinite(Number(v)) ? null : Number(v) }))
     .filter((r) => Number.isFinite(r.start));
   return rows.sort((a, b) => a.start - b.start);
 }
@@ -31,21 +39,35 @@ export function parseReadings(body, periodMs = HALF) {
 export function parseCurrent(body) {
   const row = body?.data?.[0];
   if (!row) return null;
-  const at = Number(row[0]) * 1000, v = Number(row[1]);
+  const at = toMs(row[0]), v = Number(row[1]);
   if (!Number.isFinite(at) || !Number.isFinite(v)) return null;
   const units = String(body.units || 'W');
   return { w: /^kW$/i.test(units) ? v * 1000 : v, at };
 }
 
-/** The electricity resources in the account: consumption (kWh) and its cost, if listed. */
-export function pickResources(entities) {
+/**
+ * Every electricity-use resource in the account ({ ve, veName, consumption, cost, name }), the
+ * likeliest first. An account can have several places (virtual entities) and, within one, more than
+ * one consumption resource; the smart meter's half hours come from the DCC (Bright's "DCC Sourced",
+ * "…profile reads"), while "adhoc" ones are one-off reads.
+ */
+export function electricityResources(entities) {
+  const out = [];
   for (const ve of entities || []) {
     const res = ve.resources || [];
-    const use = res.find((r) => r.classifier === 'electricity.consumption');
-    if (use) return { ve: ve.veId, consumption: use.resourceId, cost: res.find((r) => r.classifier === 'electricity.consumption.cost')?.resourceId || '' };
+    const cost = res.find((r) => r.classifier === 'electricity.consumption.cost')?.resourceId || '';
+    for (const r of res) {
+      if (r.classifier !== 'electricity.consumption') continue;
+      const words = `${r.name || ''} ${r.description || ''} ${ve.name || ''}`.toLowerCase();
+      const score = (/dcc|profile/.test(words) ? 2 : 0) - (/adhoc|ad hoc/.test(words) ? 3 : 0);
+      out.push({ ve: ve.veId, veName: ve.name || '', consumption: r.resourceId, cost, name: r.name || '', score, order: out.length });
+    }
   }
-  return null;
+  return out.sort((a, b) => b.score - a.score || a.order - b.order).map(({ score, order, ...r }) => r);
 }
+
+/** The likeliest electricity resources (kept for callers that want just one). */
+export const pickResources = (entities) => electricityResources(entities)[0] || null;
 
 /** Plain words for what went wrong. */
 export function explainBrightError(e) {
@@ -146,16 +168,36 @@ export class Bright {
     }
   }
 
-  /** Find the meter's electricity readings in the account, and whether a Glow display/CAD gives live usage. */
+  /**
+   * Find the meter's electricity readings in the account, and whether a Glow display/CAD gives live
+   * usage. With more than one candidate, the one with the newest readings wins.
+   */
   async discover(now = Date.now()) {
     let found;
     try {
-      const list = await this.api('virtualentity');
-      found = pickResources(list);
-      // Some accounts list the resources separately.
-      for (const ve of list || []) {
-        if (found) break;
-        found = pickResources([{ veId: ve.veId, resources: (await this.api(`virtualentity/${encodeURIComponent(ve.veId)}/resources`))?.resources }]);
+      const list = (await this.api('virtualentity')) || [];
+      // The list usually names each place's resources without saying what they are, so ask each place.
+      const full = [];
+      for (const ve of list) {
+        const inline = ve.resources || [];
+        const known = inline.length && inline.every((r) => r.classifier);
+        full.push({ ...ve, resources: known ? inline : ((await this.api(`virtualentity/${encodeURIComponent(ve.veId)}/resources`))?.resources || []) });
+      }
+      const all = electricityResources(full);
+      found = all[0];
+      if (all.length > 1) {
+        // Daily totals for the last 10 days (one small call each): the newest reading picks the meter.
+        let best = -1;
+        for (const c of all.slice(0, 4)) {
+          let newest = -1;
+          try {
+            const days = await this.readings(c.consumption, now - 10 * 864e5, now, 'P1D');
+            newest = Math.max(-1, ...days.filter((d) => d.kwh > 0).map((d) => d.start));
+          } catch (e) {
+            if (e instanceof HttpError && e.status === 429) throw e;
+          }
+          if (newest > best) { best = newest; found = c; }
+        }
       }
     } catch (e) {
       throw explainBrightError(e);
@@ -166,12 +208,17 @@ export class Bright {
     return { ...found, live, at: now, user: this.s.bright.username };
   }
 
-  /** Half-hourly kWh from `from` to `to` (Bright's own clock is UTC; the panel works out the days). */
-  async readings(resource, from, to) {
+  /**
+   * kWh per half hour (or per `period`, e.g. 'P1D') from `from` to `to`. Bright's clock is UTC; the
+   * panel works out the days. Bright allows 10 days of half hours in one call.
+   */
+  async readings(resource, from, to, period = 'PT30M') {
     const body = await this.api(`resource/${encodeURIComponent(resource)}/readings`, {
-      params: { from: glowTime(from), to: glowTime(to), period: 'PT30M', offset: 0, function: 'sum', nulls: 1 },
+      params: { from: glowTime(from), to: glowTime(to), period, offset: 0, function: 'sum', nulls: 1 },
     });
-    return parseReadings(body).filter((r) => r.start >= from && r.start < to);
+    if (body?.status && String(body.status).toUpperCase() !== 'OK') throw new Error(`Bright didn't send the readings (it said "${String(body.status).slice(0, 60)}"). The panel will try again.`);
+    const ms = { PT30M: HALF, PT1H: 2 * HALF, P1D: 864e5 }[period] || HALF;
+    return parseReadings(body, ms).filter((r) => r.start >= from && r.start < to);
   }
 
   /** Live demand from a Glow display/CAD: { w, at }, or null. */

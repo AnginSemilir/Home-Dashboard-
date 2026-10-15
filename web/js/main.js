@@ -93,24 +93,44 @@ function shoppingInfo() {
 }
 
 // ---------- Bright: usage for any supplier, on a fixed price ----------
-/** What the Bright cards show: today and yesterday from the half-hourly readings, priced at the fixed rate. */
+/**
+ * What the Bright cards show: today and yesterday from the half-hourly readings, priced at the fixed
+ * rate. When Bright is behind, the chart and the day tile show the newest day it has, dated.
+ */
 function brightView(now = Date.now()) {
   const dayStart = startOfDay(now, tz), dayEnd = startOfDay(now, tz, 1), yStart = startOfDay(now, tz, -1);
-  // Only yesterday and today count (readings kept from before a few days off don't).
-  const slots = state.brightSlots.filter((x) => x.start >= yStart);
+  const slots = state.brightSlots;
   const today = usageBetween(slots, dayStart, now);
-  const yesterday = usageBetween(slots, yStart, dayStart);
-  yesterday.complete = yesterday.last >= dayStart;
+  const newest = [...slots].reverse().find((x) => x.kwh != null) || null;
+  // The latest whole day: yesterday, or the newest day Bright has.
+  const dayOf = (t) => ({ start: startOfDay(t, tz), end: startOfDay(t, tz, 1) });
+  const day = !usageBetween(slots, yStart, dayStart).slots && newest && newest.start < yStart ? dayOf(newest.start) : { start: yStart, end: dayStart };
+  const lastDay = { ...usageBetween(slots, day.start, day.end), ...day };
+  lastDay.complete = lastDay.last >= day.end;
+  // The chart: today once it has a reading, until then the newest day Bright has.
+  const shown = !today.slots && newest && newest.start < dayStart ? dayOf(newest.start) : { start: dayStart, end: dayEnd };
   const rates = { unitRate: Number(settings.energy.unitRate) || 0, standing: Number(settings.energy.standing) || 0 };
   const priced = rates.unitRate > 0;
-  const lastHalf = [...slots].reverse().find((x) => x.kwh != null) || null;
   return {
-    today, yesterday, priced, rates, dayStart, dayEnd, lastHalf,
+    today, yesterday: lastDay, priced, rates, dayStart, dayEnd, yStart, shown, newest,
+    lastHalf: newest && newest.start >= yStart ? newest : null, // "Last half hour" is never days old
     todayP: priced ? fixedCost(today.kwh, rates) : null,
-    yesterdayP: priced ? fixedCost(yesterday.kwh, rates) : null,
-    slots, live: state.brightLive, demand: state.brightDemand,
+    yesterdayP: priced ? fixedCost(lastDay.kwh, rates) : null,
+    slots, live: state.brightLive, demand: state.brightDemand, configured: bright.configured,
     status: state.status.bright, liveStatus: state.status.brightlive,
   };
+}
+
+/** What a tap on the Bright card or tiles says: never nothing while the card is empty or stale. */
+function explainBright(st = state.status.bright) {
+  if (!bright.configured) return ui.toast(refs, "Bright isn't set up on this panel yet: ⚙ → Electricity → type your Bright email and password → Save & close.", 8000);
+  if (!st) return ui.toast(refs, 'Asking Bright for your readings…', 4000);
+  if (st.error) return explain(st);
+  const v = brightView();
+  if (v.newest && (st.stale || !v.today.slots)) {
+    return ui.toast(refs, `Bright's newest half hour is ${ui.slotWhen(v.newest, Date.now(), tz)}. Bright is often a few hours behind, sometimes a day or more; the Bright app shows the same. If the app has newer readings, press Connect in ⚙ → Electricity.`, 9000);
+  }
+  explain(st);
 }
 
 const LIVE_FRESH = 15 * 60e3; // a Glow display reading older than this means the display has stopped
@@ -138,6 +158,7 @@ async function ensureBrightFound() {
 
 // When the panel last asked Bright to catch up, kept across reloads (Hildebrand asks for at most every half hour).
 const CATCHUP_KEY = 'wallpanel.bright.catchup';
+let olderLook = null; // { for, at, slots }: the last look further back, when Bright is behind
 const catchupAt = () => { try { return Number(localStorage.getItem(CATCHUP_KEY)) || 0; } catch { return 0; } };
 
 async function refreshBright() {
@@ -149,7 +170,20 @@ async function refreshBright() {
     try { localStorage.setItem(CATCHUP_KEY, String(now)); } catch { /* fine */ }
     try { await bright.catchup(d.consumption); } catch (e) { console.warn('[bright] catch-up', e); }
   }
-  state.brightSlots = await bright.readings(d.consumption, startOfDay(now, tz, -1), now);
+  const yStart = startOfDay(now, tz, -1);
+  const recent = await bright.readings(d.consumption, yStart, now);
+  let slots = recent;
+  if (!recent.some((x) => x.kwh != null)) {
+    // Nothing for yesterday or today (Bright can be a day or more behind): look back over the
+    // week before for its newest readings, at most once an hour.
+    if (olderLook?.for !== d.consumption || now - olderLook.at >= 3600e3) {
+      olderLook = { for: d.consumption, at: now, slots: await bright.readings(d.consumption, startOfDay(now, tz, -9), yStart) };
+    }
+    slots = [...olderLook.slots, ...recent];
+  }
+  state.brightSlots = slots;
+  const newest = [...slots].reverse().find((x) => x.kwh != null);
+  state.brightNewest = newest ? ui.slotWhen(newest, now, tz) : ''; // for the ⚙ checklist
   // No live usage: look again every few hours, for a new Glow display or one that was off at the daily lookup.
   if (!d.live && now - (d.liveCheckedAt || d.at) >= 3 * 3600e3) {
     d.liveCheckedAt = now;
@@ -158,6 +192,9 @@ async function refreshBright() {
       if (c && now - c.at < LIVE_FRESH) { d.live = true; setTimeout(() => sources.brightlive?.run(), 0); }
     } catch { /* still no Glow display */ }
     save();
+  }
+  if (!slots.some((x) => x.kwh != null)) {
+    throw new Error("Bright hasn't sent any readings for over a week. Open the Bright app: if it has nothing recent either, it may ask you to confirm access to your meter again. If it does, press Connect in ⚙ → Electricity.");
   }
 }
 
@@ -172,10 +209,10 @@ async function refreshBrightLive() {
   state.brightDemand = state.brightDemand.filter((p) => p.t > Date.now() - 2 * 3600e3);
 }
 
-/** When Bright's newest reading ends (to turn the dot amber when readings stop coming). */
+/** When Bright's newest reading ends (to turn the dot amber when readings stop coming, or never came). */
 const brightDataAt = () => {
   const last = [...state.brightSlots].reverse().find((x) => x.kwh != null);
-  return last ? last.end : null;
+  return last ? last.end : 0;
 };
 
 // ---------- Average prices (the small button on the price card) ----------
@@ -800,13 +837,13 @@ async function boot() {
     settings: () => openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate }),
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
-      if (key === 'usage' && useBright()) return explain(state.brightLive ? state.status.brightlive : state.status.bright, 'No new readings from Bright for a few hours. The Bright app shows the same.');
-      if (key === 'cost' && useBright()) return explain(state.status.bright, 'No new readings from Bright for a few hours. The Bright app shows the same.');
+      if (key === 'usage' && useBright()) return state.brightLive && settings.bright.discovered?.live ? explain(state.status.brightlive) : explainBright();
+      if (key === 'cost' && useBright()) return explainBright();
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
       if (key === 'cost') return explain(ui.worst(state.status.homemini, state.status.rates), homeMiniStaleWhy());
       explain(state.status[{ indoor: 'thermostat', car: 'kia' }[key]]);
     },
-    status: (key) => (key === 'rates' && useBright() ? explain(state.status.bright, 'No new readings from Bright for a few hours. The Bright app shows the same.') : explain(state.status[key])),
+    status: (key) => (key === 'rates' && useBright() ? explainBright() : explain(state.status[key])),
     chartTap: (hit) => (useBright() ? ui.showUsageTip(refs, hit, tz) : ui.showChartTip(refs, hit, priceOpts(), tz)),
     musicCmd,
     musicClose: closeMusic,

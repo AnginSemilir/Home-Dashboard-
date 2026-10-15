@@ -34,3 +34,4 @@ Everything researched while building the panel, saved here so it outlives the cl
 | [Review: music/AI/Assistant buttons and location-based day and night (incl. WebView Kiosk and Chrome location behaviour)](2026-09-27-review-buttons-location.md) | Current |
 | [Review: Spotify controls (security, runtime, docs)](2026-09-27-review-spotify.md) | Current |
 | [Usage data after leaving Octopus: the Home Mini, Fuse, Glow/Bright (Glowmarkt API), n3rgy, CT clamps, and browser access](2026-10-13-usage-after-octopus.md) | Current |
+| [Why the panel showed no Bright usage while the app had data (Glowmarkt API behaviour, 32 reproduced cases, fixes)](2026-10-15-bright-blank-panel.md) | Current |

@@ -11,7 +11,9 @@ The research behind this, with sources, is in [research/2026-10-13-usage-after-o
 - **Last half hour** (tile): the newest half hour's average power, and which half hour it was. With a Glow display (below) this tile becomes **Using now**, live.
 - **Yesterday** (tile): what yesterday cost, and its kWh.
 
-Bright is usually **about half an hour behind**, sometimes longer. The panel asks Bright to fetch the newest half hours from your meter every half hour (as often as Hildebrand asks apps to), and refreshes every 10 minutes (every 30 at night).
+Bright is usually **about half an hour behind**, but often a few hours and sometimes a day or more: the meter network sends some meters' readings only once a day. The Bright app shows the same. The panel asks Bright to fetch the newest half hours from your meter every half hour (as often as Hildebrand asks apps to), and refreshes every 10 minutes (every 30 at night).
+
+When today has no readings yet, the card says so and gives Bright's newest half hour. The chart and the day tile then show the newest day Bright has, with its date (for example **Wed 23 September** instead of **Yesterday**). Tap the card for more.
 
 The average-prices and "when you use electricity" buttons are about Agile prices, so they don't show in this mode.
 
@@ -19,13 +21,24 @@ The average-prices and "when you use electricity" buttons are about Agile prices
 
 1. Install **Bright** on your phone, create an account, and connect your smart meter. Bright asks you to confirm your details (verification). Wait until Bright shows your half-hourly use; that can take a day or so.
 2. On the panel: ⚙ → **Electricity** → **Usage comes from**: *Bright app*.
-3. Type your **Bright email** and **password** → **Connect**. It should say *Bright connected*.
+3. Type your **Bright email** and **password** → **Connect**. It should say *Bright connected and saved* (Connect saves them straight away).
 4. Type your **unit rate** and **standing charge**, both in pence and including VAT. They're in your supplier's app or on your bill (Fuse: tariff details). Without a unit rate the panel shows kWh instead of pounds.
 5. **Save & close**.
 
 The checklist in ⚙ has a line, **Electricity usage (Bright)**, that says what's wrong if something isn't working.
 
 Your Bright email and password are stored only on this tablet and are sent only to Bright (or to your own relay, below). The panel keeps Bright's sign-in for a week at a time and signs in again by itself. If Bright refuses the password (say you changed it in the Bright app), the panel waits a few hours before trying it again, so it doesn't keep knocking: type the new one in ⚙ → Electricity and press **Connect**, which always checks it straight away.
+
+## The panel shows nothing, but the Bright app has data
+
+The card always says why. Tap it for more.
+
+- **"Bright isn't set up on this panel yet":** ⚙ → Electricity → type your Bright email and password → **Connect** (or **Save & close**).
+- **"No readings for today yet · Bright's newest: …":** Bright is behind. Look at the Bright app's *half-hourly* view for today and yesterday; if it stops at the same time, it's Bright (or the meter network), and the panel catches up by itself. If the app has newer half hours than the panel, press **Connect** in ⚙ → Electricity: the panel looks up your meter again.
+- **"Usage unavailable (tap for why)":** the tap says what went wrong, and so does ⚙ (the checklist line **Electricity usage (Bright)**).
+  - *Bright hasn't sent any readings for over a week:* open the Bright app. It may ask you to confirm access to your meter again (this can happen after a password change or a supplier switch).
+
+⚙ → Electricity names the meter the panel reads (for example *electricity consumption, DCC Sourced*), and the checklist gives its newest reading. If your account lists more than one, the panel uses the one with the newest readings.
 
 ## Live usage: a Glow display
 

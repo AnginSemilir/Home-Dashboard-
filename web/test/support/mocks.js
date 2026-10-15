@@ -134,7 +134,7 @@ export function fullSettings(now) {
  * Install fake network for a Playwright page. Returns a log of calls, and `fail` to make a
  * service return errors (e.g. fail.add('octopus')).
  */
-export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil, brightUntil, glow = false } = {}) {
+export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil, brightUntil, glow = false, brightAccount = 'one' } = {}) {
   const calls = [];
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
   const kiaPayload = await encryptReading(kiaReading || { battery: 78, range: 182, charging: false, plugged: false, updated: now - 2 * 3600e3 }, KIA_KEY);
@@ -206,24 +206,56 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     }
     if (h.token !== 'glow-token-1') return json(route, { error: 'invalid token' }, 401);
     if (fail.has('bright')) return json(route, { error: 'Service unavailable' }, 503);
-    if (url.pathname === '/api/v0-1/virtualentity') {
-      return json(route, [{ veId: 've-1', name: 'DCC Sourced', applicationId: 'b0f1b774-a586-4f72-9edd-27ead8aa7a8d', resources: [
-        { resourceId: 'res-gas', classifier: 'gas.consumption', name: 'gas consumption' },
-        { resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption' },
+    // As the real API: the list names each place's resources by ID only; what they are comes from
+    // /virtualentity/{id}/resources. brightAccount: 'one' (the usual "DCC Sourced"), 'two-places'
+    // (another place listed first, whose meter has no readings), 'adhoc' (an "adhoc" consumption
+    // resource listed before the DCC one).
+    const places = {
+      one: [{ veId: 've-1', name: 'DCC Sourced', resources: [
+        { resourceId: 'res-gas', classifier: 'gas.consumption', name: 'gas consumption', description: 'DCC SM profile reads' },
+        { resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption', description: 'DCC SM profile reads' },
         { resourceId: 'res-elec-cost', classifier: 'electricity.consumption.cost', name: 'electricity cost' },
-      ] }]);
+      ] }],
+      'two-places': [
+        { veId: 've-0', name: 'Flat', resources: [{ resourceId: 'res-empty', classifier: 'electricity.consumption', name: 'electricity consumption' }] },
+        { veId: 've-1', name: 'House', resources: [{ resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption' }] },
+      ],
+      adhoc: [{ veId: 've-1', name: 'DCC Sourced', resources: [
+        { resourceId: 'res-adhoc', classifier: 'electricity.consumption', name: 'adhoc electricity consumption' },
+        { resourceId: 'res-elec', classifier: 'electricity.consumption', name: 'electricity consumption', description: 'DCC SM profile reads' },
+      ] }],
+    }[brightAccount];
+    if (url.pathname === '/api/v0-1/virtualentity') {
+      return json(route, places.map((ve) => ({ veId: ve.veId, name: ve.name, applicationId: 'b0f1b774-a586-4f72-9edd-27ead8aa7a8d', resources: ve.resources.map((r) => ({ resourceId: r.resourceId, resourceTypeId: `type-${r.resourceId}` })) })));
+    }
+    const ve = /^\/api\/v0-1\/virtualentity\/([^/]+)\/resources$/.exec(url.pathname);
+    if (ve) {
+      const place = places.find((p) => p.veId === ve[1]);
+      return place ? json(route, { veId: place.veId, name: place.name, resources: place.resources.map((r) => ({ ...r, baseUnit: 'kWh', active: true })) }) : json(route, { error: 'Not found' }, 404);
     }
     const m = /^\/api\/v0-1\/resource\/([^/]+)\/(readings|current|catchup)$/.exec(url.pathname);
-    if (m && m[1] === 'res-elec') {
+    if (m && ['res-elec', 'res-empty', 'res-adhoc'].includes(m[1])) {
       if (m[2] === 'catchup') return json(route, { data: { valid: true } });
       // glow: true = a reading 8 s old; a number = the time of the display's newest reading (it has stopped).
-      if (m[2] === 'current') return json(route, glow ? { data: [[Math.floor((typeof glow === 'number' ? glow : now - 8e3) / 1000), 742]], units: 'W' } : { data: [], units: 'W' });
-      // offset=0: times are UTC with no zone.
+      if (m[2] === 'current') return json(route, glow && m[1] === 'res-elec' ? { data: [[Math.floor((typeof glow === 'number' ? glow : now - 8e3) / 1000), 742]], units: 'W' } : { data: [], units: 'W' });
+      // offset=0: times are UTC with no zone. Half hours, or (period P1D) daily totals from UTC midnight.
       const from = Date.parse(`${url.searchParams.get('from')}Z`), to = Date.parse(`${url.searchParams.get('to')}Z`);
+      const period = url.searchParams.get('period');
       const until = brightUntil ?? now - 40 * 60e3;
+      const has = (t) => m[1] !== 'res-empty' && t + 1800e3 <= until;
+      const query = { from: url.searchParams.get('from'), to: url.searchParams.get('to'), period, function: 'sum' };
+      if (fail.has('bright-empty')) return json(route, { status: 'OK', name: 'electricity consumption', resourceId: m[1], query, data: [], units: 'kWh' });
       const data = [];
-      for (let t = from; t < to; t += 1800e3) data.push([t / 1000, t + 1800e3 <= until ? usedKwh(t) : null]);
-      return json(route, { data, units: 'kWh', resource: 'res-elec' });
+      if (period === 'P1D') {
+        for (let d = Math.floor(from / 864e5) * 864e5; d < to; d += 864e5) {
+          let k = null;
+          for (let t = d; t < d + 864e5; t += 1800e3) if (has(t)) k = (k ?? 0) + usedKwh(t);
+          data.push([d / 1000, k]);
+        }
+      } else {
+        for (let t = from; t < to; t += 1800e3) data.push([t / 1000, has(t) ? usedKwh(t) : null]);
+      }
+      return json(route, { status: 'OK', name: 'electricity consumption', resourceId: m[1], classifier: 'electricity.consumption', query, data, units: 'kWh' });
     }
     return json(route, { error: 'Not found' }, 404);
   });

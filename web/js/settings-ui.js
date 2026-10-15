@@ -37,7 +37,9 @@ export function checklist(s, st) {
   return [
     item(s.weather.lat != null ? res('weather') : 'todo', 'Weather location', s.weather.place, 'weather'),
     ...(s.energy.source === 'bright' ? [
-      item(s.bright.username && s.bright.password ? res('bright') : 'todo', 'Electricity usage (Bright)', s.energy.unitRate > 0 ? `${s.energy.unitRate}p a kWh + ${s.energy.standing}p a day` : 'add your unit rate for £', 'bright'),
+      item(s.bright.username && s.bright.password ? res('bright') : 'todo', 'Electricity usage (Bright)', s.bright.username && s.bright.password
+        ? [s.energy.unitRate > 0 ? `${s.energy.unitRate}p a kWh + ${s.energy.standing}p a day` : 'add your unit rate for £', st.brightNewest ? `newest reading ${st.brightNewest}` : ''].filter(Boolean).join(' · ')
+        : 'type your Bright email and password, then Save & close', 'bright'),
       item(s.bright.discovered?.live ? res('brightlive') : 'off', 'Live usage (Glow display)', s.bright.discovered?.live ? '' : 'optional: needs a Glow display/CAD', 'brightlive'),
     ] : [
       item(s.octopus.tariff || s.octopus.discovered ? res('rates') : 'todo', 'Octopus Agile prices', s.octopus.discovered?.tariff || s.octopus.tariff, 'rates'),
@@ -64,6 +66,7 @@ export function checklist(s, st) {
 export function openSettings(root, ctx) {
   const { settings: s, save, state, google } = ctx;
   const draft = JSON.parse(JSON.stringify(s));
+  let savedEarly = false;
   // Test buttons use clients bound to the unsaved draft, so Cancel really discards it.
   const draftGoogle = () => new Google(draft, () => {});
   const msg = h('div', { class: 'help' });
@@ -124,7 +127,8 @@ export function openSettings(root, ctx) {
   const brightInfo = h('div', { class: 'help' });
   const showBright = () => {
     const d = draft.bright.discovered;
-    brightInfo.textContent = d && (d.user ?? draft.bright.username) === draft.bright.username ? `Connected: meter found${d.live ? ', with live usage from a Glow display' : ' (half-hourly readings; live usage needs a Glow display)'}.` : 'Not connected yet.';
+    const meter = [d?.name, d?.veName].filter(Boolean).join(', ');
+    brightInfo.textContent = d && (d.user ?? draft.bright.username) === draft.bright.username ? `Connected: meter found${meter ? ` (${meter})` : ''}${d.live ? ', with live usage from a Glow display' : '; live usage needs a Glow display'}.` : 'Not connected yet.';
   };
   showBright();
   const brightEmail = input(draft.bright, 'username', { placeholder: 'the email you use in the Bright app' });
@@ -138,8 +142,14 @@ export function openSettings(root, ctx) {
       const b = new Bright(draft);
       b.forget();
       draft.bright.discovered = await b.discover();
+      // Saved straight away: a working Bright sign-in shouldn't be lost to Cancel.
+      s.energy = { ...s.energy, ...draft.energy };
+      s.bright = { ...draft.bright };
+      save();
+      savedEarly = true;
       showBright();
-      say(draft.bright.discovered.live ? 'Bright connected, with live usage' : 'Bright connected');
+      renderList();
+      say(draft.bright.discovered.live ? 'Bright connected and saved, with live usage' : 'Bright connected and saved');
     }),
     field('Unit rate (p/kWh, including VAT)', input(draft.energy, 'unitRate', { type: 'number', step: 0.01 }), 'From your Fuse (or other supplier) tariff details. For "today so far" in pounds.'),
     field('Standing charge (p/day, including VAT)', input(draft.energy, 'standing', { type: 'number', step: 0.01 })),
@@ -420,7 +430,8 @@ export function openSettings(root, ctx) {
     save();
     location.reload();
   });
-  const cancel = btn('Cancel', async () => { overlay.remove(); ctx.onClose?.(); }, true);
+  // Something was saved straight away (Bright's Connect): reload so the panel starts using it.
+  const cancel = btn('Cancel', async () => { if (savedEarly) { location.reload(); return; } overlay.remove(); ctx.onClose?.(); }, true);
 
   // Which published version this is (written by the publish workflow), to check an update arrived.
   const version = h('div', { class: 'help' });

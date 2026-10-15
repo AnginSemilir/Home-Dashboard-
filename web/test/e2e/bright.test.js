@@ -19,6 +19,7 @@ const kwh = (from, to) => {
   return k;
 };
 const pounds = (k) => `£${((47.35 + k * 26.64) / 100).toFixed(2)}`;
+const kwhFrom = (from, until) => { let k = 0; for (let t = from; t + HALF <= until; t += HALF) k += usedKwh(t); return k; };
 const text = (page, sel) => page.locator(sel).innerText();
 
 test('left Octopus: today so far in pounds, today\'s half hours, the last half hour and yesterday', async () => {
@@ -55,7 +56,7 @@ test('left Octopus: today so far in pounds, today\'s half hours, the last half h
   assert.equal(await page.locator('#price .usage-btn').isVisible(), false);
   assert.equal(calls.filter((c) => c.service === 'octopus').length, 0, 'no Octopus calls');
   const bright = calls.filter((c) => c.service === 'bright');
-  assert.deepEqual(bright.map((c) => c.path).slice(0, 5), ['/auth', '/virtualentity', '/resource/res-elec/current', '/resource/res-elec/catchup', '/resource/res-elec/readings']);
+  assert.deepEqual(bright.map((c) => c.path).slice(0, 6), ['/auth', '/virtualentity', '/virtualentity/ve-1/resources', '/resource/res-elec/current', '/resource/res-elec/catchup', '/resource/res-elec/readings']);
   const r = new URL(bright.find((c) => c.path.endsWith('/readings')).url);
   assert.equal(r.searchParams.get('from'), '2026-09-23T23:00:00', 'from yesterday 00:00 (UK time)');
   assert.equal(r.searchParams.get('period'), 'PT30M');
@@ -123,7 +124,7 @@ test('switching from Octopus to Bright in Settings', async () => {
   await set.getByLabel('Bright password').fill('bright-pass');
   await set.getByRole('button', { name: 'Connect', exact: true }).first().click();
   await set.getByText('Bright connected').waitFor();
-  await set.getByText('Connected: meter found (half-hourly readings; live usage needs a Glow display).').waitFor();
+  await set.getByText('Connected: meter found (electricity consumption, DCC Sourced); live usage needs a Glow display.').waitFor();
   await set.getByLabel('Unit rate (p/kWh, including VAT)').fill('26.64');
   await set.getByLabel('Standing charge (p/day, including VAT)').fill('47.35');
   const before = calls.filter((c) => c.service === 'octopus').length;
@@ -212,5 +213,98 @@ test('after days off: no old half hour passed off as the last one', async () => 
   } });
   await page.locator('#price .sub', { hasText: 'Usage unavailable' }).waitFor();
   assert.equal(await text(page, '.tile.usage .t-value'), '–');
+  await ctx.close();
+});
+
+// ---------- The panel never sits blank without saying why ----------
+
+test('Bright chosen but not set up on this panel: it says so, and how', async () => {
+  const s = brightSettings(NOW);
+  s.bright.username = '';
+  s.bright.password = '';
+  const { ctx, page, calls } = await openPanel(env, { settings: s });
+  await page.locator('#price .sub', { hasText: "Bright isn't set up on this panel yet" }).waitFor();
+  assert.match(await text(page, '#price .sub'), /⚙ → Electricity: your Bright email and password, then Save & close/);
+  assert.equal(await text(page, '.tile.usage .extra'), 'Bright not set up yet');
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: 'type your Bright email and password → Save & close' }).waitFor();
+  assert.equal(calls.filter((c) => c.service === 'bright').length, 0);
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText('Electricity usage (Bright) · type your Bright email and password, then Save & close').waitFor();
+  await ctx.close();
+});
+
+test('Connect saves at once: Cancel afterwards still leaves Bright working', async () => {
+  const s = brightSettings(NOW);
+  s.bright.username = '';
+  s.bright.password = '';
+  const { ctx, page } = await openPanel(env, { settings: s });
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByLabel('Bright email').fill('sam@example.com');
+  await set.getByLabel('Bright password').fill('bright-pass');
+  await set.getByRole('button', { name: 'Connect', exact: true }).first().click();
+  await set.getByText('Bright connected and saved').waitFor();
+  await set.getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('#price .big .num', { hasText: '£' }).waitFor();
+  assert.equal(await text(page, '#price .label'), 'Today so far');
+  await ctx.close();
+});
+
+test('Bright two days behind: the newest day it has, dated, and a tap says why', async () => {
+  const until = Date.parse('2026-09-23T21:00:00+01:00'); // Wednesday evening; now is Friday 09:41
+  const { ctx, page, calls } = await openPanel(env, { settings: connected(false), brightUntil: until });
+  await page.locator('#price .sub', { hasText: 'No readings for today yet' }).waitFor();
+  assert.equal(await text(page, '#price .big'), '–');
+  assert.match(await text(page, '#price .sub'), /Bright's newest: Wed 23 September 20:30–21:00/);
+  // The chart shows Wednesday, up to 21:00.
+  assert.match(await text(page, '#chart .chart-head .label'), /^Usage Wed 23 September\s*kWh per half hour$/);
+  assert.equal(await page.locator('#chart .ch-bar.ch-use').count(), 42);
+  // The day tile shows Wednesday too (with readings to 21:00); "last half hour" isn't passed off.
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Wed 23 September');
+  const wed = Date.parse('2026-09-23T00:00:00+01:00');
+  assert.equal(await text(page, '.tile.cost .t-value'), pounds(kwhFrom(wed, until)));
+  assert.equal(await text(page, '.tile.usage .t-value'), '–');
+  assert.equal(await text(page, '.tile.usage .extra'), 'Bright is behind · tap');
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: "Bright's newest half hour is Wed 23 September 20:30–21:00" }).waitFor();
+  // It looked further back once, not at every refresh.
+  const looks = calls.filter((c) => c.service === 'bright' && c.path.endsWith('/readings') && new URL(c.url).searchParams.get('from') === '2026-09-15T23:00:00');
+  assert.equal(looks.length, 1);
+  await ctx.close();
+});
+
+test('nothing from Bright for over a week, or answers with no readings: a red dot and the reason', async () => {
+  let { ctx, page } = await openPanel(env, { settings: connected(false), brightUntil: Date.parse('2026-09-01T00:00:00+01:00') });
+  await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: "Bright hasn't sent any readings for over a week" }).waitFor();
+  await ctx.close();
+
+  ({ ctx, page } = await openPanel(env, { settings: connected(false), fail: new Set(['bright-empty']) }));
+  await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText(/Electricity usage \(Bright\) · Bright hasn't sent any readings for over a week/).waitFor();
+  await ctx.close();
+});
+
+test('an account with two places, or an "adhoc" meter listed first: the meter with readings is used', async () => {
+  for (const brightAccount of ['two-places', 'adhoc']) {
+    const { ctx, page, calls } = await openPanel(env, { settings: brightSettings(NOW), brightAccount });
+    await page.locator('#price .big .num', { hasText: pounds(kwh(TODAY, NOW)) }).waitFor();
+    const halfHours = calls.filter((c) => c.service === 'bright' && c.path.endsWith('/readings') && new URL(c.url).searchParams.get('period') === 'PT30M');
+    assert.ok(halfHours.length && halfHours.every((c) => c.path === '/resource/res-elec/readings'), `${brightAccount}: only the meter with readings is read`);
+    await ctx.close();
+  }
+});
+
+test('early morning, before today\'s first reading: yesterday on the chart, and why', async () => {
+  const at = Date.parse('2026-09-25T00:40:00+01:00');
+  const { ctx, page } = await openPanel(env, { now: at, settings: { ...connected(false), bright: { ...connected(false).bright, discovered: { ...connected(false).bright.discovered, at } } }, brightUntil: Date.parse('2026-09-25T00:00:00+01:00') });
+  await page.locator('#price .sub', { hasText: 'No readings for today yet' }).waitFor();
+  assert.match(await text(page, '#price .sub'), /Bright's newest: yesterday 23:30–00:00/);
+  assert.match(await text(page, '#chart .chart-head .label'), /^Usage yesterday/);
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Yesterday');
+  assert.equal(await text(page, '.tile.usage .t-label'), 'Last half hour');
   await ctx.close();
 });

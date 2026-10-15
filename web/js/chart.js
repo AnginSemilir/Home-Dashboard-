@@ -225,12 +225,12 @@ export function renderHours({ values, bands, width, height, fs = 12, selected = 
  * @param {{start:number,end:number,kwh:number|null}[]} o.slots half-hourly readings
  * @param {number} o.dayStart, o.dayEnd local midnight to midnight (epoch ms)
  */
-export function renderUsageDay({ slots, now, dayStart, dayEnd, width, height, fs = 12, tz = DEFAULT_TZ }) {
+export function renderUsageDay({ slots, now, dayStart, dayEnd, width, height, fs = 12, tz = DEFAULT_TZ, day = 'today' }) {
   const W = Math.max(160, Math.round(width));
   const H = Math.max(80, Math.round(height));
   const padL = Math.round(fs * 2.8), padR = 2, padT = Math.round(fs * 1.9), padB = Math.round(fs * 2);
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg use-svg" role="img" aria-label="Electricity used in each half hour today">`];
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg use-svg" role="img" aria-label="Electricity used in each half hour ${/^(today|yesterday)$/.test(day) ? day : `on ${day}`}">`];
   const shown = (slots || []).filter((s) => s.start >= dayStart && s.start < dayEnd && Number.isFinite(s.kwh));
   const x = (t) => padL + ((t - dayStart) / (dayEnd - dayStart)) * plotW;
   const base = H - padB;
@@ -268,7 +268,7 @@ export function renderUsageDay({ slots, now, dayStart, dayEnd, width, height, fs
     out.push(`<path d="${barPath(bx, w, yTop, base, false)}" fill="#4f9cf0" class="ch-bar ch-use"/>`);
     if (!biggest || s.kwh > biggest.s.kwh) biggest = { s, cx: bx + w / 2, yTop };
   }
-  if (!shown.length) out.push(`<text x="${f1(padL + plotW / 2)}" y="${f1(padT + plotH * 0.45)}" text-anchor="middle" class="ch-empty">No readings yet today</text>`);
+  if (!shown.length) out.push(`<text x="${f1(padL + plotW / 2)}" y="${f1(padT + plotH * 0.45)}" text-anchor="middle" class="ch-empty">${day === 'today' ? 'No readings yet today' : `No readings for ${day}`}</text>`);
   // Now marker.
   if (now >= dayStart && now < dayEnd) {
     const nx = Math.round(x(now)) + 0.5;

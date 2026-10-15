@@ -3,7 +3,7 @@
 
 import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
-import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, DEFAULT_TZ } from './time.js';
+import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, startOfDay, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
 import { renderChart, renderHours, renderUsageDay } from './chart.js';
 import { groupDays } from './calendar.js';
@@ -862,10 +862,36 @@ function renderOctopusTiles(r, st, s, now) {
 const kwhShort = (k) => (k < 10 ? k.toFixed(1) : Math.round(k).toLocaleString('en-GB'));
 const pounds = (p) => `£${(p / 100).toFixed(2)}`;
 
+/** A day in words: 'today', 'yesterday' or 'Wed 23 September'. */
+export function dayWords(t, now, tz = DEFAULT_TZ) {
+  const d0 = startOfDay(now, tz);
+  if (t >= d0 && t < startOfDay(now, tz, 1)) return 'today';
+  if (t >= startOfDay(now, tz, -1) && t < d0) return 'yesterday';
+  return `${weekdayShort(t, tz)} ${dayMonth(t, tz)}`;
+}
+const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+
+/** A half hour in words: '13:00–13:30' today, else with its day ('yesterday 23:30–00:00'). */
+export function slotWhen(slot, now, tz = DEFAULT_TZ) {
+  const day = dayWords(slot.start, now, tz);
+  return `${day === 'today' ? '' : `${day} `}${hhmm(slot.start, tz)}–${hhmm(slot.end, tz)}`;
+}
+
+/** What the card says while today has no readings: never just "waiting", always why. */
+function brightQuiet(v, now, tz) {
+  if (!v.configured) return [h('div', {}, "Bright isn't set up on this panel yet"), h('div', {}, '⚙ → Electricity: your Bright email and password, then ', h('b', {}, 'Save & close'))];
+  if (v.status?.error) return ['Usage unavailable (tap for why)'];
+  if (!v.status) return ['Asking Bright…'];
+  if (v.newest) return [h('div', {}, 'No readings for today yet · tap for why'), h('div', {}, "Bright's newest: ", h('b', {}, slotWhen(v.newest, now, tz)))];
+  return ['No readings from Bright yet'];
+}
+
 /**
  * Bright (any supplier, fixed price): the hero says what today has cost so far, the chart shows
- * today's half hours. `v` from main.js brightView: { today, yesterday ({ kwh, slots, last }),
- * priced, todayP, yesterdayP, rates, slots, live, lastHalf, status, liveStatus, dayStart, dayEnd }.
+ * today's half hours (until today has one, the newest day Bright has). `v` from main.js brightView:
+ * { today, yesterday (the latest whole day: { kwh, slots, last, start, end, complete }), priced,
+ * todayP, yesterdayP, rates, slots, newest, shown ({ start, end }), live, lastHalf, configured,
+ * status, liveStatus, dayStart, dayEnd, yStart }.
  */
 export function renderBright(r, v, now, tz = DEFAULT_TZ) {
   r.panel.classList.add('src-bright');
@@ -874,26 +900,27 @@ export function renderBright(r, v, now, tz = DEFAULT_TZ) {
   setDot(r.chartDot, v.status);
   delete r.price.dataset.band;
   const t = v.today;
-  if (!t.slots && !v.slots.length) {
+  if (!t.slots) {
     r.priceBig.className = 'big none';
     r.priceBig.textContent = '–';
     r.priceBand.className = 'band-chip hidden';
-    r.priceSub.replaceChildren(v.status?.error ? 'Usage unavailable (tap for why)' : 'Waiting for Bright…');
+    r.priceSub.replaceChildren(...brightQuiet(v, now, tz));
   } else {
     r.priceBig.className = 'big';
     r.priceBig.replaceChildren(...(v.priced ? [h('span', { class: 'num' }, pounds(v.todayP))] : [h('span', { class: 'num' }, kwhShort(t.kwh)), h('small', {}, 'kWh')]));
     r.priceBand.className = v.priced ? 'band-chip chip-use' : 'band-chip hidden';
     r.priceBand.textContent = `${t.kwh.toFixed(1)} kWh`;
     r.priceSub.replaceChildren(
-      h('div', {}, t.last ? ['readings to ', h('b', {}, hhmm(t.last, tz))] : 'no readings yet today', ' · Bright is about half an hour behind'),
+      h('div', {}, 'readings to ', h('b', {}, hhmm(t.last, tz)), now - t.last <= 90 * 60e3 ? ' · Bright is about half an hour behind' : ` · Bright is ${Math.round((now - t.last) / 3600e3)} hours behind`),
       h('div', {}, v.priced ? [h('b', {}, `${round1(v.rates.unitRate).toFixed(1)}p`), ' a kWh + ', h('b', {}, `${round1(v.rates.standing).toFixed(1)}p`), ' a day'] : 'Add your unit rate in Settings (⚙ → Electricity) for £'));
   }
-  r.chartLabel.replaceChildren('Usage today ', h('span', { class: 'unit' }, 'kWh per half hour'));
+  const day = dayWords(v.shown.start, now, tz);
+  r.chartLabel.replaceChildren(`Usage ${day} `, h('span', { class: 'unit' }, 'kWh per half hour'));
   r.legend.dataset.key = '';
   r.legend.replaceChildren();
   const box = r.chartBox.getBoundingClientRect();
   const fs = parseFloat(getComputedStyle(r.chartBox).fontSize) || 12;
-  r.chartBox.replaceChildren(svg(renderUsageDay({ slots: v.slots, now, dayStart: v.dayStart, dayEnd: v.dayEnd, width: box.width || 500, height: box.height || 260, fs, tz })));
+  r.chartBox.replaceChildren(svg(renderUsageDay({ slots: v.slots, now, dayStart: v.shown.start, dayEnd: v.shown.end, width: box.width || 500, height: box.height || 260, fs, tz, day })));
 }
 
 /** Using now (live with a Glow display, else the newest half hour) and Yesterday. */
@@ -910,13 +937,14 @@ function renderBrightTiles(r, v, now, tz) {
     r.tUsage.value.textContent = fmtKw(v.lastHalf.kwh * 2000);
     r.tUsage.extra.replaceChildren(h('div', { class: 'muted' }, `${hhmm(v.lastHalf.start, tz)}–${hhmm(v.lastHalf.end, tz)} average`));
   } else {
-    r.tUsage.label.textContent = 'Using now';
+    r.tUsage.label.textContent = v.newest ? 'Last half hour' : 'Using now';
     r.tUsage.value.textContent = '–';
-    r.tUsage.extra.replaceChildren(h('span', { class: 'muted' }, v.status?.error ? '' : 'Waiting for Bright'));
+    const why = !v.configured ? 'Bright not set up yet' : v.status?.error ? '' : !v.status ? 'Asking Bright…' : v.newest ? 'Bright is behind · tap' : 'No readings yet';
+    r.tUsage.extra.replaceChildren(h('span', { class: 'muted' }, why));
   }
   setDot(r.tCost.dot, v.status);
-  r.tCost.label.textContent = 'Yesterday';
   const y = v.yesterday;
+  r.tCost.label.textContent = capital(dayWords(y.start, now, tz));
   if (y.slots) {
     r.tCost.value.textContent = v.priced ? pounds(v.yesterdayP) : `${kwhShort(y.kwh)} kWh`;
     r.tCost.extra.replaceChildren(h('div', { class: 'muted' }, v.priced ? `${y.kwh.toFixed(1)} kWh` : '', y.complete ? '' : `${v.priced ? ' · ' : ''}readings to ${hhmm(y.last, tz)}`));

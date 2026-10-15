@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Bright, BRIGHT_APP_ID, parseReadings, parseCurrent, pickResources, glowTime, usageBetween, fixedCost } from '../../js/bright.js';
+import { Bright, BRIGHT_APP_ID, parseReadings, parseCurrent, pickResources, electricityResources, glowTime, usageBetween, fixedCost } from '../../js/bright.js';
 import { loadSettings } from '../../js/config.js';
 
 const memStore = () => { const m = new Map(); return { m, getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k) }; };
@@ -12,6 +12,10 @@ test('parseReadings: Bright\'s seconds become half hours; missing ones stay miss
   assert.deepEqual(r.map((x) => [x.start, x.kwh]), [[t * 1000, 0.25], [(t + 1800) * 1000, null], [(t + 3600) * 1000, 0]]);
   assert.equal(r[0].end - r[0].start, 1800e3);
   assert.deepEqual(parseReadings(null), []);
+  // Milliseconds or ISO strings (not what Bright sends, but read the same), and junk rows skipped.
+  const ms = parseReadings({ data: [[t * 1000, 0.5], [new Date(t * 1000 + 1800e3).toISOString(), 0.1], 'junk', [null, 1]] });
+  assert.deepEqual(ms.map((x) => [x.start, x.kwh]), [[t * 1000, 0.5], [t * 1000 + 1800e3, 0.1]]);
+  assert.deepEqual(parseReadings({ data: [[t, 2]] }, 864e5)[0], { start: t * 1000, end: t * 1000 + 864e5, kwh: 2 });
 });
 
 test('parseCurrent: watts (or kW) from a Glow display; nothing without one', () => {
@@ -22,9 +26,19 @@ test('parseCurrent: watts (or kW) from a Glow display; nothing without one', () 
 });
 
 test('pickResources: the electricity readings, whichever order they come in', () => {
-  const list = [{ veId: 'v', resources: [{ resourceId: 'g', classifier: 'gas.consumption' }, { resourceId: 'c', classifier: 'electricity.consumption.cost' }, { resourceId: 'e', classifier: 'electricity.consumption' }] }];
-  assert.deepEqual(pickResources(list), { ve: 'v', consumption: 'e', cost: 'c' });
+  const list = [{ veId: 'v', name: 'DCC Sourced', resources: [{ resourceId: 'g', classifier: 'gas.consumption' }, { resourceId: 'c', classifier: 'electricity.consumption.cost' }, { resourceId: 'e', classifier: 'electricity.consumption', name: 'electricity consumption' }] }];
+  assert.deepEqual(pickResources(list), { ve: 'v', veName: 'DCC Sourced', consumption: 'e', cost: 'c', name: 'electricity consumption' });
   assert.equal(pickResources([{ veId: 'v', resources: [{ resourceId: 'g', classifier: 'gas.consumption' }] }]), null);
+});
+
+test('electricityResources: every candidate, the DCC half hours first and "adhoc" reads last', () => {
+  const list = [
+    { veId: 'home', name: 'Home', resources: [{ resourceId: 'a', classifier: 'electricity.consumption', name: 'adhoc electricity consumption' }] },
+    { veId: 'v2', name: 'Flat', resources: [{ resourceId: 'f', classifier: 'electricity.consumption', name: 'electricity consumption' }] },
+    { veId: 'dcc', name: 'DCC Sourced', resources: [{ resourceId: 'd', classifier: 'electricity.consumption', name: 'electricity consumption' }] },
+    { veId: 'v3', resources: [{ resourceId: 'p', classifier: 'electricity.consumption', description: 'electricity consumption DCC SM profile reads' }] },
+  ];
+  assert.deepEqual(electricityResources(list).map((r) => r.consumption), ['d', 'p', 'f', 'a']);
 });
 
 test('glowTime: UTC without a zone, as Bright wants', () => {
@@ -162,7 +176,7 @@ test('Bright: finds the meter, checks for a Glow display, and asks for readings 
     return { status: 404, body: {} };
   });
   const d = await b.discover(now);
-  assert.deepEqual({ ...d, at: 0 }, { ve: 've-1', consumption: 'e', cost: '', live: false, at: 0, user: 'sam@example.com' });
+  assert.deepEqual({ ...d, at: 0 }, { ve: 've-1', veName: '', consumption: 'e', cost: '', name: '', live: false, at: 0, user: 'sam@example.com' });
   const r = await b.readings('e', at('2026-10-13T00:00:00+01:00'), now);
   const q = new URL(calls.at(-1).url);
   assert.equal(q.pathname, '/api/v0-1/resource/e/readings');
@@ -176,4 +190,31 @@ test('Bright: an optional relay replaces the address, and must be https', async 
   assert.equal(b.base, 'https://bright-relay.me.workers.dev/api/v0-1');
   s.bright.proxy = 'http://insecure.example';
   assert.throws(() => b.base, /must look like https/);
+});
+
+test('Bright: with several meters listed, the one with the newest readings is used', async () => {
+  const { b } = setup();
+  const now = at('2026-10-15T14:17:00+01:00');
+  const day = (d) => at(`${d}T00:00:00Z`) / 1000;
+  fakeFetch((url) => {
+    if (url.endsWith('/auth')) return { body: { valid: true, token: 't', exp: Math.floor(now / 1000) + 86400 * 7 } };
+    if (url.endsWith('/virtualentity')) return { body: [{ veId: 'a', name: 'Flat', resources: [{ resourceId: 'old', resourceTypeId: 'x' }] }, { veId: 'b', name: 'House', resources: [{ resourceId: 'new', resourceTypeId: 'x' }] }] };
+    if (url.includes('/virtualentity/a/resources')) return { body: { resources: [{ resourceId: 'old', classifier: 'electricity.consumption', name: 'electricity consumption' }] } };
+    if (url.includes('/virtualentity/b/resources')) return { body: { resources: [{ resourceId: 'new', classifier: 'electricity.consumption', name: 'electricity consumption' }] } };
+    if (url.includes('/resource/old/readings')) return { body: { status: 'OK', data: [[day('2026-10-09'), 8], [day('2026-10-10'), null], [day('2026-10-14'), null]] } };
+    if (url.includes('/resource/new/readings')) return { body: { status: 'OK', data: [[day('2026-10-09'), 7], [day('2026-10-14'), 9.5], [day('2026-10-15'), 0]] } };
+    if (url.includes('/current')) return { body: { data: [] } };
+    return { status: 404, body: {} };
+  });
+  const d = await b.discover(now);
+  assert.equal(d.consumption, 'new');
+  assert.equal(d.veName, 'House');
+  const probe = new URL(calls.find((c) => c.url.includes('/resource/old/readings')).url);
+  assert.equal(probe.searchParams.get('period'), 'P1D');
+});
+
+test('Bright: an answer marked as failed is an error, not "no readings"', async () => {
+  const { b } = setup();
+  fakeFetch((url) => (url.endsWith('/auth') ? { body: { valid: true, token: 't', exp: Math.floor(Date.now() / 1000) + 86400 * 7 } } : { body: { status: 'ERROR', data: [] } }));
+  await assert.rejects(b.readings('e', Date.now() - 3600e3, Date.now()), /Bright didn't send the readings \(it said "ERROR"\)/);
 });
