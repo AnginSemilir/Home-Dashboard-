@@ -38,52 +38,12 @@ A web page can only read another site's data if that site allows it (CORS). Whet
 
 1. Sign up at <https://dash.cloudflare.com/sign-up> (free plan).
 2. **Workers & Pages → Create → Create Worker**. Name it `fuse-relay` → **Deploy** → **Edit code**.
-3. Replace the code with this, then **Deploy**:
-
-   ```js
-   // Passes the few calls the wall panel makes to Fuse, and lets the panel's page read the answers.
-   const PANEL = 'https://anginsemilir.github.io';
-   const API = 'https://api.fuseenergy.com';
-   const WEB = 'https://www.fuseenergy.com';
-   const OK = [ // the only calls it will pass on
-     ['POST', /^\/api\/v3\/auth$/],
-     ['POST', /^\/api\/v1\/auth\/refresh$/],
-     ['GET', /^\/api\/v2\/customer\/premises$/],
-     ['GET', /^\/api\/v1\/premises\/[\w-]+\/chart$/],
-   ];
-   export default {
-     async fetch(req) {
-       const cors = {
-         'Access-Control-Allow-Origin': PANEL,
-         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-         'Access-Control-Allow-Headers': 'authorization, device-id, content-type, accept, x-fuse-app-version',
-         'Access-Control-Max-Age': '86400',
-         Vary: 'Origin',
-       };
-       const origin = req.headers.get('Origin');
-       if (origin && origin !== PANEL) return new Response('Not allowed', { status: 403 });
-       if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
-       const url = new URL(req.url);
-       let target;
-       if (req.method === 'POST' && url.pathname === '/web/api/trpc/phoneSignIn') target = `${WEB}/api/trpc/phoneSignIn`; // the text message
-       else if (OK.some(([m, re]) => m === req.method && re.test(url.pathname))) target = `${API}${url.pathname}${url.search}`;
-       else return new Response('Not found', { status: 404, headers: cors });
-       const headers = {};
-       for (const h of ['authorization', 'device-id', 'content-type', 'accept', 'x-fuse-app-version']) {
-         if (req.headers.get(h)) headers[h] = req.headers.get(h);
-       }
-       const res = await fetch(target, { method: req.method, headers, body: req.method === 'POST' ? await req.text() : undefined });
-       const out = new Response(res.body, res);
-       for (const [k, v] of Object.entries(cors)) out.headers.set(k, v);
-       return out;
-     },
-   };
-   ```
+3. Open [relay/fuse-relay.js](../relay/fuse-relay.js) on GitHub, press the **Copy raw file** button (two squares, top right of the file), go back to Cloudflare's editor, select everything there, paste, then **Deploy**. The file is tested (`web/test/unit/fuse-relay.test.js`): it only passes the five calls the panel makes, only for your panel's page, and keeps Fuse's cookies and your other headers out of it.
 4. Copy the worker's address (like `https://fuse-relay.yourname.workers.dev`).
 5. Allow the panel to talk to it. On GitHub, open `web/index.html` → ✏️ edit. In the `Content-Security-Policy` line, after `https://www.fuseenergy.com`, add a space and your worker's address, then **Commit changes**. (Or tell Claude the address and it does this.) After a few minutes the updated page is live.
 6. On the panel: ⚙ → Electricity → **Relay URL** → paste → **Send code**.
 
-The relay only passes those five calls through, and only for your panel's page. (The page check stops other websites, not other programs: keep the worker's address to yourself, as you would a password.) Your number, the code and the sign-in go via Cloudflare to Fuse, as they would from your browser. Cloudflare's free plan allows 100,000 requests a day; the panel uses a few hundred.
+The relay passes only those five calls. (The page check stops other websites, not other programs: keep the worker's address to yourself, as you would a password.) Your number, the code and the sign-in go via Cloudflare to Fuse, as they would from your browser. Cloudflare's free plan allows 100,000 requests a day; the panel uses a few hundred.
 
 If Fuse refuses the relay as well (an error mentioning 403), tell Claude: some sites turn away cloud servers.
 
