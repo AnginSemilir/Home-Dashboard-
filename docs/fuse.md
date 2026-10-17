@@ -40,10 +40,11 @@ A web page can only read another site's data if that site allows it (CORS). Whet
 2. **Workers & Pages → Create → Create Worker**. Name it `fuse-relay` → **Deploy** → **Edit code**.
 3. Open [relay/fuse-relay.js](../relay/fuse-relay.js) on GitHub, press the **Copy raw file** button (two squares, top right of the file), go back to Cloudflare's editor, select everything there, paste, then **Deploy**. The file is tested (`web/test/unit/fuse-relay.test.js`): it only passes the five calls the panel makes, only for your panel's page, and keeps Fuse's cookies and your other headers out of it.
 4. Copy the worker's address (like `https://fuse-relay.yourname.workers.dev`).
-5. Allow the panel to talk to it. On GitHub, open `web/index.html` → ✏️ edit. In the `Content-Security-Policy` line, after `https://www.fuseenergy.com`, add a space and your worker's address, then **Commit changes**. (Or tell Claude the address and it does this.) After a few minutes the updated page is live.
-6. On the panel: ⚙ → Electricity → **Relay URL** → paste → **Send code**.
+5. On the panel: ⚙ → Electricity → **Relay URL** → paste the address → **Send code**.
 
-The relay passes only those five calls. (The page check stops other websites, not other programs: keep the worker's address to yourself, as you would a password.) Your number, the code and the sign-in go via Cloudflare to Fuse, as they would from your browser. Cloudflare's free plan allows 100,000 requests a day; the panel uses a few hundred.
+Nothing needs editing in the repository: the panel's security list (`connect-src` in `web/index.html`) already allows any `https://….workers.dev` address, so **your own address never has to be written anywhere public**. That matters for this relay in particular, because anyone who knew its address could use it to have Fuse text arbitrary phone numbers. (A relay on your own domain, not workers.dev, does need adding to that `connect-src` line.)
+
+The relay passes only those five calls. (The page check stops other websites, not other programs: keep the worker's address to yourself, as you would a password. Never put it in the repository or share a screenshot of it.) Your number, the code and the sign-in go via Cloudflare to Fuse, as they would from your browser. Cloudflare's free plan allows 100,000 requests a day; the panel uses a few hundred.
 
 If Fuse refuses the relay as well (an error mentioning 403), tell Claude: some sites turn away cloud servers.
 

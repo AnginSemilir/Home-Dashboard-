@@ -264,21 +264,22 @@ test('Fuse blocked in this browser: plain words and where to look; with a relay,
   await page.locator('#settings').getByText(/Electricity and gas \(Fuse\) · Fuse didn't answer this browser.*docs\/fuse\.md/).waitFor();
   await ctx.close();
 
-  // The relay's address is allowed in index.html (docs/fuse.md has the user do that), then used for everything.
+  // A relay on workers.dev needs nothing edited in index.html, and is then used for everything.
   const s = fuseSettings(NOW);
   s.fuse.proxy = FUSE_RELAY;
   let calls;
-  ({ ctx, page, calls } = await openPanel(env, { settings: s, fuse: true, csp: true }));
+  ({ ctx, page, calls } = await openPanel(env, { settings: s, fuse: true }));
   await page.locator('#price .big .num').waitFor();
   assert.ok(fuseCalls(calls).length >= 2);
   assert.ok(fuseCalls(calls).every((c) => c.host === 'fuse-relay.example.workers.dev'), 'nothing went to Fuse directly');
   await ctx.close();
 
-  // Without that edit the policy refuses it, and the panel says what to do.
+  // A relay on another domain isn't in the policy: refused, and the panel says what to do.
+  s.fuse.proxy = 'https://relay.example.com';
   ({ ctx, page, calls } = await openPanel(env, { settings: s, fuse: true }));
   await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
   await page.locator('#price').click();
-  await page.locator('.toast', { hasText: 'to connect-src in web/index.html first (see docs/fuse.md)' }).waitFor();
+  await page.locator('.toast', { hasText: 'Add https://relay.example.com to connect-src in web/index.html first (see docs/fuse.md)' }).waitFor();
   assert.equal(fuseCalls(calls).length, 0);
   await ctx.close();
 });

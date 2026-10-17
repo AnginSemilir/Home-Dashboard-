@@ -25,6 +25,8 @@ One reviewer (a separate agent, with a second look from reproduction scripts) re
 | 8 | "+44 (0)7700 900123" kept the trunk 0. | Dropped. |
 | 9 | Kept figures from a different Fuse account could show as "yesterday" for a couple of hours. | Cached days and the newest-reading note carry the property's ID, and others are ignored. |
 
+Added after the first try on the tablet (Fuse did not allow the browser to call it, as feared): the relay is now a tested file, `relay/fuse-relay.js`, and the panel's security list allows any `*.workers.dev` address, so the user's own relay address never goes into the public repository. (Anyone who knew it could use the relay to have Fuse text arbitrary numbers.)
+
 Smaller: the relay's path pattern now accepts any ID characters (`[\w-]+`) rather than only lower-case hex; docs/fuse.md says to keep the worker's address private (its page check stops other websites, not other programs); the privacy page now says "Copy settings" includes the mobile number and the address line.
 
 Each fix has a test that fails without it (unit tests for 1, 2, 4, 6, 7, 8; browser tests for 3, 5, 9).

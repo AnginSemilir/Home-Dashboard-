@@ -263,7 +263,7 @@ export function openSettings(root, ctx) {
       say('Signed out of Fuse.');
     }, true),
     field('Relay URL (only if needed)', input(draft.fuse, 'proxy', { placeholder: 'https://fuse-relay.<you>.workers.dev' }),
-      'Leave empty. Only if the checklist says Fuse is blocking this browser: see docs/fuse.md (the address also has to be added to web/index.html).'));
+      'Leave empty. Only if the checklist says Fuse is blocking this browser: see docs/fuse.md (a Cloudflare workers.dev address needs nothing else).'));
   showFuse();
   const sourceSel = h('select', {},
     h('option', { value: 'octopus', selected: !['bright', 'fuse'].includes(draft.energy.source) }, 'Octopus: Agile prices and the Octopus Home Mini'),
