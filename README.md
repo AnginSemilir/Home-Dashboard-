@@ -77,4 +77,8 @@ npm run preview      # screenshots in shots/ at three tablet sizes
 npm run serve        # http://127.0.0.1:8080/Home-Dashboard-/
 ```
 
+## Licence
+
+[AGPL-3.0-only](LICENSE): anyone may use, change and share the panel's code, as long as they share their changes on the same terms (including when they run a changed copy for others over the web). The Fuse support builds on two community projects; [NOTICE](NOTICE) credits them and keeps their copyright notices.
+
 **The earlier Home Assistant version** (commit [`46756f4`](https://github.com/AnginSemilir/Home-Dashboard-/tree/46756f4)) is still in the history if you ever want it. It needed an always-on computer; this version doesn't.

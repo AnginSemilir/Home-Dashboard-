@@ -458,7 +458,9 @@ export function openSettings(root, ctx) {
     h('h1', {}, 'Panel settings', h('span', {}, cancel, close)),
     h('section', {}, h('h2', {}, 'Setup checklist'), list, msg),
     weather, energy, octo, google_, spotify_, kia, panel, move,
-    h('div', { class: 'help' }, 'Everything here is stored only in this browser on this tablet.'), version));
+    h('div', { class: 'help' }, 'Everything here is stored only in this browser on this tablet.'), version,
+    // AGPL-3.0: a web app shows where its source is.
+    h('div', { class: 'help' }, 'Free software (AGPL-3.0). ', h('a', { href: 'https://github.com/AnginSemilir/Home-Dashboard-', target: '_blank', rel: 'noopener noreferrer' }, 'Source code'))));
   root.append(overlay);
   return overlay;
 }

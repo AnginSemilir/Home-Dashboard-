@@ -9,7 +9,7 @@
 - Include today so far.
 
 **Read first:**
-- [docs/research/2026-10-17-fuse-api.md](../research/2026-10-17-fuse-api.md): the protocol spec. It is the only source to build from.
+- [docs/research/2026-10-17-fuse-api.md](../research/2026-10-17-fuse-api.md): the protocol spec, with file and line references into both projects (read their current code on GitHub; porting it is allowed, see Licence).
 - [docs/research/2026-10-15-bright-blank-panel.md](../research/2026-10-15-bright-blank-panel.md): lessons from Bright mode. Never blank without saying why, and a tap always explains.
 - `web/js/bright.js` and the Bright parts of `web/js/main.js`, `web/js/ui.js` and `web/js/settings-ui.js`. Fuse mode follows the same patterns.
 
@@ -20,9 +20,18 @@
 - They live only in the tablet's localStorage. Never ask the user to paste them in chat.
 - Don't commit the user's Cloud project ID either.
 
-**Licence**
-- **No code copied** from yakupafsin, simonsolts or LionZXY. Write fresh JavaScript from the protocol facts in the research note. (Issue #13 there is an open AGPL dispute.)
-- Credit them as a courtesy in `docs/fuse.md` and at the top of `web/js/fuse.js`: "Fuse API behaviour as documented by yakupafsin/fuse-energy-ha, simonsolts/fuse-homeassistant and LionZXY/FuseEnergyApi; no code copied."
+**Licence** (decided by the user on 17 Oct: the panel is **AGPL-3.0-only**; `LICENSE` and `NOTICE` are in the repo root)
+- **Code may be ported** from yakupafsin/fuse-energy-ha (MIT) and simonsolts/fuse-homeassistant (AGPL-3.0-only), Python translated to JavaScript. Port their tests' cases too where they help (yakupafsin's SMS-error shapes, clock-change days and cost-breakdown checks).
+- **Nothing from LionZXY/FuseEnergyApi**: it has no licence, so use only the facts in the research note, and never its example JSON (it holds the author's postcode and meter serial).
+- `web/js/fuse.js` and `web/test/unit/fuse.test.js` start with:
+  ```
+  // SPDX-License-Identifier: AGPL-3.0-only
+  // Fuse Energy client. Based on simonsolts/fuse-homeassistant (Copyright (C) 2026 Simon Solts,
+  // AGPL-3.0-only) and yakupafsin/fuse-energy-ha (Copyright (c) 2026 Yakup Afsin, MIT; see
+  // LICENSES/). Translated to JavaScript and changed for the wall panel, Oct 2026. See NOTICE.
+  ```
+- Keep `NOTICE` up to date if anything else is ported. Settings already links to the source, as AGPL asks of web apps.
+- Use the Fuse name only to say what the panel connects to; NOTICE carries the trademark line.
 
 **Behaviour**
 - **Never send an SMS by itself.** Only the user's tap on "Send code" may call phoneSignIn. When the session ends, say so and wait.

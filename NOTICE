@@ -1,0 +1,42 @@
+Home Dashboard (the wall panel)
+Copyright (C) 2026 AnginSemilir and the Home-Dashboard contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3 only
+(AGPL-3.0-only), as published by the Free Software Foundation. It comes with
+NO WARRANTY. See LICENSE for the full terms.
+
+Source: https://github.com/AnginSemilir/Home-Dashboard-
+(also linked from the panel: Settings, at the bottom).
+
+---
+THIRD-PARTY WORK
+
+Fuse Energy support (web/js/fuse.js and its tests) is based on:
+
+    simonsolts/fuse-homeassistant
+    Copyright (C) 2026 Simon Solts
+    Licensed under AGPL-3.0-only
+    https://github.com/simonsolts/fuse-homeassistant
+
+    yakupafsin/fuse-energy-ha
+    Copyright (c) 2026 Yakup Afsin
+    Licensed under the MIT Licence; its notice is kept in
+    LICENSES/MIT-yakupafsin-fuse-energy-ha.txt
+    https://github.com/yakupafsin/fuse-energy-ha
+
+Code ported from them was translated to JavaScript and changed to fit the
+panel; the changed files say so in their headers.
+
+The earliest public research into Fuse's API, LionZXY/FuseEnergyApi (December
+2024, https://github.com/LionZXY/FuseEnergyApi), is credited too. It has no
+licence, so nothing from it is copied: only facts about how the API behaves.
+
+---
+TRADEMARKS
+
+"Fuse" and "Fuse Energy" are trademarks of Fuse Energy Ltd. Octopus Energy,
+Bright, Glow, Google, Nest, Spotify and the other services the panel connects
+to belong to their owners. This project is independent and is not affiliated
+with, sponsored by or endorsed by any of them; their names are used only to
+say what the panel connects to.
