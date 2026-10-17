@@ -336,27 +336,45 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
     const m = /^\/api\/v1\/premises\/([^/]+)\/chart$/.exec(path);
     if (!m || m[1] !== 'prem-1') return json(route, { error: 'Not found' }, 404);
     const [y, mo, d] = ['year', 'month', 'day'].map((k) => +url.searchParams.get(k));
-    const ymd = `${y}-${pad(mo)}-${pad(d)}`;
-    const midnight = Date.parse(`${ymd}T00:00:00Z`) - (ymd >= '2026-03-29' && ymd < '2026-10-25' ? 3600e3 : 0); // UK midnight
+    if (fail.has('fuse-range-fails') && !d) return json(route, { error: 'Service unavailable' }, 503); // the month and year charts only
     const hourStart = Math.floor(now / 3600e3) * 3600e3;
     const elecUntil = fuseUntil ?? hourStart;
     const gasUntil = fail.has('fuse-no-gas-today') ? dayStart : elecUntil;
-    const local = new Date(now + 3600e3); // BST (the test dates are all in summer time)
-    const bars = (fuel) => [...Array(24).keys()].map((hour) => {
-      const start = midnight + hour * 3600e3;
+    const flat = fail.has('fuse-gas-flat'); // gas shared out evenly through the day: the same figure every hour
+    const rate = (fuel) => (fuel === 'gas' ? 0.0687 : 0.2664), standingH = (fuel) => (fuel === 'gas' ? 0.28 : 0.4735) / 24;
+    const midnightOf = (yy, mm, dd) => { const ymd = `${yy}-${pad(mm)}-${pad(dd)}`; return Date.parse(`${ymd}T00:00:00Z`) - (ymd >= '2026-03-29' && ymd < '2026-10-25' ? 3600e3 : 0); }; // UK midnight
+    // One hour of one fuel: what it truly was (full), and what Fuse reports (realised hours only, the hour in
+    // progress climbing; later hours are forecasts).
+    const hourOf = (fuel, start, spread) => {
       const until = fuel === 'gas' ? gasUntil : elecUntil;
-      const full = fuel === 'gas' ? gasHour(hour) : +(usedKwh(start) + usedKwh(start + 1800e3)).toFixed(3);
-      const nowIn = start === until && start <= now && now < start + 3600e3; // the hour in progress
-      const done = start + 3600e3 <= until;
-      let kwh = done ? full : nowIn ? (now - start >= 1800e3 ? +(full / 2).toFixed(3) : 0) : full;
+      const lh = new Date(start + 3600e3).getUTCHours();
+      const full = fuel === 'gas' ? (spread ? 0.37 : gasHour(lh)) : +(usedKwh(start) + usedKwh(start + 1800e3)).toFixed(3);
+      const done = start + 3600e3 <= until, nowIn = start === until && start <= now && now < start + 3600e3;
+      let kwh = done ? full : nowIn ? (now - start >= 1800e3 ? +(full / 2).toFixed(3) : 0) : 0;
       if (fuel === 'gas' && fail.has('fuse-gas-standing-only') && (done || nowIn)) kwh = 0;
-      const usage = kwh * (fuel === 'gas' ? 0.0687 : 0.2664), standing = (fuel === 'gas' ? 0.28 : 0.4735) / 24;
-      return { bar: { index: { year: y, month: mo, day: d, hour }, kWh: String(kwh), money: { amount: trunc2(usage + standing), currency: 'GBP' }, type: done || nowIn ? 'REALISED' : 'FORECASTED' },
-        breakdown: [{ name: 'USAGE', value: { amount: usage.toFixed(4) }, kWh: String(kwh) }, { name: 'STANDING', value: { amount: standing.toFixed(4) }, kWh: null }] };
-    });
-    const padding = { bar: { index: { year: y, month: mo, day: d - 1, hour: 23 }, kWh: '9', money: { amount: '9.00', currency: 'GBP' }, type: 'REALISED' } }; // a neighbouring day
-    const supplies = fuseNoElec ? [] : [{ supply_fid: 's1', supply_type: 'ELEC_IMPORT', bars: fail.has('fuse-empty') ? [] : [padding, ...bars('elec')] }, { supply_fid: 's2', supply_type: 'ELEC_EXPORT', bars: [] }];
-    if (!fuseNoGas) supplies.push({ supply_fid: 's3', supply_type: 'GAS', bars: fail.has('fuse-empty') ? [] : bars('gas') });
+      return { kwh, full, realised: done || nowIn };
+    };
+    const money = (usage, standing) => ({ amount: trunc2(usage + standing), currency: 'GBP' });
+    const entry = (fuel, index, hours, kind) => { // a bar for some hours (one hour, a day or a month)
+      const real = hours.filter((x) => x.realised);
+      const kwh = real.reduce((t, x) => t + x.kwh, 0), usage = kwh * rate(fuel), standing = real.length * standingH(fuel);
+      const ok = real.length > 0 && kind !== 'forecast';
+      const shown = ok ? kwh : hours.reduce((t, x) => t + x.full, 0); // a forecast shows something non-zero, to prove it is ignored
+      return { bar: { index, kWh: String(+shown.toFixed(3)), money: money(ok ? usage : shown * rate(fuel), ok ? standing : 0), type: ok ? 'REALISED' : 'FORECASTED' },
+        breakdown: [{ name: 'USAGE', value: { amount: usage.toFixed(4) }, kWh: String(+kwh.toFixed(3)) }, { name: 'STANDING', value: { amount: standing.toFixed(4) }, kWh: null }] };
+    };
+    const hoursOfDay = (fuel, yy, mm, dd, spread) => [...Array(24).keys()].map((h) => hourOf(fuel, midnightOf(yy, mm, dd) + h * 3600e3, spread));
+    const daysIn = (yy, mm) => new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+    const barsFor = (fuel) => {
+      if (d) { const hrs = hoursOfDay(fuel, y, mo, d, flat); return hrs.map((x, hour) => entry(fuel, { year: y, month: mo, day: d, hour }, [x])); }
+      if (mo) return [...Array(daysIn(y, mo)).keys()].map((i) => entry(fuel, { year: y, month: mo, day: i + 1 }, hoursOfDay(fuel, y, mo, i + 1, false)));
+      return [...Array(12).keys()].map((i) => entry(fuel, { year: y, month: i + 1 }, [...Array(daysIn(y, i + 1)).keys()].flatMap((dd) => hoursOfDay(fuel, y, i + 1, dd + 1, false))));
+    };
+    const local = new Date(now + 3600e3); // BST (the test dates are all in summer time)
+    const padding = d ? { bar: { index: { year: y, month: mo, day: d - 1, hour: 23 }, kWh: '9', money: { amount: '9.00', currency: 'GBP' }, type: 'REALISED' } } // a neighbouring day
+      : { bar: { index: mo ? { year: y, month: mo - 1 || 12, day: 28 } : { year: y - 1, month: 12 }, kWh: '9', money: { amount: '9.00', currency: 'GBP' }, type: 'REALISED' } };
+    const supplies = fuseNoElec ? [] : [{ supply_fid: 's1', supply_type: 'ELEC_IMPORT', bars: fail.has('fuse-empty') ? [] : [padding, ...barsFor('elec')] }, { supply_fid: 's2', supply_type: 'ELEC_EXPORT', bars: [] }];
+    if (!fuseNoGas) supplies.push({ supply_fid: 's3', supply_type: 'GAS', bars: fail.has('fuse-empty') ? [] : barsFor('gas') });
     return json(route, { current_index: { year: local.getUTCFullYear(), month: local.getUTCMonth() + 1, day: local.getUTCDate(), hour: local.getUTCHours() }, supplies });
   });
 

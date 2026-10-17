@@ -10,7 +10,7 @@ import { listTaskLists, createTaskList } from './tasks.js';
 import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
 import { detectEnv, MUSIC_APPS, ASSISTANTS } from './launcher.js';
-import { hhmm, dayKey, startOfDay } from './time.js';
+import { hhmm, dayKey, startOfDay, partsInTz } from './time.js';
 import { exportSpotify, importSpotify, spotifyEnded } from './spotify.js';
 import { LOCATION_WHY } from './sun.js';
 import { checkSubName } from './doorbell.js';
@@ -256,6 +256,11 @@ export function openSettings(root, ctx) {
       if (!draft.fuse.premisesId || !fuseApi.signedIn) throw new Error('Sign in to Fuse first.');
       const now = Date.now(), out = [];
       for (const ymd of [dayKey(now, draft.tz), dayKey(startOfDay(now, draft.tz, -1), draft.tz)]) out.push(chartSummary(await fuseApi.rawDay(draft.fuse.premisesId, ymd), ymd));
+      // The month (a bar per day) and the year (a bar per month): what the D/M/Y chart is drawn from.
+      const p = partsInTz(now, draft.tz), id = draft.fuse.premisesId;
+      for (const [title, ask] of [[`${p.y}-${String(p.m).padStart(2, '0')} (this month, a bar per day)`, () => fuseApi.rawRange(id, p.y, p.m)], [`${p.y} (this year, a bar per month)`, () => fuseApi.rawRange(id, p.y)]]) {
+        try { out.push(chartSummary(await ask(), title)); } catch (e) { out.push(`Fuse's chart for ${title}\ncouldn't be read: ${describeError(e)}`); }
+      }
       fuseDiag.textContent = out.join('\n\n');
       fuseDiag.classList.remove('hidden');
     }, true),

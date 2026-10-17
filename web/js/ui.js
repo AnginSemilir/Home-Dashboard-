@@ -5,7 +5,7 @@ import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
 import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, startOfDay, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
-import { renderChart, renderHours, renderUsageDay, renderFuseDay } from './chart.js';
+import { renderChart, renderHours, renderUsageDay, renderFuseChart as renderFuseChart_ } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
 import { MUSIC_APPS, musicApp, ASSISTANTS, assistantApp } from './launcher.js';
@@ -93,8 +93,18 @@ export function buildPanel(root, on) {
   });
   r.legend = h('div', { class: 'legend' });
   r.chartLabel = h('div', { class: 'label' }, 'Agile price ', h('span', { class: 'unit' }, 'p/kWh'));
+  // Fuse's chart: D (the day by the hour), M (the month by the day), Y (the year by the month), and stacked. Only shown in Fuse mode.
+  const names = { D: 'The day, by the hour', M: 'This month, by the day', Y: 'This year, by the month' };
+  r.fuseViews = Object.keys(names).map((k) => {
+    const b = h('button', { class: 'fz-seg', type: 'button', 'data-view': k, 'aria-label': names[k], 'aria-pressed': 'false' }, k);
+    b.addEventListener('click', (e) => { e.stopPropagation(); on.fuseView?.(k); });
+    return b;
+  });
+  r.fuseStack = h('button', { class: 'fz-stack hidden', type: 'button', 'aria-pressed': 'false' }, 'Stacked');
+  r.fuseStack.addEventListener('click', (e) => { e.stopPropagation(); on.fuseStyle?.(); });
+  r.fuseCtl = h('div', { class: 'fuse-ctl hidden' }, h('div', { class: 'fz-segs', role: 'group', 'aria-label': 'Chart range' }, ...r.fuseViews), r.fuseStack);
   r.chart = h('section', { class: 'card chart', id: 'chart' },
-    h('div', { class: 'chart-head' }, r.chartLabel, r.legend),
+    h('div', { class: 'chart-head' }, r.chartLabel, r.legend, r.fuseCtl),
     r.chartBox, r.chartTip, (r.chartDot = dot()));
 
   r.priceBig = h('div', { class: 'big' });
@@ -1018,22 +1028,52 @@ export function renderFuse(r, v, now, tz = DEFAULT_TZ) {
         : ['readings to ', h('b', {}, to), lag <= 2 * 3600e3 ? ' · Fuse is about an hour behind' : ` · Fuse is ${Math.round(lag / 3600e3)} hours behind`];
     // The amounts that make up the total, for each fuel the account has (one that hasn't reported yet says so).
     const bits = [v.hasElec && (e.kwh > 0 ? ['Electricity ', h('b', {}, pounds(v.parts.elec))] : 'electricity not reported yet'),
-      v.hasGas && (g.kwh > 0 ? ['Gas ', h('b', {}, pounds(v.parts.gas))] : 'gas not reported yet')].filter(Boolean);
+      v.hasGas && (g.kwh > 0 ? ['Gas ', h('b', {}, pounds(v.parts.gas)), v.chart.gasEven ? ' (even spread)' : ''] : 'gas not reported yet')].filter(Boolean);
     const split = bits.flatMap((b, i) => (i ? [' · ', b] : [b]));
     r.priceSub.replaceChildren(h('div', {}, ...reach), h('div', {}, ...split, bits.length === 1 ? ' · standing charge included' : ''));
   }
-  // The chart: today, or until today has a reading the newest day Fuse has, dated.
-  const day = dayWords(v.shown.start, now, tz);
-  r.chartLabel.replaceChildren(`Usage ${day} `, h('span', { class: 'unit' }, 'kWh per hour'));
-  r.legend.dataset.key = `fuse/${v.hasElec}/${v.hasGas}`;
+  renderFuseChart(r, v, now, tz);
+}
+
+/** Fuse's chart: a day by the hour, a month by the day or a year by the month; split into a row per fuel, or stacked in pounds. */
+function renderFuseChart(r, v, now, tz) {
+  const c = v.chart;
+  // The controls: which view, and (when there is something to stack) stacked.
+  r.fuseCtl.classList.remove('hidden');
+  r.fuseViews.forEach((b) => { const on = b.dataset.view === c.view; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+  const stacked = c.style === 'stacked' && c.canStack;
+  r.fuseStack.classList.toggle('hidden', !c.canStack);
+  r.fuseStack.classList.toggle('on', stacked);
+  r.fuseStack.setAttribute('aria-pressed', String(stacked));
+
+  const month = c.view === 'M', year = c.view === 'Y';
+  const level = c.view === 'D' ? 'hour' : c.period.level;
+  const from = c.view === 'D' ? v.shown.start : c.period.start, to = c.view === 'D' ? v.shown.end : c.period.end;
+  const when = c.view === 'D' ? dayWords(v.shown.start, now, tz) : month ? 'this month' : 'this year';
+  const data = c.view === 'D' ? v.shownDay : c.range;
+  r.chartLabel.replaceChildren(`${stacked ? 'Cost' : 'Usage'} ${when} `,
+    h('span', { class: 'unit' }, `${stacked ? '£' : 'kWh'} per ${{ hour: 'hour', day: 'day', month: 'month' }[level]}${c.view === 'D' && c.gasEven ? " · gas isn't hourly" : ''}`));
+
+  // Rows: electricity, and gas (by the hour only when Fuse really sends it that way).
+  const gasShown = v.hasGas && (c.view !== 'D' || c.gasHourly);
+  const min = { hour: { elec: 0.5, gas: 1, pounds: 0.25 }, day: { elec: 5, gas: 15, pounds: 2 }, month: { elec: 100, gas: 300, pounds: 25 } }[level];
+  const rows = [];
+  if (v.hasElec) rows.push({ fuel: 'elec', label: 'Electricity', min: min.elec, hours: data?.elec || [] });
+  if (gasShown) rows.push({ fuel: 'gas', label: 'Gas', min: min.gas, hours: data?.gas || [] });
+  r.legend.dataset.key = `fuse/${rows.length}`;
   const item = (cls, text) => h('span', { class: 'lg' }, h('span', { class: `sw sw-${cls}` }), text);
-  r.legend.replaceChildren(...(v.hasElec && v.hasGas ? [item('elec', 'Electricity'), item('gas', 'Gas')] : []));
+  // Split rows carry their own swatch and name; the legend is for the stacked bars.
+  r.legend.replaceChildren(...(stacked && rows.length > 1 ? [item('elec', 'Electricity'), item('gas', 'Gas')] : []));
+
+  // A month or year that hasn't come, or can't be drawn, says why instead of leaving the box empty.
+  const what = month ? 'month' : 'year';
+  const nothing = !data ? (c.load.error ? `Couldn't load this ${what} from Fuse: ${c.load.error}` : `Loading this ${what} from Fuse…`)
+    : (c.view !== 'D' && !data.elec.length && !data.gas.length)
+      ? `Fuse sent no ${month ? 'daily' : 'monthly'} figures for this ${what} yet.${data.skipped ? ` (It sent ${data.skipped} bars the panel couldn't place: ⚙ → Electricity → Show what Fuse sent.)` : ''}` : '';
+  if (c.view !== 'D' && nothing) { r.chartBox.replaceChildren(h('div', { class: 'chart-msg' }, nothing)); return; }
   const box = r.chartBox.getBoundingClientRect();
   const fs = parseFloat(getComputedStyle(r.chartBox).fontSize) || 12;
-  const rows = [];
-  if (v.hasElec) rows.push({ fuel: 'elec', label: 'Electricity', min: 0.5, hours: v.shownDay?.elec || [] });
-  if (v.hasGas) rows.push({ fuel: 'gas', label: 'Gas', min: 1, hours: v.shownDay?.gas || [] });
-  r.chartBox.replaceChildren(svg(renderFuseDay({ rows, now, dayStart: v.shown.start, dayEnd: v.shown.end, width: box.width || 500, height: box.height || 260, fs, tz, day })));
+  r.chartBox.replaceChildren(svg(renderFuseChart_({ rows, stacked, minPounds: min.pounds, level, now, start: from, end: to, width: box.width || 500, height: box.height || 260, fs, tz, day: when })));
 }
 
 /** Electricity (replaces "Using now": Fuse has nothing live) and Gas (or yesterday, with no gas). */
@@ -1043,7 +1083,7 @@ function renderFuseTiles(r, v, now, tz) {
   const why = (what) => (v.notSetUp ? 'Fuse not set up yet' : v.signedOut ? 'Signed out · tap' : v.status?.error ? '' : !v.status ? 'Asking Fuse…' : what);
   const money = (t) => pounds(Math.round(t.pence));
   // Yesterday, with how far its readings reach if Fuse hasn't sent all of it.
-  const yesterday = (y) => (y.hours ? h('div', { class: 'muted' }, `Yesterday ${money(y)}`, y.complete ? '' : ` · to ${hhmm(y.last, tz)}`) : '');
+  const yesterday = (y) => (y.hours ? h('div', { class: 'muted yest' }, `Yesterday ${money(y)}`, y.complete ? '' : ` · to ${hhmm(y.last, tz)}`) : '');
   const tile = (t, label, today, yest, none) => {
     t.label.textContent = label;
     if (today.kwh > 0) {
@@ -1071,11 +1111,21 @@ function renderFuseTiles(r, v, now, tz) {
   }
 }
 
-/** The pop-up over a tapped hour: "Electricity 13:00–14:00 · 0.42 kWh · 11p (so far)". */
+/** The pop-up over a tapped bar: "Electricity 13:00–14:00 · 0.42 kWh · 11p (so far)", or for a stacked bar both fuels. */
 export function showFuseTip(r, hit, tz = DEFAULT_TZ) {
-  const start = Number(hit.dataset.start), end = Number(hit.dataset.end), kwh = Number(hit.dataset.kwh), p = Number(hit.dataset.pence);
-  r.chartTip.replaceChildren(h('b', {}, hit.dataset.fuel === 'gas' ? 'Gas' : 'Electricity'), ` ${hhmm(start, tz)}–${hhmm(end, tz)}`,
-    h('span', { class: 'tip-band' }, ` · ${kwh.toFixed(2)} kWh · ${pence(p)}${hit.dataset.sofar === '1' ? ' so far' : ''}`));
+  const d = hit.dataset, start = Number(d.start), end = Number(d.end);
+  const level = d.level || 'hour';
+  const when = level === 'hour' ? `${hhmm(start, tz)}–${hhmm(end, tz)}`
+    : level === 'day' ? `${weekdayShort(start, tz)} ${dayMonth(start, tz)}`
+      : new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: tz }).format(new Date(start));
+  const kwhText = (k) => `${k >= 100 ? Math.round(k) : k >= 10 ? k.toFixed(1) : k.toFixed(2)} kWh`;
+  const so = d.sofar === '1' ? ' so far' : '';
+  if (d.fuel === 'both') {
+    const e = [Number(d.elecKwh), Number(d.elecPence)], g = [Number(d.gasKwh), Number(d.gasPence)];
+    r.chartTip.replaceChildren(h('b', {}, when), h('span', { class: 'tip-band' }, ` · ${pence(e[1] + g[1])}${so} · Electricity ${pence(e[1])} (${kwhText(e[0])}) · Gas ${pence(g[1])} (${kwhText(g[0])})`));
+  } else {
+    r.chartTip.replaceChildren(h('b', {}, d.fuel === 'gas' ? 'Gas' : 'Electricity'), ` ${when}`, h('span', { class: 'tip-band' }, ` · ${kwhText(Number(d.kwh))} · ${pence(Number(d.pence))}${so}`));
+  }
   placeTip(r, hit);
 }
 

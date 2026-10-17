@@ -6,7 +6,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Fuse, FuseRefusal, FuseSignedOut, FUSE_APP_VERSION, parseChart, dayTotals, refusalCode,
-  normalisePhone, normaliseDateAnswer, explainFuseError, chartSummary,
+  normalisePhone, normaliseDateAnswer, explainFuseError, chartSummary, parseRange, isEvenSpread,
 } from '../../js/fuse.js';
 import { loadSettings } from '../../js/config.js';
 import { HttpError } from '../../js/util.js';
@@ -592,11 +592,87 @@ test('chartSummary: the hour and kWh of every bar and the field names, never IDs
   body.supplies[0].supply_fid = 'secret-supply-id';
   const text = chartSummary(body, '2026-10-17');
   assert.match(text, /^Fuse's chart for 2026-10-17\n/);
-  assert.match(text, /ELEC_IMPORT: 2 bars\n08=0\.422 09=0\.1\?/, 'an unrealised bar is marked');
-  assert.match(text, /GAS: 1 bars\n08=1\.5\n/);
+  assert.match(text, /ELEC_IMPORT: 2 bars\n10\.17\.08=0\.422 10\.17\.09=0\.1\?/, 'an unrealised bar is marked');
+  assert.match(text, /GAS: 1 bars\n10\.17\.08=1\.5\n/);
   assert.match(text, /first realised bar: money 0\.12, parts \[\["USAGE","0\.1086","0\.422"\],\["STANDING","0\.0181",null\]\]/);
   assert.match(text, /fields: chart\[.*premises_address.*\] supply\[.*supply_fid.*\]/, 'the names of the fields are listed');
   assert.match(text, /current_index: \{"year":2026,"month":10,"day":17,"hour":9\}/);
   assert.ok(!/Secret|secret-supply-id|abc/.test(text), 'no values from outside the numbers');
   assert.equal(chartSummary(null, '2026-10-17').split('\n').length, 3, 'a body that is not a chart still gives a summary');
+});
+
+// ---------- Month and year views ----------
+
+/** A coarse bar: a day of a month, or a month of a year (no hour in its index). */
+const coarse = (index, kwh, usage, { type = 'REALISED', standing = '0.4735' } = {}) =>
+  ({ bar: { index, kWh: String(kwh), money: { amount: '0.00', currency: 'GBP' }, type }, breakdown: [{ name: 'USAGE', value: { amount: String(usage) }, kWh: String(kwh) }, { name: 'STANDING', value: { amount: standing }, kWh: null }] });
+
+test('parseRange (a month): daily bars on the UK calendar, 25 hours long on the clock-change day, padding and forecasts left out', () => {
+  const days = Array.from({ length: 31 }, (_, i) => i + 1);
+  const body = chartOf({
+    ELEC_IMPORT: [...days.map((d) => coarse({ year: 2026, month: 10, day: d }, 10 + d, 2 + d, { type: d <= 20 ? 'REALISED' : 'FORECASTED' })), coarse({ year: 2026, month: 9, day: 30 }, 99, 99)],
+    GAS: days.filter((d) => d <= 20).map((d) => coarse({ year: 2026, month: 10, day: d }, 30, 2)),
+  });
+  const now = at('2026-10-20T14:00:00+01:00');
+  const m = parseRange(body, 'day', { year: 2026, month: 10 }, { now });
+  assert.equal(m.elec.length, 20, 'only the realised days');
+  assert.equal(m.gas.length, 20);
+  assert.equal(m.skipped, 1, 'the bar from September');
+  assert.equal(m.elec[0].kwh, 11);
+  assert.equal(m.elec[0].pence, 100 * (3 + 0.4735), 'usage plus standing, from the breakdown');
+  assert.deepEqual(m.elec.map((d) => d.inProgress).lastIndexOf(true), 19, 'the 20th is today');
+  assert.equal(m.elec.filter((d) => d.inProgress).length, 1);
+  assert.deepEqual([iso(m.elec[0].start), iso(m.elec[0].end)], ['2026-09-30T23:00Z', '2026-10-01T23:00Z'], 'BST: the 1st starts at 23:00 UTC the day before');
+  const clock = parseRange(chartOf({ ELEC_IMPORT: [coarse({ year: 2026, month: 10, day: 25 }, 1, 1)] }), 'day', { year: 2026, month: 10 }, { now: at('2026-10-26T12:00:00Z') }).elec[0];
+  assert.equal((clock.end - clock.start) / 3600e3, 25, 'the clock-back day has 25 hours');
+  assert.deepEqual(m.has, { elec: true, gas: true, export: false });
+});
+
+test('parseRange (a year): monthly bars, with the right edges for BST and GMT months, and bad bars skipped', () => {
+  const months = Array.from({ length: 12 }, (_, i) => i + 1);
+  const body = chartOf({
+    ELEC_IMPORT: [...months.map((mo) => coarse({ year: 2026, month: mo }, 100 * mo, 20 * mo)), coarse({ year: 2025, month: 12 }, 1, 1), coarse({ year: 2026, month: 13 }, 1, 1), coarse({ year: 2026, month: 3 }, 5, 5)],
+  });
+  const y = parseRange(body, 'month', { year: 2026 }, { now: at('2026-10-17T12:00:00+01:00') });
+  assert.equal(y.elec.length, 12, 'a repeated month is counted once');
+  assert.equal(y.skipped, 3, 'last December, month 13, and the repeated March');
+  assert.deepEqual(y.elec.map((m) => m.inProgress).indexOf(true), 9, 'October is the month in progress');
+  const iso16 = (ms) => new Date(ms).toISOString().slice(0, 16) + 'Z';
+  assert.deepEqual([iso16(y.elec[0].start), iso16(y.elec[0].end)], ['2026-01-01T00:00Z', '2026-02-01T00:00Z']);
+  assert.deepEqual([iso16(y.elec[9].start), iso16(y.elec[9].end)], ['2026-09-30T23:00Z', '2026-11-01T00:00Z'], 'October: starts in BST, ends in GMT');
+  assert.equal(iso16(y.elec[11].end), '2027-01-01T00:00Z');
+  assert.deepEqual(parseRange(null, 'month', { year: 2026 }).elec, []);
+  assert.deepEqual(parseRange({ supplies: 'x' }, 'day', { year: 2026, month: 1 }).skipped, 0);
+});
+
+test('isEvenSpread: the same figure hour after hour is Fuse sharing a total out, not readings', () => {
+  const hrs = (kwhs, inProgressLast = false) => kwhs.map((kwh, i) => ({ kwh, inProgress: inProgressLast && i === kwhs.length - 1 }));
+  const same = (n, v = 0.37) => Array(n).fill(v);
+  assert.equal(isEvenSpread(hrs(same(9))), true);
+  assert.equal(isEvenSpread(hrs(same(24))), true, 'a whole day');
+  assert.equal(isEvenSpread(hrs([2.9, 2.9, 2.9, ...same(6, 0.25)])), false, 'a real morning peak');
+  assert.equal(isEvenSpread(hrs(same(6))), false, 'a few quiet hours can repeat by chance');
+  assert.equal(isEvenSpread(hrs([...same(8), 0.18], true)), true, 'the hour in progress (half of it so far) is left out');
+  assert.equal(isEvenSpread(hrs([...same(7), 0.18], true)), false, 'seven finished hours is too few to say');
+  assert.equal(isEvenSpread(hrs([0, 0, 0, 0, 0, 0])), false, 'no usage is not a spread');
+  assert.equal(isEvenSpread(hrs([0.371, 0.37, 0.372, 0.37, 0.369])), false, 'real readings differ');
+  assert.equal(isEvenSpread(null), false);
+});
+
+test('a month and a year are asked for by leaving the day (and the month) out of the chart call', async () => {
+  const { fuse, storage } = setup();
+  SIGNED_IN(storage, 'acc', 'ref');
+  fakeFetch(() => ({ body: { supplies: [] } }));
+  await fuse.month('p-1', 2026, 10);
+  await fuse.year('p-1', 2026);
+  assert.deepEqual(calls.map((c) => Object.fromEntries(new URL(c.url).searchParams)), [{ year: '2026', month: '10' }, { year: '2026' }]);
+  assert.ok(calls.every((c) => path(c) === '/api/v1/premises/p-1/chart'));
+});
+
+test('chartSummary: a month shows month.day and a year just the month, whatever the title', () => {
+  const month = chartSummary(chartOf({ GAS: [coarse({ year: 2026, month: 10, day: 3 }, 20.5, 1.4), coarse({ year: 2026, month: 10, day: 4 }, 22, 1.5, { type: 'FORECASTED' })] }), '2026-10 (this month, a bar per day)');
+  assert.match(month, /^Fuse's chart for 2026-10 \(this month, a bar per day\)\n/);
+  assert.match(month, /GAS: 2 bars\n10\.03=20\.5 10\.04=22\?/);
+  const year = chartSummary(chartOf({ ELEC_IMPORT: [coarse({ year: 2026, month: 1 }, 410, 110), coarse({ year: 2026, month: 2 }, 380, 100)] }), '2026 (this year, a bar per month)');
+  assert.match(year, /ELEC_IMPORT: 2 bars\n01=410 02=380/);
 });

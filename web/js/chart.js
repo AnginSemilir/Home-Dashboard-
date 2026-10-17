@@ -3,7 +3,7 @@
 // (css/bold.css, css/ambient.css); the bar fills here are only a fallback.
 
 import { band } from './agile.js';
-import { partsInTz, weekdayShort, DEFAULT_TZ } from './time.js';
+import { partsInTz, weekdayShort, localToMs, startOfDay, DEFAULT_TZ } from './time.js';
 
 export const BAND_COLOURS = { plunge: '#3d9bff', cheap: '#2aa87e', mid: '#f0a02c', high: '#e0524a', none: '#667' };
 
@@ -289,82 +289,169 @@ export function renderUsageDay({ slots, now, dayStart, dayEnd, width, height, fs
 
 const FUSE_FALLBACK = { elec: '#3987e5', gas: '#d95926' }; // the style sheets set the real (validated) colours
 
+const poundStep = (max) => {
+  for (const st of [0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]) if (max / st <= 4) return st;
+  return 2000;
+};
+const pounds0 = (v) => `£${+v.toFixed(2)}`;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** A bar with a square top (the lower segment of a stack). */
+const flatBar = (x, w, yTop, yBot) => `M${f1(x)} ${f1(yBot)}V${f1(yTop)}h${f1(w)}V${f1(yBot)}Z`;
+
 /**
- * Fuse's hourly usage for one day, as an SVG string: a row of bars for each fuel (electricity, then
- * gas), on one shared time axis but each with its own kWh scale (the two aren't comparable, and one
- * scale would flatten the smaller). The hour in progress is lighter: it's "so far", and Fuse keeps
- * topping it up. Bars and tap targets (`ch-hit`, with the hour's figures) are drawn in the same order.
+ * Fuse's usage as an SVG string, for a day (`level` 'hour': 24 bars), a month ('day') or a year ('month').
+ * Split (the default): a row of bars for each fuel on one shared time axis but each with its own kWh scale
+ * (the two aren't comparable, and one scale would flatten the smaller). Stacked: one plot of what each bar
+ * cost in pounds, electricity at the bottom and gas on top. The bar in progress is lighter: it's "so far".
+ * Bars and tap targets (`ch-hit`, with the bar's figures) are drawn in the same order.
  * @param {object} o
  * @param {{fuel:string,label:string,min:number,hours:{start:number,end:number,kwh:number,pence:number,inProgress:boolean}[]}[]} o.rows
- *   `min`: the smallest top of the scale in kWh, so a quiet hour doesn't fill the row
- * @param {string} [o.day] 'today', 'yesterday' or a date, for the empty-row note
+ *   `min`: the smallest top of the kWh scale, so a quiet bar doesn't fill the row
+ * @param {boolean} [o.stacked]
+ * @param {number} [o.minPounds] the smallest top of the stacked scale
+ * @param {string} [o.day] 'today', 'yesterday', a date or 'this month'…, for the empty-row note and the description
  */
-export function renderFuseDay({ rows, now, dayStart, dayEnd, width, height, fs = 12, tz = DEFAULT_TZ, day = 'today' }) {
+export function renderFuseChart({ rows, stacked = false, minPounds = 0.25, level = 'hour', now, start: from, end: to, width, height, fs = 12, tz = DEFAULT_TZ, day = 'today' }) {
   const W = Math.max(160, Math.round(width));
   const H = Math.max(120, Math.round(height));
-  const padL = Math.round(fs * 2.8), padR = 2, padT = Math.round(fs * 1.9), padB = Math.round(fs * 2);
+  const padL = Math.round(fs * (stacked ? 3.6 : 2.8)), padR = 2, padT = Math.round(fs * 1.9), padB = Math.round(fs * 2);
   const plotW = W - padL - padR;
-  const n = Math.max(1, rows.length), gap = Math.round(fs * 0.7), head = Math.round(fs * 1.4);
+  const n = stacked ? 1 : Math.max(1, rows.length), gap = Math.round(fs * 0.7), head = stacked ? 0 : Math.round(fs * 1.4);
   const rowH = (H - padT - padB - gap * (n - 1)) / n;
-  const x = (t) => padL + ((t - dayStart) / (dayEnd - dayStart)) * plotW;
-  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg use-svg fuse-svg" role="img" aria-label="Electricity and gas used in each hour ${/^(today|yesterday)$/.test(day) ? day : `on ${day}`}">`];
+  const x = (t) => padL + ((t - from) / (to - from)) * plotW;
+  const unit = { hour: 'hour', day: 'day', month: 'month' }[level];
+  const colour = (f) => FUSE_FALLBACK[f] || '#888';
+  const out = [`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="chart-svg use-svg fuse-svg" role="img" aria-label="${stacked ? 'What electricity and gas cost' : 'Electricity and gas used'} in each ${unit} ${/^(today|yesterday)$/.test(day) ? day : `(${day})`}">`];
   const bars = [], hits = [], over = [];
-  rows.forEach((row, i) => {
-    const top = padT + i * (rowH + gap);
-    const plotTop = top + head, base = top + rowH;
-    const hours = row.hours.filter((h) => h.start >= dayStart && h.start < dayEnd && Number.isFinite(h.kwh));
-    const max = Math.max(row.min, ...hours.map((h) => h.kwh));
-    const step = kwhStep(max), topV = Math.ceil(max / step - 1e-9) * step;
+  const box = (b) => {
+    const x0 = x(b.start), x1 = x(Math.min(b.end, to));
+    const w = Math.max(1, Math.min(24, x1 - x0 - 2));
+    return { x: x0 + (x1 - x0 - w) / 2, w, x0, x1 };
+  };
+  const hit = (b, plotTop, base, attrs) => {
+    const bx = box(b), hx0 = Math.max(padL, bx.x0), hx1 = Math.min(W - padR, bx.x1);
+    hits.push(`<rect x="${f1(hx0)}" y="${f1(plotTop)}" width="${f1(hx1 - hx0)}" height="${f1(base - plotTop)}" fill="transparent" class="ch-hit" data-level="${level}" data-start="${b.start}" data-end="${b.end}" ${attrs}/>`);
+  };
+  // A value above the biggest bar, kept inside the plot (clear of the axis figures) when that bar is at an edge.
+  const valueLabel = (cx, y, str) => {
+    const half = (str.length * fs * 0.62) / 2 + 3;
+    return `<text x="${f1(Math.min(Math.max(cx, padL + half), W - padR - half))}" y="${f1(y)}" text-anchor="middle" class="ch-val">${str}</text>`;
+  };
+  const emptyNote = (cx, cy, what) => out.push(`<text x="${f1(cx)}" y="${f1(cy)}" text-anchor="middle" class="ch-empty">${day === 'today' ? `No ${what}readings yet today` : `No ${what}readings for ${day}`}</text>`);
+
+  if (stacked) {
+    // One plot: pounds, the fuels stacked.
+    const plotTop = padT, base = padT + rowH;
+    const times = [...new Set(rows.flatMap((r) => r.hours.filter((h) => h.start >= from && h.start < to).map((h) => h.start)))].sort((a, b) => a - b);
+    const cols = times.map((t) => ({ t, parts: rows.map((r) => ({ fuel: r.fuel, h: r.hours.find((h) => h.start === t) })).filter((p) => p.h) }));
+    const total = (c) => c.parts.reduce((a, p) => a + p.h.pence, 0) / 100;
+    const max = Math.max(minPounds, ...cols.map(total));
+    const step = poundStep(max), topV = Math.ceil(max / step - 1e-9) * step;
     const y = (v) => plotTop + (1 - v / topV) * (base - plotTop);
-    // The row's name, with a swatch of its colour (the legend; text itself stays in ink).
-    out.push(`<rect x="${padL}" y="${f1(top + fs * 0.1)}" width="${f1(fs * 0.8)}" height="${f1(fs * 0.8)}" rx="2" class="ch-key ch-${row.fuel}" fill="${FUSE_FALLBACK[row.fuel] || '#888'}"/>`);
-    out.push(`<text x="${f1(padL + fs * 1.15)}" y="${f1(top + fs * 0.85)}" class="ch-rowname">${row.label}</text>`);
-    // Gridlines at each step; all of them labelled only when there's room.
-    const roomy = (base - plotTop) / (topV / step) >= fs * 1.8;
     for (let v = 0; v <= topV + 1e-9; v += step) {
       const yy = Math.round(y(v)) + 0.5;
       out.push(`<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" class="${v === 0 ? 'ch-zero' : 'ch-grid'}"/>`);
-      if (roomy || v === 0 || v + step > topV + 1e-9) out.push(`<text x="${padL - Math.round(fs * 0.6)}" y="${f1(yy + fs * 0.35)}" text-anchor="end" class="ch-y">${+v.toFixed(2)}</text>`);
+      out.push(`<text x="${padL - Math.round(fs * 0.6)}" y="${f1(yy + fs * 0.35)}" text-anchor="end" class="ch-y">${pounds0(v)}</text>`);
     }
-    const used = hours.filter((h) => h.kwh > 0);
-    if (!used.length) {
-      out.push(`<text x="${f1(padL + plotW / 2)}" y="${f1(plotTop + (base - plotTop) * 0.55)}" text-anchor="middle" class="ch-empty">${day === 'today' ? `No ${row.label.toLowerCase()} readings yet today` : `No ${row.label.toLowerCase()} readings for ${day}`}</text>`);
-    } else {
-      // Readings still to come: a faint box from this fuel's newest reading to now.
-      const lastEnd = Math.max(...used.map((h) => (h.inProgress ? h.start + 1800e3 : h.end)));
-      if (now - lastEnd > 90 * 60e3 && now > dayStart && lastEnd < dayEnd) {
-        const px = x(lastEnd) + 2, nx = x(Math.min(now, dayEnd));
-        out.push(`<rect x="${f1(px)}" y="${f1(plotTop)}" width="${f1(Math.max(0, nx - px))}" height="${f1(base - plotTop)}" rx="6" class="ch-pending"/>`);
-        if (nx - px > fs * 9) out.push(`<text x="${f1((px + nx) / 2)}" y="${f1(plotTop + (base - plotTop) * 0.55)}" text-anchor="middle" class="ch-note">Readings due</text>`);
-      }
-    }
-    // Bars, a 2px gap between neighbours; the biggest gets its value.
+    if (!cols.length) emptyNote(padL + plotW / 2, plotTop + (base - plotTop) * 0.5, '');
     let biggest = null;
-    for (const h of hours) {
-      const x0 = x(h.start), x1 = x(Math.min(h.end, dayEnd));
-      const w = Math.max(1, Math.min(24, x1 - x0 - 2));
-      const bx = x0 + (x1 - x0 - w) / 2;
-      const yTop = Math.min(y(h.kwh), base - 1.5);
-      bars.push(`<path d="${barPath(bx, w, yTop, base, false)}" fill="${FUSE_FALLBACK[row.fuel] || '#888'}" class="ch-bar ch-${row.fuel}${h.inProgress ? ' ch-sofar' : ''}"/>`);
-      if (!biggest || h.kwh > biggest.h.kwh) biggest = { h, cx: bx + w / 2, yTop };
-      const hx0 = Math.max(padL, x0), hx1 = Math.min(W - padR, x1);
-      hits.push(`<rect x="${f1(hx0)}" y="${f1(plotTop)}" width="${f1(hx1 - hx0)}" height="${f1(base - plotTop)}" fill="transparent" class="ch-hit" data-fuel="${row.fuel}" data-start="${h.start}" data-end="${h.end}" data-kwh="${h.kwh}" data-pence="${h.pence}" data-sofar="${h.inProgress ? 1 : 0}"/>`);
+    for (const c of cols) {
+      const b = { start: c.t, end: c.parts[0].h.end, inProgress: c.parts.some((p) => p.h.inProgress) };
+      const bx = box(b);
+      let lo = 0;
+      const segs = c.parts.map((p, i) => {
+        const hi = lo + p.h.pence / 100;
+        const yTop = Math.min(y(hi), y(lo) - 1.5), yBot = y(lo) - (i ? 2 : 0); // a 2px gap between the segments
+        lo = hi;
+        const last = i === c.parts.length - 1;
+        return `<path d="${last ? barPath(bx.x, bx.w, yTop, yBot, false) : flatBar(bx.x, bx.w, yTop, yBot)}" fill="${colour(p.fuel)}" class="ch-seg ch-${p.fuel}"/>`;
+      });
+      bars.push(`<g class="ch-bar ch-stack${b.inProgress ? ' ch-sofar' : ''}">${segs.join('')}</g>`);
+      const tot = total(c);
+      if (!biggest || tot > biggest.tot) biggest = { tot, cx: bx.x + bx.w / 2, yTop: y(tot) };
+      const get = (f, k) => c.parts.find((p) => p.fuel === f)?.h[k] ?? 0;
+      hit(b, plotTop, base, `data-fuel="both" data-sofar="${b.inProgress ? 1 : 0}" data-elec-kwh="${get('elec', 'kwh')}" data-elec-pence="${get('elec', 'pence')}" data-gas-kwh="${get('gas', 'kwh')}" data-gas-pence="${get('gas', 'pence')}"`);
     }
-    if (biggest && biggest.h.kwh > 0 && biggest.yTop - fs * 0.8 > plotTop - fs * 0.2) {
-      over.push(`<text x="${f1(biggest.cx)}" y="${f1(biggest.yTop - fs * 0.45)}" text-anchor="middle" class="ch-val">${biggest.h.kwh.toFixed(2)}</text>`);
+    if (biggest && biggest.tot > 0 && biggest.yTop - fs * 0.8 > plotTop - fs * 0.2) over.push(valueLabel(biggest.cx, biggest.yTop - fs * 0.45, pounds0(biggest.tot)));
+  } else {
+    rows.forEach((row, i) => {
+      const top = padT + i * (rowH + gap);
+      const plotTop = top + head, base = top + rowH;
+      const hours = row.hours.filter((h) => h.start >= from && h.start < to && Number.isFinite(h.kwh));
+      const max = Math.max(row.min, ...hours.map((h) => h.kwh));
+      const step = kwhStep(max), topV = Math.ceil(max / step - 1e-9) * step;
+      const y = (v) => plotTop + (1 - v / topV) * (base - plotTop);
+      // The row's name, with a swatch of its colour (the legend; text itself stays in ink).
+      out.push(`<rect x="${padL}" y="${f1(top + fs * 0.1)}" width="${f1(fs * 0.8)}" height="${f1(fs * 0.8)}" rx="2" class="ch-key ch-${row.fuel}" fill="${colour(row.fuel)}"/>`);
+      out.push(`<text x="${f1(padL + fs * 1.15)}" y="${f1(top + fs * 0.85)}" class="ch-rowname">${row.label}</text>`);
+      // Gridlines at each step; all of them labelled only when there's room.
+      const roomy = (base - plotTop) / (topV / step) >= fs * 1.8;
+      for (let v = 0; v <= topV + 1e-9; v += step) {
+        const yy = Math.round(y(v)) + 0.5;
+        out.push(`<line x1="${padL}" x2="${W - padR}" y1="${yy}" y2="${yy}" class="${v === 0 ? 'ch-zero' : 'ch-grid'}"/>`);
+        if (roomy || v === 0 || v + step > topV + 1e-9) out.push(`<text x="${padL - Math.round(fs * 0.6)}" y="${f1(yy + fs * 0.35)}" text-anchor="end" class="ch-y">${+v.toFixed(2)}</text>`);
+      }
+      const used = hours.filter((h) => h.kwh > 0);
+      if (!used.length) {
+        emptyNote(padL + plotW / 2, plotTop + (base - plotTop) * 0.55, `${row.label.toLowerCase()} `);
+      } else if (level === 'hour') {
+        // Readings still to come: a faint box from this fuel's newest reading to now.
+        const lastEnd = Math.max(...used.map((h) => (h.inProgress ? h.start + 1800e3 : h.end)));
+        if (now - lastEnd > 90 * 60e3 && now > from && lastEnd < to) {
+          const px = x(lastEnd) + 2, nx = x(Math.min(now, to));
+          out.push(`<rect x="${f1(px)}" y="${f1(plotTop)}" width="${f1(Math.max(0, nx - px))}" height="${f1(base - plotTop)}" rx="6" class="ch-pending"/>`);
+          if (nx - px > fs * 9) out.push(`<text x="${f1((px + nx) / 2)}" y="${f1(plotTop + (base - plotTop) * 0.55)}" text-anchor="middle" class="ch-note">Readings due</text>`);
+        }
+      }
+      // Bars, a 2px gap between neighbours; the biggest gets its value.
+      let biggest = null;
+      for (const h of hours) {
+        const bx = box(h);
+        const yTop = Math.min(y(h.kwh), base - 1.5);
+        bars.push(`<path d="${barPath(bx.x, bx.w, yTop, base, false)}" fill="${colour(row.fuel)}" class="ch-bar ch-${row.fuel}${h.inProgress ? ' ch-sofar' : ''}"/>`);
+        if (!biggest || h.kwh > biggest.h.kwh) biggest = { h, cx: bx.x + bx.w / 2, yTop };
+        hit(h, plotTop, base, `data-fuel="${row.fuel}" data-sofar="${h.inProgress ? 1 : 0}" data-kwh="${h.kwh}" data-pence="${h.pence}"`);
+      }
+      // Its value sits above the bar; not when that lands on the row's name (a bar at the top of the scale, near the left).
+      const nameEnd = padL + fs * 1.15 + row.label.length * fs * 0.65;
+      const onName = biggest && biggest.yTop - fs * 0.45 < plotTop + fs * 0.2 && biggest.cx - fs * 1.4 < nameEnd;
+      if (biggest && biggest.h.kwh > 0 && !onName && biggest.yTop - fs * 0.8 > plotTop - fs * 0.2) {
+        over.push(valueLabel(biggest.cx, biggest.yTop - fs * 0.45, biggest.h.kwh.toFixed(biggest.h.kwh >= 100 ? 0 : 2)));
+      }
+    });
+  }
+
+  // X labels, shared by the rows: every 3 hours for a day; the 1st, 5th, 10th… for a month; each month for a year.
+  const labelY = f1(H - fs * 0.45), tickAt = (xx) => f1(Math.min(Math.max(xx, padL + fs * 1.4), W - padR - fs * 1.4));
+  if (level === 'hour') {
+    for (let t = Math.ceil(from / 3600e3) * 3600e3; t < to; t += 3600e3) {
+      const p = partsInTz(t, tz);
+      if (p.min !== 0 || p.h % 3 !== 0) continue;
+      const xx = x(t);
+      if (xx > W - padR - fs * 1.6) continue;
+      out.push(`<text x="${tickAt(xx)}" y="${labelY}" text-anchor="middle" class="ch-x">${String(p.h).padStart(2, '0')}:00</text>`);
     }
-  });
-  // X labels every 3 hours on the local clock, shared by the rows.
-  for (let t = Math.ceil(dayStart / 3600e3) * 3600e3; t < dayEnd; t += 3600e3) {
-    const p = partsInTz(t, tz);
-    if (p.min !== 0 || p.h % 3 !== 0) continue;
-    const xx = x(t);
-    if (xx > W - padR - fs * 1.6) continue;
-    out.push(`<text x="${f1(Math.max(xx, padL + fs * 1.4))}" y="${f1(H - fs * 0.45)}" text-anchor="middle" class="ch-x">${String(p.h).padStart(2, '0')}:00</text>`);
+  } else if (level === 'day') {
+    const days = Math.round((to - from) / 864e5);
+    for (let d = 1; d <= days; d++) {
+      if (d !== 1 && d % 5 !== 0) continue;
+      if (days - d < 2 && d !== days && d !== 1) continue; // not squeezed against the end
+      const t = from + (d - 1) * 864e5 + 12 * 3600e3; // midday: clear of the clock change
+      const xx = (x(t - 12 * 3600e3) + x(t + 12 * 3600e3)) / 2;
+      out.push(`<text x="${tickAt(xx)}" y="${labelY}" text-anchor="middle" class="ch-x">${d}</text>`);
+    }
+  } else {
+    const yr = partsInTz(from + 6 * 3600e3, tz).y;
+    const monthStart = (m) => (m > 11 ? to : startOfDay(localToMs(`${yr}-${String(m + 1).padStart(2, '0')}-01T12:00`, tz), tz));
+    for (let m = 0; m < 12; m++) {
+      const xx = (x(monthStart(m)) + x(monthStart(m + 1))) / 2;
+      out.push(`<text x="${f1(xx)}" y="${labelY}" text-anchor="middle" class="ch-x">${plotW / 12 >= fs * 3.4 ? MONTHS[m] : MONTHS[m][0]}</text>`);
+    }
   }
   out.push(...bars, ...over);
-  // Now marker, through every row.
-  if (now >= dayStart && now < dayEnd) {
+  // Now marker (a day only): through every row.
+  if (level === 'hour' && now >= from && now < to) {
     const nx = Math.round(x(now)) + 0.5;
     out.push(`<line x1="${nx}" x2="${nx}" y1="${padT - Math.round(fs * 0.5)}" y2="${f1(padT + n * rowH + (n - 1) * gap)}" class="ch-now"/>`);
     out.push(`<text x="${Math.min(nx, W - padR - fs)}" y="${padT - Math.round(fs * 0.85)}" text-anchor="middle" class="ch-now-label">now</text>`);

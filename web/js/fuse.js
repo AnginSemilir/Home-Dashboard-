@@ -377,6 +377,21 @@ export class Fuse {
     return this.api(`/api/v1/premises/${encodeURIComponent(premisesId)}/chart`, { year, month, day });
   }
 
+  /** A month's chart (daily bars) or a whole year's (monthly bars) as Fuse sent it: the chart call with the day, or the month, left out. */
+  rawRange(premisesId, year, month) {
+    return this.api(`/api/v1/premises/${encodeURIComponent(premisesId)}/chart`, month ? { year, month } : { year });
+  }
+
+  /** A month's daily bars: { elec, gas, export, has, skipped }. */
+  async month(premisesId, year, month, tz = DEFAULT_TZ) {
+    return parseRange(await this.rawRange(premisesId, year, month), 'day', { year, month }, { tz, now: this.now() });
+  }
+
+  /** A year's monthly bars: { elec, gas, export, has, skipped }. */
+  async year(premisesId, year, tz = DEFAULT_TZ) {
+    return parseRange(await this.rawRange(premisesId, year), 'month', { year }, { tz, now: this.now() });
+  }
+
   /** One day's hourly bars: { elec, gas, export, has, current }. */
   async day(premisesId, ymd, tz = DEFAULT_TZ) {
     return parseChart(await this.rawDay(premisesId, ymd), ymd, { tz, now: this.now() });
@@ -456,6 +471,57 @@ export function parseChart(body, ymd, { tz = DEFAULT_TZ, now = Date.now() } = {}
 }
 
 /**
+ * A month's daily bars (`level` 'day', ref { year, month }) or a year's monthly bars (`level` 'month', ref
+ * { year }), read like parseChart: REALISED bars only, cost from the breakdown, each bar's index placed on the
+ * UK calendar (so a month with a clock change still lines up). Each is { start, end, kwh, pence, standingP,
+ * inProgress } for its day or month. Bars that aren't for the period asked about (padding) or that can't be
+ * placed are counted in `skipped`.
+ */
+export function parseRange(body, level, ref, { tz = DEFAULT_TZ, now = Date.now() } = {}) {
+  const out = { elec: [], gas: [], export: [], has: { elec: false, gas: false, export: false }, skipped: 0 };
+  const pad = (n) => String(n).padStart(2, '0');
+  const noon = (y, m, d) => localToMs(`${y}-${pad(m)}-${pad(d)}T12:00`, tz);
+  const span = (idx) => {
+    const y = +idx?.year, m = +idx?.month, d = +idx?.day;
+    if (y !== ref.year) return null;
+    if (level === 'day') {
+      if (m !== ref.month || !(d >= 1 && d <= 31) || new Date(Date.UTC(y, m - 1, d)).getUTCDate() !== d) return null;
+      return [startOfDay(noon(y, m, d), tz), startOfDay(noon(y, m, d), tz, 1)];
+    }
+    if (!(m >= 1 && m <= 12)) return null;
+    return [startOfDay(noon(y, m, 1), tz), startOfDay(noon(m === 12 ? y + 1 : y, m === 12 ? 1 : m + 1, 1), tz)];
+  };
+  for (const supply of Array.isArray(body?.supplies) ? body.supplies : []) {
+    const fuel = FUELS[supply?.supply_type];
+    if (!fuel) continue;
+    out.has[fuel] = true;
+    const seen = new Set();
+    for (const entry of Array.isArray(supply.bars) ? supply.bars : []) {
+      const bar = entry?.bar;
+      if (!bar) continue;
+      const sp = span(bar.index);
+      const kwh = num(bar.kWh ?? bar.kwh), pence = barPence(entry);
+      if (!sp || seen.has(sp[0])) { out.skipped++; continue; }
+      if (kwh == null || pence == null || bar.type !== 'REALISED') continue;
+      seen.add(sp[0]);
+      out[fuel].push({ start: sp[0], end: sp[1], kwh, pence, standingP: standingPence(entry), inProgress: sp[0] <= now && now < sp[1] });
+    }
+    out[fuel].sort((a, b) => a.start - b.start);
+  }
+  return out;
+}
+
+/**
+ * Whether hours look like one figure shared out evenly (not real readings): at least eight finished hours with
+ * usage, all the same to the last decimal (a few quiet hours can repeat by chance; a day's worth doesn't). A
+ * gas meter reports far less often than electricity, so Fuse may spread the day's gas this way.
+ */
+export function isEvenSpread(hours, minHours = 8) {
+  const used = (hours || []).filter((h) => h.kwh > 0 && !h.inProgress);
+  return used.length >= minHours && used.every((h) => Math.abs(h.kwh - used[0].kwh) < 0.0005);
+}
+
+/**
  * kWh and pence for some hours, and when the readings reach: { kwh, pence, hours, last }. `last` is the
  * end of the newest hour with usage; for the hour in progress it's half past (Fuse updates it then).
  */
@@ -482,7 +548,8 @@ export function chartSummary(body, ymd) {
   for (const s of supplies) {
     const bars = Array.isArray(s?.bars) ? s.bars : [];
     lines.push(`${s?.supply_type}: ${bars.length} bars`);
-    lines.push(bars.map((e) => `${String(e?.bar?.index?.hour).padStart(2, '0')}=${e?.bar?.kWh}${e?.bar?.type === 'REALISED' ? '' : '?'}`).join(' '));
+    const at = (i) => (i && typeof i === 'object' ? [i.month, i.day, i.hour].filter((x) => x != null).map((x) => String(x).padStart(2, '0')).join('.') : '??');
+    lines.push(bars.map((e) => `${at(e?.bar?.index)}=${e?.bar?.kWh}${e?.bar?.type === 'REALISED' ? '' : '?'}`).join(' '));
     const first = bars.find((e) => e?.bar?.type === 'REALISED');
     if (first) lines.push(`first realised bar: money ${first.bar.money?.amount}, parts ${JSON.stringify((Array.isArray(first.breakdown) ? first.breakdown : []).map((c) => [c?.name, c?.value?.amount, c?.kWh]))}`);
   }
