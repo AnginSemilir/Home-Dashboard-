@@ -6,6 +6,7 @@ import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort, dayKey } from './t
 import { Octopus, costToday } from './octopus.js';
 import { PriceStats } from './stats.js';
 import { Bright, usageBetween, fixedCost } from './bright.js';
+import { Fuse, FuseSignedOut, dayTotals } from './fuse.js';
 import { Google, redirectUri } from './google.js';
 import { Spotify, spotifyEnded } from './spotify.js';
 import { DoorbellListener, SUB_RE } from './doorbell.js';
@@ -45,12 +46,15 @@ export const state = {
   brightSlots: cache.brightSlots || [], // half-hourly kWh from Bright, yesterday and today
   brightLive: cache.brightLive || null, // { w, at } from a Glow display, if there is one
   brightDemand: cache.brightDemand || [], // the Glow display's last two hours, for the sparkline
+  fuseDays: cache.fuseDays || {}, // Fuse's hourly bars for today and yesterday: { 'YYYY-MM-DD': { at, elec, gas, export, has } }
+  fuseNewest: cache.fuseNewest || null, // { elec, gas }: when each fuel's newest reading ends (for the ⚙ checklist)
 };
 
 const persist = () => saveCache({
   rates: state.rates, ratesTariff: state.ratesTariff, standingP: state.standingP, tele: state.tele, demand: state.demand, lastDemandAt: state.lastDemandAt, costP: state.costP,
   thermo: state.thermo, camera: state.camera, events: state.events, weather: state.weather, kia: state.kia, shopping: state.shopping,
   place: state.place, brightSlots: state.brightSlots, brightLive: state.brightLive, brightDemand: state.brightDemand,
+  fuseDays: state.fuseDays, fuseNewest: state.fuseNewest,
 });
 
 const google = new Google(settings, save);
@@ -58,8 +62,11 @@ const spotify = new Spotify(settings);
 const octopus = new Octopus(settings);
 const bright = new Bright(settings);
 if (!bright.configured) bright.forget(); // the Bright email or password was cleared: so is its sign-in
-// Usage from Bright (any supplier, a fixed price) instead of Octopus (Agile and the Home Mini).
+// Usage from Bright (any supplier, a fixed price), or from Fuse (electricity and gas), instead of
+// Octopus (Agile and the Home Mini).
 const useBright = () => settings.energy.source === 'bright';
+const useFuse = () => settings.energy.source === 'fuse';
+const fuse = new Fuse(settings);
 const priceStats = new PriceStats({ octopus, settings, tz });
 const nest = new Nest(google, settings);
 let refs;
@@ -73,9 +80,11 @@ function renderAll() {
   ui.renderWeather(refs, state.weather, state.status.weather, tz);
   ui.renderCalendar(refs, state.events, now, state.status.calendar, tz, 9, google.signedIn);
   const bv = useBright() ? brightView(now) : null;
-  if (bv) ui.renderBright(refs, bv, now, tz);
+  const fv = useFuse() ? fuseView(now) : null;
+  if (fv) ui.renderFuse(refs, fv, now, tz);
+  else if (bv) ui.renderBright(refs, bv, now, tz);
   else ui.renderPrice(refs, state.rates, now, state.status.rates, priceOpts(), tz);
-  ui.renderTiles(refs, state, settings, now, tz, bv);
+  ui.renderTiles(refs, state, settings, now, tz, bv, fv);
   ui.renderCamera(refs, settings, state, live);
   ui.renderDock(refs, settings);
   renderMusic();
@@ -132,6 +141,84 @@ function explainBright(st = state.status.bright) {
   }
   explain(st);
 }
+
+/**
+ * What the Fuse card and tiles show: today and yesterday for electricity and gas, from Fuse's
+ * hourly bars. Today counts the hour in progress (Fuse keeps topping it up), and includes the
+ * standing charge for the hours so far, as the Fuse app does.
+ */
+function fuseView(now = Date.now()) {
+  const todayKey = dayKey(now, tz), yKey = dayKey(startOfDay(now, tz, -1), tz);
+  const days = state.fuseDays || {};
+  const sum = (key) => ({ elec: dayTotals(days[key]?.elec), gas: dayTotals(days[key]?.gas) });
+  const today = sum(todayKey), yesterday = sum(yKey);
+  // Yesterday is whole once its readings reach midnight.
+  const midnight = startOfDay(now, tz);
+  for (const fuel of ['elec', 'gas']) yesterday[fuel].complete = yesterday[fuel].last >= midnight;
+  const hasToday = today.elec.kwh > 0 || today.gas.kwh > 0;
+  const hasYesterday = yesterday.elec.hours + yesterday.gas.hours > 0;
+  // Before today's first reading the chart shows the newest day Fuse has.
+  const shownKey = hasToday || !hasYesterday ? todayKey : yKey;
+  const shown = shownKey === todayKey ? { start: startOfDay(now, tz), end: startOfDay(now, tz, 1) } : { start: startOfDay(now, tz, -1), end: startOfDay(now, tz) };
+  const newest = (fuel) => Math.max(today[fuel].last ?? 0, yesterday[fuel].last ?? 0) || null;
+  const signedIn = fuse.signedIn;
+  return {
+    today, yesterday, hasToday, shown, shownDay: days[shownKey] || null,
+    newest: { elec: newest('elec'), gas: newest('gas') },
+    hasGas: [todayKey, yKey].some((k) => days[k]?.has?.gas),
+    // Each part to the penny first, so the total is the sum of what's shown beside it.
+    totalP: Math.round(today.elec.pence) + Math.round(today.gas.pence),
+    signedIn, signedOut: !signedIn && !!settings.fuse.premisesId, notSetUp: !signedIn && !settings.fuse.premisesId,
+    status: state.status.fuse,
+  };
+}
+
+/**
+ * What a tap on the Fuse card or tiles says: never nothing while what it shows is empty or stale.
+ * `which` ('elec' or 'gas'): the tile tapped, which is explained when its own fuel has nothing today.
+ */
+function explainFuse(which, st = state.status.fuse) {
+  const v = fuseView();
+  if (v.notSetUp) return ui.toast(refs, "Fuse isn't connected on this panel yet: ⚙ → Electricity → type your mobile number → Send code.", 8000);
+  if (v.signedOut) return ui.toast(refs, 'Fuse signed the panel out. ⚙ → Electricity → Send code to sign in again.', 8000);
+  if (!st) return ui.toast(refs, 'Asking Fuse for your usage…', 4000);
+  if (st.error) return explain(st);
+  const missing = !v.hasToday || (which === 'elec' && !(v.today.elec.kwh > 0)) || (which === 'gas' && v.hasGas && !(v.today.gas.kwh > 0));
+  if (st.stale || missing) {
+    const upTo = ui.fuseNewestText(v, Date.now(), tz);
+    return ui.toast(refs, `${upTo ? `Fuse's newest readings: ${upTo}. ` : 'Fuse has sent no readings yet. '}Fuse is usually about an hour behind, and gas can be a day behind; the Fuse app shows the same.`, 9000);
+  }
+  explain(st);
+}
+
+const FUSE_REFETCH_YESTERDAY = 2 * 3600e3; // Fuse keeps revising the hours that have just closed
+
+async function refreshFuse() {
+  const now = Date.now();
+  if (!settings.fuse.premisesId) {
+    const p = await fuse.premises();
+    Object.assign(settings.fuse, { premisesId: p.id, premisesName: p.name });
+    save();
+  }
+  const id = settings.fuse.premisesId;
+  const todayKey = dayKey(now, tz), yKey = dayKey(startOfDay(now, tz, -1), tz);
+  const days = { ...state.fuseDays };
+  days[todayKey] = { at: now, ...(await fuse.day(id, todayKey, tz)) };
+  // Yesterday: if it isn't kept, was fetched before the day ended, or has had time to settle.
+  const y = days[yKey];
+  if (!y || y.at < startOfDay(now, tz) || now - y.at >= FUSE_REFETCH_YESTERDAY) {
+    try { days[yKey] = { at: now, ...(await fuse.day(id, yKey, tz)) }; } catch (e) {
+      if (e instanceof FuseSignedOut) throw e;
+      console.warn('[fuse] yesterday', e);
+    }
+  }
+  state.fuseDays = Object.fromEntries(Object.entries(days).filter(([k]) => k === todayKey || k === yKey));
+  const last = (fuel) => Math.max(0, ...Object.values(state.fuseDays).map((d) => dayTotals(d[fuel]).last ?? 0)) || null;
+  state.fuseNewest = { elec: last('elec'), gas: last('gas') };
+}
+
+/** When Fuse's newest electricity reading ends (to turn the dot amber when readings stop, or never came). */
+const fuseDataAt = () => state.fuseNewest?.elec || 0;
 
 const LIVE_FRESH = 15 * 60e3; // a Glow display reading older than this means the display has stopped
 
@@ -331,7 +418,7 @@ const sources = {};
  * data itself is when that differs from the last successful call (e.g. a Home Mini that has
  * stopped reporting still answers). `clear()` forgets cached data when the source is switched off.
  */
-function source(name, fn, interval, { staleAfter, dataAt, clear, enabled = () => true, render = renderAll } = {}) {
+function source(name, fn, interval, { staleAfter, dataAt, clear, enabled = () => true, render = renderAll, rateLimitFailures = 4 } = {}) {
   let failures = 0, timer = null, lastOk = 0, busy = false, nextAt = 0;
   const staleCheck = () => {
     const st = state.status[name];
@@ -357,7 +444,7 @@ function source(name, fn, interval, { staleAfter, dataAt, clear, enabled = () =>
       failures++;
       const rateLimited = e instanceof HttpError && e.status === 429;
       state.status[name] = { error: describeError(e), at: Date.now(), stale: true };
-      if (rateLimited) failures = Math.max(failures, 4);
+      if (rateLimited) failures = Math.max(failures, rateLimitFailures);
       console.warn(`[${name}]`, e);
     } finally {
       busy = false;
@@ -841,14 +928,15 @@ async function boot() {
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       // The live reading only while the tile shows it (a stopped Glow display: the tile and its tap are Bright's).
+      if ((key === 'usage' || key === 'cost') && useFuse()) return explainFuse(key === 'usage' ? 'elec' : 'gas');
       if (key === 'usage' && useBright()) return settings.bright.discovered?.live && state.brightLive && Date.now() - state.brightLive.at < LIVE_FRESH ? explain(state.status.brightlive) : explainBright();
       if (key === 'cost' && useBright()) return explainBright();
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());
       if (key === 'cost') return explain(ui.worst(state.status.homemini, state.status.rates), homeMiniStaleWhy());
       explain(state.status[{ indoor: 'thermostat', car: 'kia' }[key]]);
     },
-    status: (key) => (key === 'rates' && useBright() ? explainBright() : explain(state.status[key])),
-    chartTap: (hit) => (useBright() ? ui.showUsageTip(refs, hit, tz) : ui.showChartTip(refs, hit, priceOpts(), tz)),
+    status: (key) => (key === 'rates' && useFuse() ? explainFuse() : key === 'rates' && useBright() ? explainBright() : explain(state.status[key])),
+    chartTap: (hit) => (useFuse() ? ui.showFuseTip(refs, hit, tz) : useBright() ? ui.showUsageTip(refs, hit, tz) : ui.showChartTip(refs, hit, priceOpts(), tz)),
     musicCmd,
     musicClose: closeMusic,
     stats: openStats,
@@ -881,17 +969,17 @@ async function boot() {
     ui.toast(refs, `Google sign-in: ${result.slice(7)}`, 7000);
   }
 
-  const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.bright.username && !settings.google.refreshToken;
+  const nothingSetUp = !settings.weather.lat && !settings.octopus.tariff && !settings.octopus.apiKey && !settings.bright.username && !settings.fuse.phone && !settings.google.refreshToken;
   if (nothingSetUp || result === 'signed-in') openSettings(document.body, { settings, save, state, google, sun, spotify, chime, testRing: () => ring({ device: settings.google.cameraId }), place: placeNow, locateNow: () => refreshPlace({ asked: true }), locateStatus: lastLocate });
 
   const minutes = (m) => () => m * 60e3;
   // A source that's switched off (signed out, key removed…) also forgets what it showed.
   source('rates', refreshRates, minutes(15), {
-    staleAfter: 3 * 3600e3, enabled: () => !useBright() && !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)),
+    staleAfter: 3 * 3600e3, enabled: () => !useBright() && !useFuse() && !!(settings.octopus.tariff || (settings.octopus.apiKey && settings.octopus.account)),
     clear: () => { state.rates = []; state.ratesTariff = null; state.standingP = null; state.costP = null; },
   })();
   source('homemini', refreshHomeMini, () => (nightNow() ? 300e3 : Math.max(30, settings.octopus.pollSeconds) * 1000), {
-    staleAfter: HOME_MINI_STALE, dataAt: homeMiniDataAt, enabled: () => !useBright() && !!(settings.octopus.apiKey && settings.octopus.account),
+    staleAfter: HOME_MINI_STALE, dataAt: homeMiniDataAt, enabled: () => !useBright() && !useFuse() && !!(settings.octopus.apiKey && settings.octopus.account),
     clear: () => { state.tele = null; state.demand = []; state.lastDemandAt = null; state.costP = null; },
   })();
   // Bright: half-hourly readings every 10 minutes (30 at night); live usage every 30 s with a Glow display.
@@ -902,6 +990,12 @@ async function boot() {
   source('brightlive', refreshBrightLive, () => (nightNow() ? 300e3 : 30e3), {
     staleAfter: 10 * 60e3, dataAt: () => state.brightLive?.at, enabled: () => useBright() && bright.configured && !!settings.bright.discovered?.live && settings.bright.discovered.user === settings.bright.username,
     clear: () => { state.brightLive = null; state.brightDemand = []; },
+  })();
+  // Fuse: hourly bars for electricity and gas, every 15 minutes (30 at night). A refused session
+  // isn't retried by itself: the panel waits for the user to sign in again.
+  source('fuse', refreshFuse, () => (nightNow() ? 30 : 15) * 60e3, {
+    staleAfter: 3 * 3600e3, dataAt: fuseDataAt, enabled: () => useFuse() && fuse.signedIn, rateLimitFailures: 6,
+    clear: () => { state.fuseDays = {}; state.fuseNewest = null; },
   })();
   source('thermostat', refreshNest, minutes(5), {
     staleAfter: 30 * 60e3, enabled: () => !!(google.signedIn && settings.google.thermostatId),

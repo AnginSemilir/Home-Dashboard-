@@ -4,6 +4,8 @@ Left Octopus? The Octopus Home Mini only reports to Octopus, so it stops being u
 
 The research behind this, with sources, is in [research/2026-10-13-usage-after-octopus.md](research/2026-10-13-usage-after-octopus.md).
 
+**On Fuse?** The Fuse option (⚙ → Electricity → *Fuse app*) reads electricity **and gas** straight from Fuse, usually fresher than Bright is, which is often hours or a day behind: see [fuse.md](fuse.md). Bright is the choice for any other supplier, and its Glow display is the only way to get live watts.
+
 ## What you see
 
 - **Today so far**, in the big box: what today's electricity has cost (kWh × your unit rate + the day's standing charge), with the kWh beside it and when the newest reading is from.

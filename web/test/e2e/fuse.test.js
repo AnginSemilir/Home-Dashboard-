@@ -1,0 +1,314 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Electricity and gas from the Fuse app (hourly, about an hour behind), for a household on a Fuse
+// tariff. Fuse's private API is faked (mocks.js): sign-in by SMS code, rotating tokens, hourly charts.
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { startBrowser, openPanel, NOW } from '../support/browser.js';
+import { fuseSettings, usedKwh, FUSE_RELAY } from '../support/mocks.js';
+
+let env;
+before(async () => { env = await startBrowser(); });
+after(async () => { await env?.close(); });
+
+const HOUR = 3600e3;
+const MID = Date.parse('2026-09-25T00:00:00+01:00'); // NOW is Friday 25 September 2026, 09:41 (BST)
+const text = (page, sel) => page.locator(sel).first().innerText();
+const fuseCalls = (calls) => calls.filter((c) => c.service === 'fuse');
+const onPath = (calls, p) => fuseCalls(calls).filter((c) => c.path === p);
+
+// What the fake Fuse sends, worked out again here (rates as in mocks.js).
+const elecHour = (start) => +(usedKwh(start) + usedKwh(start + 1800e3)).toFixed(3);
+const gasHour = (h) => (h >= 6 && h < 9 ? 2.9 : h >= 17 && h < 22 ? 2.1 : 0.25);
+const poundsFor = (fuel, kwh) => +(kwh * (fuel === 'gas' ? 0.0687 : 0.2664)).toFixed(4) + +((fuel === 'gas' ? 0.28 : 0.4735) / 24).toFixed(4);
+const day = (fuel, hours, midnight = MID) => hours.map((h) => {
+  const kwh = fuel === 'gas' ? gasHour(h) : elecHour(midnight + h * HOUR);
+  return { kwh, pence: poundsFor(fuel, kwh) * 100 };
+});
+const total = (rows) => rows.reduce((t, r) => ({ kwh: t.kwh + r.kwh, pence: t.pence + r.pence }), { kwh: 0, pence: 0 });
+const gbp = (p) => `£${(Math.round(p) / 100).toFixed(2)}`;
+const short = (p) => (p >= 100 ? gbp(p) : `${p < 10 ? p.toFixed(1) : Math.round(p)}p`);
+// Today at 09:41: complete hours 00–08, then 09:00–10:00 in progress (half its usage, as it's past half past).
+const half = (fuel, h) => { const r = day(fuel, [h])[0]; const kwh = +(r.kwh / 2).toFixed(3); return { kwh, pence: poundsFor(fuel, kwh) * 100 }; };
+const todayRows = (fuel) => [...day(fuel, [0, 1, 2, 3, 4, 5, 6, 7, 8]), half(fuel, 9)];
+const yesterdayRows = (fuel) => day(fuel, [...Array(24).keys()], MID - 864e5);
+const T = { elec: total(todayRows('elec')), gas: total(todayRows('gas')) };
+const Y = { elec: total(yesterdayRows('elec')), gas: total(yesterdayRows('gas')) };
+
+const notSignedIn = () => { const s = fuseSettings(NOW); s.fuse = { phone: '', proxy: '', premisesId: '', premisesName: '' }; return s; };
+
+test('today so far: electricity and gas on the card, in the two-row chart, and in the tiles', async () => {
+  const { ctx, page, calls, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, initScript: () => {
+    window.__csp = [];
+    document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI}`));
+  } });
+  await page.locator('#price .big .num').waitFor();
+  const e = T.elec, g = T.gas;
+  assert.equal(await text(page, '#price .label'), 'Today so far');
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(e.pence) + Math.round(g.pence)), 'the total is the sum of the two parts shown');
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${e.kwh.toFixed(1)} kWh`, `${g.kwh.toFixed(1)} kWh`]);
+  assert.match(await text(page, '#price .sub'), /readings to 09:30 · Fuse is about an hour behind/);
+  assert.ok((await text(page, '#price .sub')).includes(`Electricity ${gbp(e.pence)} · Gas ${gbp(g.pence)}`));
+
+  // The chart: a row for each fuel, an hour per bar, the hour in progress lighter.
+  assert.match(await text(page, '#chart .chart-head .label'), /^Usage today\s*kWh per hour$/);
+  assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 10);
+  assert.equal(await page.locator('#chart .ch-bar.ch-gas').count(), 10);
+  assert.equal(await page.locator('#chart .ch-bar.ch-sofar').count(), 2, 'the hour in progress, for each fuel');
+  assert.deepEqual(await page.locator('#chart .legend .lg').allInnerTexts(), ['Electricity', 'Gas']);
+  await page.locator('#chart .ch-hit[data-fuel="elec"]').nth(3).click(); // 03:00–04:00
+  const h3 = day('elec', [3])[0];
+  assert.equal(await text(page, '#chart .chart-tip'), `Electricity 03:00–04:00 · ${h3.kwh.toFixed(2)} kWh · ${short(h3.pence)}`);
+  await page.locator('#chart .ch-hit[data-fuel="gas"]').nth(9).click(); // the hour in progress
+  const now9 = half('gas', 9);
+  assert.equal(await text(page, '#chart .chart-tip'), `Gas 09:00–10:00 · ${now9.kwh.toFixed(2)} kWh · ${short(now9.pence)} so far`);
+
+  // No live figure from Fuse: the "Using now" tile is Electricity, and the third tile is Gas.
+  assert.equal(await text(page, '.tile.usage .t-label'), 'Electricity');
+  assert.equal(await text(page, '.tile.usage .t-value'), gbp(e.pence));
+  assert.equal(await text(page, '.tile.usage .extra'), `${e.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.elec.pence)}`);
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas');
+  assert.equal(await text(page, '.tile.cost .t-value'), gbp(g.pence));
+  assert.equal(await text(page, '.tile.cost .extra'), `${g.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.gas.pence)}`);
+  assert.equal(await page.locator('#tiles', { hasText: 'Using now' }).count(), 0);
+  assert.equal(await page.locator('#price .stats-btn').isVisible(), false, 'the Agile buttons are hidden');
+  assert.equal(await page.locator('#price .usage-btn').isVisible(), false);
+
+  // What was asked of Fuse: today and yesterday's chart, as the signed-in device. Nobody else is asked.
+  const charts = onPath(calls, '/api/v1/premises/prem-1/chart');
+  assert.deepEqual(charts.map((c) => Object.fromEntries(new URL(c.url).searchParams)), [{ year: '2026', month: '9', day: '25' }, { year: '2026', month: '9', day: '24' }]);
+  assert.ok(charts.every((c) => c.headers.authorization === 'Bearer fuse-acc-1' && c.headers['device-id'] === 'dev-test'));
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 0, 'no text message was asked for');
+  assert.equal(calls.filter((c) => ['octopus', 'bright'].includes(c.service)).length, 0);
+  assert.deepEqual(await page.evaluate(() => window.__csp), []);
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+test('an electricity-only account: one row, no gas chip, and the third tile is yesterday', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseNoGas: true });
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(T.elec.pence));
+  assert.equal(await page.locator('#price .band-chip .fz').count(), 1, 'only the electricity chip');
+  assert.equal(await page.locator('#chart .ch-bar.ch-gas').count(), 0);
+  assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 10);
+  assert.match(await text(page, '#price .sub'), /Electricity .* · standing charge included/);
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Yesterday');
+  assert.equal(await text(page, '.tile.cost .t-value'), gbp(Y.elec.pence));
+  await ctx.close();
+});
+
+test('gas not reported yet today: said so on the card and tile, with yesterday still shown', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-no-gas-today']) });
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(T.elec.pence));
+  assert.match(await text(page, '#price .sub'), /electricity to 09:30, gas to yesterday midnight/);
+  assert.match(await text(page, '#price .sub'), /Electricity .* · gas not reported yet/);
+  assert.equal(await text(page, '.tile.cost .t-value'), '–');
+  assert.equal(await text(page, '.tile.cost .extra'), `No gas readings yet today · tap\nYesterday ${gbp(Y.gas.pence)}`);
+  assert.match(await text(page, '#chart'), /No gas readings yet today/);
+  await page.locator('.tile.cost').click();
+  await page.locator('.toast', { hasText: "Fuse's newest readings: electricity to 09:30, gas to yesterday midnight." }).waitFor();
+  await ctx.close();
+});
+
+test('Fuse well behind: the newest day it has, dated, and every tap says why', async () => {
+  const until = Date.parse('2026-09-24T05:00:00+01:00'); // yesterday 05:00
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseUntil: until });
+  await page.locator('#price .sub', { hasText: 'No usage for today yet' }).waitFor();
+  assert.equal(await text(page, '#price .big'), '–');
+  assert.match(await text(page, '#price .sub'), /Fuse's newest: electricity to yesterday 05:00, gas to yesterday 05:00/);
+  assert.match(await text(page, '#chart .chart-head .label'), /^Usage yesterday/);
+  assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 5);
+  assert.equal(await text(page, '.tile.usage .t-value'), '–');
+  assert.match(await text(page, '.tile.usage .extra'), /No readings yet today · tap\nYesterday £\d+\.\d\d · to 05:00/);
+  for (const sel of ['#price', '.tile.usage', '.tile.cost']) {
+    await page.reload(); // a fresh page, so each tap's toast is its own
+    await page.locator('#price .sub', { hasText: 'No usage for today yet' }).waitFor();
+    await page.locator(sel).click();
+    await page.locator('.toast', { hasText: "Fuse's newest readings: electricity to yesterday 05:00" }).waitFor();
+  }
+  await ctx.close();
+});
+
+test('not signed in to Fuse on this panel: it says so, and how; nothing is asked of Fuse', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: notSignedIn() });
+  await page.locator('#price .sub', { hasText: "Fuse isn't connected on this panel yet" }).waitFor();
+  assert.match(await text(page, '#price .sub'), /⚙ → Electricity → Send code/);
+  assert.equal(await text(page, '.tile.usage .extra'), 'Fuse not set up yet');
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: 'type your mobile number → Send code' }).waitFor();
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText('Electricity and gas (Fuse) · press Send code, then type the code Fuse texts you').waitFor();
+  assert.equal(fuseCalls(calls).length, 0);
+  await ctx.close();
+});
+
+test('signing in from Settings: number, code, identity question; saved at once, and Cancel keeps it', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: notSignedIn(), fail: new Set(['fuse-dob']) });
+  await page.locator('#price .sub', { hasText: "Fuse isn't connected" }).waitFor();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  assert.equal(fuseCalls(calls).length, 0, 'opening Settings sends nothing');
+  await set.getByLabel('Mobile number on your Fuse account').fill('07700 900123');
+  assert.equal(fuseCalls(calls).length, 0, 'typing the number sends nothing either');
+
+  await set.getByRole('button', { name: 'Send code' }).click();
+  await set.getByText(/Code sent\. Type it below/).waitFor();
+  const [start, sms] = fuseCalls(calls);
+  assert.deepEqual([start.path, sms.path], ['/api/v3/auth', '/api/trpc/phoneSignIn']);
+  assert.deepEqual(start.body, { challenge_type: 'INITIAL', data: { method: 'PHONE', data: { phone_number: '+447700900123', prelude_dispatch_id: null } } });
+  assert.match(start.headers['device-id'], /^[0-9a-f-]{36}$/);
+  assert.deepEqual(sms.body, { phone: '+447700900123' });
+  assert.equal(sms.headers['x-fuse-app-version'], '0.5.388');
+
+  // A wrong code is turned away in plain words, with no more texts sent.
+  await set.getByLabel('Code from the text message').fill('000000');
+  await set.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await set.getByText(/That code isn't right/).waitFor();
+  await set.getByLabel('Code from the text message').fill('123456');
+  await set.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await set.getByText('Verify your date of birth: Fuse needs to check it is you').waitFor();
+  // A date typed the wrong way round is caught before Fuse is asked.
+  await set.getByRole('button', { name: 'Continue' }).click();
+  await set.getByText('Date of birth: type the date like 04/03/1965.').waitFor();
+  await set.locator('input[type=date]').fill('1965-03-04');
+  await set.getByRole('button', { name: 'Continue' }).click();
+  await set.getByText('Fuse connected and saved').waitFor();
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 1, 'one text message for the whole sign-in');
+  await set.getByText(/Electricity and gas \(Fuse\) · 1 Test Street/).waitFor();
+  assert.equal(await set.locator('.checklist li', { hasText: 'Electricity and gas (Fuse)' }).locator('.ok').count(), 1);
+  assert.equal(await set.getByLabel('Usage comes from').inputValue(), 'fuse');
+
+  await set.getByRole('button', { name: 'Cancel' }).click();
+  await page.waitForLoadState('load');
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .label'), 'Today so far');
+  const saved = await page.evaluate(() => ({ s: JSON.parse(localStorage.getItem('wallpanel.settings.v1')), t: JSON.parse(localStorage.getItem('wallpanel.fuse.v1')) }));
+  assert.deepEqual([saved.s.energy.source, saved.s.fuse.premisesId, saved.s.fuse.premisesName], ['fuse', 'prem-1', '1 Test Street']);
+  assert.deepEqual([saved.t.access, saved.t.refresh], ['fuse-acc-1', 'fuse-ref-1']);
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 1, 'and none after the reload');
+  await ctx.close();
+});
+
+test('Fuse asking to wait, and a number that can\'t be one: plain words beside the button', async () => {
+  let { ctx, page, calls } = await openPanel(env, { settings: notSignedIn(), fail: new Set(['fuse-sms-wait']) });
+  await page.locator('#clock .gear').click();
+  let set = page.locator('#settings');
+  await set.getByLabel('Mobile number on your Fuse account').fill('hello');
+  await set.getByRole('button', { name: 'Send code' }).click();
+  await set.getByText(/Check the mobile number/).waitFor();
+  assert.equal(fuseCalls(calls).length, 0, 'a number that can\'t be one never reaches Fuse');
+  await set.getByLabel('Mobile number on your Fuse account').fill('07700 900123');
+  await set.getByRole('button', { name: 'Send code' }).click();
+  await set.getByText(/Fuse wants you to wait a few minutes before asking for another code/).waitFor();
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 1);
+  assert.equal(await set.getByLabel('Code from the text message').isVisible(), false, 'no code box for a text that was never sent');
+  await ctx.close();
+
+  ({ ctx, page, calls } = await openPanel(env, { settings: notSignedIn() }));
+  await page.locator('#clock .gear').click();
+  set = page.locator('#settings');
+  await set.getByLabel('Mobile number on your Fuse account').fill('07123 456789');
+  await set.getByRole('button', { name: 'Send code' }).click();
+  await set.getByText(/Fuse wouldn't continue \(unknown_user\)|doesn't recognise/).waitFor();
+  await ctx.close();
+});
+
+test('the access token has run out: renewed once, the new pair saved, and the panel carries on', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: fuseSettings(NOW), fuse: { access: 'fuse-acc-0', refresh: 'fuse-ref-1' } });
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence) + Math.round(T.gas.pence)));
+  const refreshes = onPath(calls, '/api/v1/auth/refresh');
+  assert.equal(refreshes.length, 1);
+  assert.deepEqual(refreshes[0].body, { refresh_token: 'fuse-ref-1', original_request_path: null });
+  assert.equal(refreshes[0].headers.authorization, 'Bearer fuse-acc-0');
+  const charts = onPath(calls, '/api/v1/premises/prem-1/chart');
+  assert.deepEqual(charts.map((c) => c.headers.authorization), ['Bearer fuse-acc-0', 'Bearer fuse-acc-2', 'Bearer fuse-acc-2']);
+  const t = await page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.fuse.v1')));
+  assert.deepEqual([t.access, t.refresh, t.deviceId], ['fuse-acc-2', 'fuse-ref-2', 'dev-test']);
+  await ctx.close();
+});
+
+test('Fuse ends the session: the card, the tap and the checklist say so, and no text is ever sent by itself', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-signed-out']) });
+  await page.locator('#price .sub', { hasText: 'Fuse signed the panel out' }).waitFor();
+  assert.match(await text(page, '#price .sub'), /⚙ → Electricity → Send code to sign in again/);
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: 'Fuse signed the panel out. ⚙ → Electricity → Send code to sign in again.' }).waitFor();
+  await page.locator('#clock .gear').click();
+  const line = page.locator('#settings .checklist li', { hasText: 'Electricity and gas (Fuse)' });
+  await line.getByText(/Fuse signed the panel out/).waitFor();
+  assert.equal(await line.locator('.bad').count(), 1);
+  await page.waitForTimeout(1500);
+  assert.equal(onPath(calls, '/api/v1/auth/refresh').length, 1, 'one refused renewal, not a stream of them');
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length + onPath(calls, '/api/v3/auth').length, 0, 'nothing that could send a text');
+  const t = await page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.fuse.v1')));
+  assert.deepEqual(t, { deviceId: 'dev-test' }, 'the dead tokens are gone, the device ID stays');
+  await ctx.close();
+});
+
+test('a Fuse that wants a newer app version says so', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-426']) });
+  await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: 'Fuse wants a newer app version. Update FUSE_APP_VERSION in web/js/fuse.js' }).waitFor();
+  await ctx.close();
+});
+
+test('Fuse blocked in this browser: plain words and where to look; with a relay, every call goes through it', async () => {
+  let { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-blocked']) });
+  await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: "Fuse didn't answer this browser" }).waitFor();
+  await page.locator('#clock .gear').click();
+  await page.locator('#settings').getByText(/Electricity and gas \(Fuse\) · Fuse didn't answer this browser.*docs\/fuse\.md/).waitFor();
+  await ctx.close();
+
+  // The relay's address is allowed in index.html (docs/fuse.md has the user do that), then used for everything.
+  const s = fuseSettings(NOW);
+  s.fuse.proxy = FUSE_RELAY;
+  let calls;
+  ({ ctx, page, calls } = await openPanel(env, { settings: s, fuse: true, csp: true }));
+  await page.locator('#price .big .num').waitFor();
+  assert.ok(fuseCalls(calls).length >= 2);
+  assert.ok(fuseCalls(calls).every((c) => c.host === 'fuse-relay.example.workers.dev'), 'nothing went to Fuse directly');
+  await ctx.close();
+
+  // Without that edit the policy refuses it, and the panel says what to do.
+  ({ ctx, page, calls } = await openPanel(env, { settings: s, fuse: true }));
+  await page.locator('#price .sub', { hasText: 'Usage unavailable (tap for why)' }).waitFor();
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: 'to connect-src in web/index.html first (see docs/fuse.md)' }).waitFor();
+  assert.equal(fuseCalls(calls).length, 0);
+  await ctx.close();
+});
+
+test('Fuse answering with nothing at all: it says so (never blank and silent)', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-empty']) });
+  await page.locator('#price .sub', { hasText: 'No readings from Fuse yet' }).waitFor();
+  await page.locator('#price').click();
+  await page.locator('.toast', { hasText: 'Fuse has sent no readings yet.' }).waitFor();
+  await ctx.close();
+});
+
+test('sign out of Fuse, and what "copy settings" leaves out', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true });
+  await ctx.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByRole('button', { name: 'Copy settings' }).click();
+  await set.getByText(/^Copied\./).waitFor();
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  assert.ok(copied.length > 50, 'the settings were copied');
+  assert.ok(!/fuse-acc-1|fuse-ref-1|dev-test/.test(copied), 'the Fuse sign-in and device ID are not copied');
+  assert.ok(copied.includes('"premisesId":"prem-1"'), 'the rest of the Fuse settings are');
+  await set.getByRole('button', { name: 'Sign out of Fuse' }).click();
+  await set.getByText('Signed out of Fuse.').waitFor();
+  assert.deepEqual(await page.evaluate(() => JSON.parse(localStorage.getItem('wallpanel.fuse.v1'))), { deviceId: 'dev-test' });
+  await set.getByRole('button', { name: 'Cancel' }).click();
+  await page.waitForLoadState('load');
+  await page.locator('#price .sub', { hasText: "Fuse isn't connected on this panel yet" }).waitFor();
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 0);
+  await ctx.close();
+});

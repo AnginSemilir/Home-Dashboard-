@@ -17,7 +17,8 @@ import { checkSubName } from './doorbell.js';
 import { Chime } from './chime.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 import { Bright } from './bright.js';
-import { slotWhen } from './ui.js';
+import { Fuse, normaliseDateAnswer } from './fuse.js';
+import { slotWhen, untilWords } from './ui.js';
 
 const ENV_LABEL = {
   webview: 'Kiosk app (all buttons work)',
@@ -42,6 +43,11 @@ export function checklist(s, st) {
         ? [s.energy.unitRate > 0 ? `${s.energy.unitRate}p a kWh + ${s.energy.standing}p a day` : 'add your unit rate for £', st.brightNewest ? `newest reading ${slotWhen(st.brightNewest, Date.now(), s.tz)}` : ''].filter(Boolean).join(' · ')
         : 'type your Bright email and password, then Save & close', 'bright'),
       item(s.bright.discovered?.live ? res('brightlive') : 'off', 'Live usage (Glow display)', s.bright.discovered?.live ? '' : 'optional: needs a Glow display/CAD', 'brightlive'),
+    ] : s.energy.source === 'fuse' ? [
+      // A property but no sign-in: Fuse ended the session (or it was moved here in copied settings).
+      item(s.fuse.premisesId && st.fuseSignedIn ? res('fuse') : s.fuse.premisesId ? 'bad' : 'todo', 'Electricity and gas (Fuse)', s.fuse.premisesId && st.fuseSignedIn
+        ? [s.fuse.premisesName, st.fuseNewest?.elec ? `electricity to ${untilWords(st.fuseNewest.elec, Date.now(), s.tz)}` : '', st.fuseNewest?.gas ? `gas to ${untilWords(st.fuseNewest.gas, Date.now(), s.tz)}` : ''].filter(Boolean).join(' · ')
+        : s.fuse.premisesId ? 'Fuse signed the panel out. Press Send code to sign in again.' : 'press Send code, then type the code Fuse texts you', 'fuse'),
     ] : [
       item(s.octopus.tariff || s.octopus.discovered ? res('rates') : 'todo', 'Octopus Agile prices', s.octopus.discovered?.tariff || s.octopus.tariff, 'rates'),
       item(s.octopus.apiKey ? res('homemini') : 'todo', 'Octopus Home Mini (live usage)', '', 'homemini'),
@@ -109,9 +115,15 @@ export function openSettings(root, ctx) {
 
   // Checklist
   const list = h('ul', { class: 'checklist' });
-  const listState = () => (connected && draft.energy.source === 'bright'
-    ? { ...state, brightNewest: null, status: { ...state.status, bright: { ok: true }, brightlive: draft.bright.discovered?.live ? { ok: true } : null } }
-    : state);
+  const fuseApi = new Fuse(draft); // its tokens are in storage, shared with the panel; only the relay URL comes from the draft
+  const listState = () => ({
+    ...(connected && draft.energy.source === 'bright'
+      ? { ...state, brightNewest: null, status: { ...state.status, bright: { ok: true }, brightlive: draft.bright.discovered?.live ? { ok: true } : null } }
+      : connected && draft.energy.source === 'fuse'
+        ? { ...state, fuseNewest: null, status: { ...state.status, fuse: { ok: true } } }
+        : state),
+    fuseSignedIn: fuseApi.signedIn,
+  });
   const renderList = () => list.replaceChildren(...checklist(draft, listState()).map((i) => h('li', {},
     h('span', { class: i.state === 'ok' ? 'ok' : i.state === 'bad' ? 'bad' : 'off' }, i.state === 'ok' ? '✓' : i.state === 'bad' ? '✗' : i.state === 'pending' ? '…' : '○'),
     h('span', {}, i.text, i.detail ? h('span', { class: 'muted' }, ` · ${i.detail}`) : ''))));
@@ -166,12 +178,89 @@ export function openSettings(root, ctx) {
     field('Standing charge (p/day, including VAT)', input(draft.energy, 'standing', { type: 'number', step: 0.01 })),
     field('Relay URL (only if needed)', input(draft.bright, 'proxy', { placeholder: 'https://bright-relay.<you>.workers.dev' }),
       'Leave empty. Only if the checklist says Bright is blocking this browser: see docs/bright.md (the address also has to be added to web/index.html).'));
+  // Fuse Energy: a mobile number, an SMS code, sometimes identity questions. Only ever started by
+  // a tap on "Send code": the panel never asks Fuse to text anyone by itself.
+  const fuseInfo = h('div', { class: 'help' });
+  const showFuse = (justNow = false) => {
+    fuseInfo.textContent = draft.fuse.premisesId && fuseApi.signedIn ? `${justNow ? 'Fuse connected and saved. ' : ''}Signed in${draft.fuse.premisesName ? ` (${draft.fuse.premisesName})` : ''}.` : 'Not signed in yet.';
+  };
+  const codeIn = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 8, placeholder: '6-digit code', spellcheck: 'false' });
+  const codeRow = h('div', { class: 'hidden' }, field('Code from the text message', codeIn));
+  const questionsBox = h('div', { class: 'hidden' });
+  const finishFuse = async () => {
+    const p = await fuseApi.premises();
+    Object.assign(draft.fuse, { premisesId: p.id, premisesName: p.name });
+    // Saved straight away (the sign-in is, in storage; so are the switch and the property), so
+    // Cancel can't lose a working sign-in. The rest of the page still waits for Save & close.
+    s.fuse = { ...draft.fuse };
+    s.energy = { ...s.energy, source: 'fuse' };
+    draft.energy.source = 'fuse';
+    sourceSel.value = 'fuse';
+    save();
+    savedEarly = true;
+    connected = true;
+    codeRow.classList.add('hidden');
+    questionsBox.classList.add('hidden');
+    codeIn.value = '';
+    showSource();
+    // Said here, not by the button that was pressed (a question's Continue button has just gone).
+    showFuse(true);
+  };
+  const askQuestions = (q) => {
+    const answers = q.questions.map((x) => ({ x, el: h('input', { type: x.kind === 'DATE' ? 'date' : 'text', autocomplete: 'off', spellcheck: 'false' }) }));
+    questionsBox.replaceChildren(
+      h('div', { class: 'help' }, [q.title, q.subtitle].filter(Boolean).join(': ') || 'Fuse wants to check who you are.'),
+      ...answers.map(({ x, el }) => field(x.title, el)),
+      btn('Continue', async () => {
+        const responses = {};
+        for (const { x, el } of answers) {
+          const value = x.kind === 'DATE' ? normaliseDateAnswer(el.value) : el.value.trim();
+          if (!value) throw new Error(x.kind === 'DATE' ? `${x.title}: type the date like 04/03/1965.` : `${x.title}: Fuse needs an answer.`);
+          responses[x.key] = value;
+        }
+        const next = await fuseApi.answer(responses);
+        if (next.done) await finishFuse(); else { askQuestions(next); say('Fuse has another question.'); }
+      }));
+    questionsBox.classList.remove('hidden');
+    codeRow.classList.add('hidden');
+  };
+  const fuseFields = h('div', {},
+    field('Mobile number on your Fuse account', input(draft.fuse, 'phone', { placeholder: '07700 900123' }), 'Fuse texts you a code to sign in, as its app does. There is no password.'),
+    btn('Send code', async () => {
+      connected = false;
+      await fuseApi.startSignIn(draft.fuse.phone);
+      codeRow.classList.remove('hidden');
+      questionsBox.classList.add('hidden');
+      say('Code sent. Type it below. (Wait a few minutes before asking for another.)');
+    }),
+    codeRow,
+    btn('Sign in', async () => {
+      const r = await fuseApi.submitCode(codeIn.value);
+      if (r.done) await finishFuse(); else askQuestions(r);
+    }),
+    questionsBox,
+    fuseInfo,
+    btn('Sign out of Fuse', async () => {
+      fuseApi.signOut();
+      Object.assign(draft.fuse, { premisesId: '', premisesName: '' });
+      s.fuse = { ...s.fuse, premisesId: '', premisesName: '' };
+      save(); // can't be undone, so it isn't left for Save & close
+      savedEarly = true;
+      connected = false;
+      showFuse();
+      renderList();
+      say('Signed out of Fuse.');
+    }, true),
+    field('Relay URL (only if needed)', input(draft.fuse, 'proxy', { placeholder: 'https://fuse-relay.<you>.workers.dev' }),
+      'Leave empty. Only if the checklist says Fuse is blocking this browser: see docs/fuse.md (the address also has to be added to web/index.html).'));
+  showFuse();
   const sourceSel = h('select', {},
-    h('option', { value: 'octopus', selected: draft.energy.source !== 'bright' }, 'Octopus: Agile prices and the Octopus Home Mini'),
-    h('option', { value: 'bright', selected: draft.energy.source === 'bright' }, 'Bright app: any supplier, fixed price (e.g. Fuse)'));
+    h('option', { value: 'octopus', selected: !['bright', 'fuse'].includes(draft.energy.source) }, 'Octopus: Agile prices and the Octopus Home Mini'),
+    h('option', { value: 'bright', selected: draft.energy.source === 'bright' }, 'Bright app: any supplier, fixed price (half hours, often hours behind)'),
+    h('option', { value: 'fuse', selected: draft.energy.source === 'fuse' }, 'Fuse app: electricity and gas, hourly (about an hour behind)'));
   const energy = h('section', {}, h('h2', {}, 'Electricity'),
-    field('Usage comes from', sourceSel, 'Left Octopus? Choose Bright: it reads your smart meter whoever supplies you (set up in the free Bright app first; docs/bright.md).'),
-    brightFields);
+    field('Usage comes from', sourceSel, "With Fuse, choose Fuse: it reads the same usage the Fuse app shows, electricity and gas. Bright reads any supplier's smart meter (set up in the free Bright app first; docs/bright.md)."),
+    fuseFields, brightFields);
 
   // Octopus
   const octoInfo = h('div', { class: 'help' });
@@ -206,7 +295,9 @@ export function openSettings(root, ctx) {
   // Only the chosen source's details show.
   const showSource = () => {
     brightFields.classList.toggle('hidden', draft.energy.source !== 'bright');
-    octo.classList.toggle('hidden', draft.energy.source === 'bright');
+    fuseFields.classList.toggle('hidden', draft.energy.source !== 'fuse');
+    octo.classList.toggle('hidden', ['bright', 'fuse'].includes(draft.energy.source));
+    if (!connected) showFuse();
     renderList();
   };
   sourceSel.addEventListener('change', () => { draft.energy.source = sourceSel.value; connected = false; showSource(); });
@@ -414,7 +505,7 @@ export function openSettings(root, ctx) {
   const box = h('textarea', { placeholder: 'Paste settings here' });
   let movedSpotify = null;
   const move = h('section', {}, h('h2', {}, 'Copy settings to another browser'),
-    h('div', { class: 'help' }, 'Use this to sign in to Google in Chrome, then move everything into the kiosk app. The text contains your keys, so paste it straight into the other app and nowhere else.'),
+    h('div', { class: 'help' }, 'Use this to sign in to Google in Chrome, then move everything into the kiosk app. The text contains your keys, so paste it straight into the other app and nowhere else. The Fuse sign-in is not copied (Fuse ends a sign-in used in two places): sign in again with a new code in the other app.'),
     btn('Copy settings', async () => {
       // Spotify's sign-in can change each time it's used, so only one browser can keep it: it
       // moves with the copy, and this browser lets go of it. Copying again (say the clipboard

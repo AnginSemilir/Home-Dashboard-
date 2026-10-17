@@ -118,6 +118,18 @@ export function brightSettings(now) {
   return s;
 }
 
+export const FUSE_PHONE = '+447700900123';
+export const FUSE_RELAY = 'https://fuse-relay.example.workers.dev';
+
+/** Settings for a household on Fuse: electricity and gas from the Fuse app, signed in (see openPanel's `fuse`). */
+export function fuseSettings(now) {
+  const s = fullSettings(now);
+  s.octopus = { account: '', apiKey: '', discovered: null };
+  s.energy = { source: 'fuse', unitRate: 0, standing: 0 };
+  s.fuse = { phone: '07700 900123', proxy: '', premisesId: 'prem-1', premisesName: '1 Test Street' };
+  return s;
+}
+
 /** Settings as they'd look after a complete setup. */
 export function fullSettings(now) {
   return {
@@ -134,7 +146,7 @@ export function fullSettings(now) {
  * Install fake network for a Playwright page. Returns a log of calls, and `fail` to make a
  * service return errors (e.g. fail.add('octopus')).
  */
-export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil, brightUntil, glow = false, brightAccount = 'one' } = {}) {
+export async function installMocks(page, { now, dayStart, fail = new Set(), kiaReading, xss = false, homeMiniStopsAt, readingsUntil, brightUntil, glow = false, brightAccount = 'one', fuseUntil, fuseNoGas = false } = {}) {
   const calls = [];
   const json = (route, body, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(body) });
   const kiaPayload = await encryptReading(kiaReading || { battery: 78, range: 182, charging: false, plugged: false, updated: now - 2 * 3600e3 }, KIA_KEY);
@@ -264,6 +276,85 @@ export async function installMocks(page, { now, dayStart, fail = new Set(), kiaR
       return json(route, { status: 'OK', name: 'electricity consumption', resourceId: m[1], classifier: 'electricity.consumption', query, data, units: 'kWh' });
     }
     return json(route, { error: 'Not found' }, 404);
+  });
+
+  // Fuse Energy's private API (the Fuse app), on its two hosts and, for the relay test, a relay in front.
+  // Sign in with +447700900123 and the code 123456 (with `fuse-dob`, after the date of birth 1965-03-04).
+  // Tokens rotate on every refresh and the old refresh token dies at once, as Fuse's do. Charts are hourly:
+  // complete hours up to `fuseUntil` (default: the start of this hour), then the hour in progress with a
+  // climbing value (it steps at half past), then forecasts. Fail flags: fuse-blocked (as CORS), fuse-sms-wait,
+  // fuse-dob, fuse-signed-out (refresh refused), fuse-426, fuse-no-gas-today, fuse-empty.
+  const fuseSrv = { n: 1 };
+  const fuseTok = () => ({ access_token: `fuse-acc-${fuseSrv.n}`, refresh_token: `fuse-ref-${fuseSrv.n}` });
+  const pad = (n) => String(n).padStart(2, '0');
+  const trunc2 = (x) => (Math.floor(x * 100 + 1e-9) / 100).toFixed(2);
+  const gasHour = (h) => (h >= 6 && h < 9 ? 2.9 : h >= 17 && h < 22 ? 2.1 : 0.25);
+  const dobQuestion = { key: 'DATE_OF_BIRTH', title: 'Date of birth', type: 'DATE' };
+  await page.route(/^https:\/\/(api\.fuseenergy\.com|www\.fuseenergy\.com|fuse-relay\.example\.workers\.dev)\//, async (route) => {
+    const req = route.request();
+    const url = new URL(req.url());
+    const h = req.headers();
+    const path = url.pathname.replace(/^\/web(?=\/api\/trpc)/, ''); // a relay maps /web/… to the website
+    const body = req.postData() ? JSON.parse(req.postData()) : undefined;
+    calls.push({ service: 'fuse', host: url.host, url: req.url(), path, method: req.method(), headers: h, body });
+    if (fail.has('fuse-blocked')) return route.abort('failed'); // as a browser sees a missing CORS header
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
+    if (path === '/api/trpc/phoneSignIn') {
+      if (body?.phone !== FUSE_PHONE) return json(route, { result: { data: { error: { errorCode: 'incorrect_phone_number' } } } });
+      if (fail.has('fuse-sms-wait')) return json(route, { error: { json: { message: 'Too soon', code: -32600, data: { code: 'issue_otp_premature_retry' } } } });
+      return json(route, { result: { data: {} } });
+    }
+    if (!h['device-id']) return json(route, { status_string: 'missing_device_id' }, 400);
+    if (path === '/api/v3/auth') {
+      const type = body?.challenge_type;
+      if (type === 'INITIAL') {
+        if (body.data?.data?.phone_number !== FUSE_PHONE) return json(route, { status_string: 'unknown_user' }, 400);
+        return json(route, { auth_flow_token: 'flow-1', challenge_type: 'PHONE_OTP', data: {} });
+      }
+      if (!/^Bearer flow-/.test(h.authorization || '')) return json(route, { status_string: 'bad_flow' }, 401);
+      if (type === 'PHONE_OTP') {
+        if (body.data?.code !== '123456') return json(route, { status_string: 'invalid_code' }, 400);
+        if (fail.has('fuse-dob')) return json(route, { challenge_type: 'ADDITIONAL_INFO', auth_flow_token: 'flow-2', data: { title: 'Verify your date of birth', subtitle: 'Fuse needs to check it is you', questions: [dobQuestion] } });
+        return json(route, { challenge_type: 'AUTHORIZED', data: fuseTok() });
+      }
+      if (type === 'ADDITIONAL_INFO') {
+        if (body.data?.responses?.DATE_OF_BIRTH !== '1965-03-04') return json(route, { challenge_type: 'ADDITIONAL_INFO', auth_flow_token: 'flow-3', data: { title: 'That does not match', questions: [dobQuestion] } });
+        return json(route, { challenge_type: 'AUTHORIZED', data: fuseTok() });
+      }
+      return json(route, { status_string: 'unsupported' }, 400);
+    }
+    if (path === '/api/v1/auth/refresh') {
+      if (fail.has('fuse-signed-out') || body?.refresh_token !== fuseTok().refresh_token) return json(route, { status_string: 'refresh_failed' }, 401);
+      fuseSrv.n++;
+      return json(route, fuseTok());
+    }
+    if (fail.has('fuse-426')) return json(route, { status_string: 'app_version_too_old' }, 426);
+    if (fail.has('fuse-signed-out') || h.authorization !== `Bearer ${fuseTok().access_token}`) return json(route, { status_string: 'token_expired' }, 401);
+    if (path === '/api/v2/customer/premises') return json(route, [{ premises: { id: 'prem-1', address_line_1: '1 Test Street' }, supplies: [], default_date_uk: '2026-05-25' }]);
+    const m = /^\/api\/v1\/premises\/([^/]+)\/chart$/.exec(path);
+    if (!m || m[1] !== 'prem-1') return json(route, { error: 'Not found' }, 404);
+    const [y, mo, d] = ['year', 'month', 'day'].map((k) => +url.searchParams.get(k));
+    const ymd = `${y}-${pad(mo)}-${pad(d)}`;
+    const midnight = Date.parse(`${ymd}T00:00:00Z`) - (ymd >= '2026-03-29' && ymd < '2026-10-25' ? 3600e3 : 0); // UK midnight
+    const hourStart = Math.floor(now / 3600e3) * 3600e3;
+    const elecUntil = fuseUntil ?? hourStart;
+    const gasUntil = fail.has('fuse-no-gas-today') ? dayStart : elecUntil;
+    const local = new Date(now + 3600e3); // BST (the test dates are all in summer time)
+    const bars = (fuel) => [...Array(24).keys()].map((hour) => {
+      const start = midnight + hour * 3600e3;
+      const until = fuel === 'gas' ? gasUntil : elecUntil;
+      const full = fuel === 'gas' ? gasHour(hour) : +(usedKwh(start) + usedKwh(start + 1800e3)).toFixed(3);
+      const nowIn = start === until && start <= now && now < start + 3600e3; // the hour in progress
+      const done = start + 3600e3 <= until;
+      const kwh = done ? full : nowIn ? (now - start >= 1800e3 ? +(full / 2).toFixed(3) : 0) : full;
+      const usage = kwh * (fuel === 'gas' ? 0.0687 : 0.2664), standing = (fuel === 'gas' ? 0.28 : 0.4735) / 24;
+      return { bar: { index: { year: y, month: mo, day: d, hour }, kWh: String(kwh), money: { amount: trunc2(usage + standing), currency: 'GBP' }, type: done || nowIn ? 'REALISED' : 'FORECASTED' },
+        breakdown: [{ name: 'USAGE', value: { amount: usage.toFixed(4) }, kWh: String(kwh) }, { name: 'STANDING', value: { amount: standing.toFixed(4) }, kWh: null }] };
+    });
+    const padding = { bar: { index: { year: y, month: mo, day: d - 1, hour: 23 }, kWh: '9', money: { amount: '9.00', currency: 'GBP' }, type: 'REALISED' } }; // a neighbouring day
+    const supplies = [{ supply_fid: 's1', supply_type: 'ELEC_IMPORT', bars: fail.has('fuse-empty') ? [] : [padding, ...bars('elec')] }, { supply_fid: 's2', supply_type: 'ELEC_EXPORT', bars: [] }];
+    if (!fuseNoGas) supplies.push({ supply_fid: 's3', supply_type: 'GAS', bars: fail.has('fuse-empty') ? [] : bars('gas') });
+    return json(route, { current_index: { year: local.getUTCFullYear(), month: local.getUTCMonth() + 1, day: local.getUTCDate(), hour: local.getUTCHours() }, supplies });
   });
 
   await page.route(/^https:\/\/(oauth2\.googleapis\.com\/token|www\.googleapis\.com\/oauth2\/v4\/token)/, async (route) => {

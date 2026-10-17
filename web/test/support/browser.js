@@ -2,7 +2,7 @@
 // a fresh context per test with every outside service faked.
 import { chromium } from 'playwright';
 import { startServer } from './serve.js';
-import { installMocks, fullSettings } from './mocks.js';
+import { installMocks, fullSettings, FUSE_RELAY } from './mocks.js';
 
 export const NOW = Date.parse('2026-09-25T09:41:00+01:00');
 export const dayStartOf = (ms) => Date.parse(new Date(ms + 3600e3).toISOString().slice(0, 10) + 'T00:00:00+01:00'); // BST test dates only
@@ -24,7 +24,7 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
-  style, theme, geolocation, spotify, touch, readingsUntil, brightUntil, glow, brightAccount,
+  style, theme, geolocation, spotify, touch, readingsUntil, brightUntil, glow, brightAccount, fuse, fuseUntil, fuseNoGas, csp,
 } = {}) {
   // `geolocation`: { latitude, longitude } the tablet reports (location allowed); by default it's refused.
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block',
@@ -35,7 +35,7 @@ export async function openPanel(env, {
   page.on('pageerror', (e) => problems.push(e.message));
   if (clock === 'install') await page.clock.install({ time: now });
   else await page.clock.setFixedTime(now);
-  const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt, readingsUntil, brightUntil, glow, brightAccount });
+  const calls = await installMocks(page, { now, dayStart: dayStartOf(now), fail, xss, kiaReading, homeMiniStopsAt, readingsUntil, brightUntil, glow, brightAccount, fuseUntil, fuseNoGas });
   // PANEL_STYLE / PANEL_THEME run the whole suite in another look (CI runs every style).
   style ??= process.env.PANEL_STYLE;
   theme ??= process.env.PANEL_THEME;
@@ -48,6 +48,18 @@ export async function openPanel(env, {
   // spotify: true = already connected to Spotify (a sign-in waiting to be refreshed).
   if (spotify) {
     await page.addInitScript(() => { if (!sessionStorage.getItem('seeded-sp')) { localStorage.setItem('wallpanel.spotify.v1', JSON.stringify({ refreshToken: 'sp-rt-0' })); sessionStorage.setItem('seeded-sp', '1'); } });
+  }
+  // fuse: true = already signed in to Fuse; or { access, refresh } (an expired access token: the panel renews it).
+  if (fuse) {
+    const tokens = fuse === true ? { access: 'fuse-acc-1', refresh: 'fuse-ref-1' } : fuse;
+    await page.addInitScript((t) => { if (!sessionStorage.getItem('seeded-fuse')) { localStorage.setItem('wallpanel.fuse.v1', JSON.stringify({ deviceId: 'dev-test', ...t })); sessionStorage.setItem('seeded-fuse', '1'); } }, tokens);
+  }
+  // csp: true = the Fuse relay (FUSE_RELAY) is added to the page's connect-src, as docs/fuse.md has the user do.
+  if (csp) {
+    await page.route((u) => u.href.startsWith(env.url) && !/\.\w+$/.test(u.pathname), async (route) => {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, body: (await res.text()).replace("connect-src 'self'", `connect-src 'self' ${csp === true ? FUSE_RELAY : csp}`) });
+    });
   }
   if (initScript) await page.addInitScript(initScript);
   await page.goto(env.url);

@@ -36,6 +36,8 @@
   /* Price bands: validated (dataviz validate_palette, --mode dark --surface #0a0b0d). */
   --plunge: #338ef0;
   --use: #4f9cf0;    /* usage bars (Bright) */
+  --elec: #3987e5;   /* Fuse: electricity bars */
+  --gas: #d95926;    /* Fuse: gas bars */
   --cheap: #2aa87e;
   --mid: #ce8109;
   --high: #d22e2c;
@@ -84,6 +86,8 @@
   --accent: #6a4be0;
   --plunge: #1f6fd6;
   --use: #2f6fd0;    /* usage bars (Bright) */
+  --elec: #2f6fd0;
+  --gas: #eb6834;
   --cheap: #11805a;
   --mid: #c47f00;
   --high: #bf2a22;
@@ -619,6 +623,23 @@ svg { display: block; }
 /* The average-prices and by-hour buttons are about Agile prices: not shown here. */
 .src-bright .price .stats-btn, .src-bright .price .usage-btn { display: none; }
 .src-bright .price > .dot { right: 0.9em; }
+/* ---------- Fuse (electricity and gas, hourly) ---------- */
+/* Series colours validated with the dataviz validate_palette (categorical, both fuels together):
+   dark #3987e5 + #d95926 on the card; light the --use blue + #eb6834 on the card. */
+.chart-svg .ch-bar.ch-elec, .chart-svg .ch-key.ch-elec { fill: var(--elec); }
+.chart-svg .ch-bar.ch-gas, .chart-svg .ch-key.ch-gas { fill: var(--gas); }
+.chart-svg .ch-bar.ch-sofar { fill-opacity: 0.5; } /* the hour in progress: "so far", Fuse is still topping it up */
+.chart-svg .ch-rowname { fill: var(--text); font-weight: 600; }
+.sw.sw-elec { background: var(--elec); }
+.sw.sw-gas { background: var(--gas); }
+.band-chip.chip-fuel { display: inline-flex; align-items: center; gap: 0.9em; }
+.chip-fuel .fz { display: inline-flex; align-items: center; gap: 0.35em; }
+.chip-fuel .fz svg { width: 0.95em; height: 0.95em; flex: none; }
+.chip-fuel .fz-elec svg { color: var(--elec); }
+.chip-fuel .fz-gas svg { color: var(--gas); }
+/* The average-prices and by-hour buttons are about Agile prices: not shown here either. */
+.src-fuse .price .stats-btn, .src-fuse .price .usage-btn { display: none; }
+.src-fuse .price > .dot { right: 0.9em; }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */
 .cam.expanded.ring { z-index: 75; } /* above night (60), the music controls (65) and Settings (70); below toasts (80) */

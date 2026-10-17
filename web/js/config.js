@@ -14,8 +14,9 @@ export const DEFAULTS = Object.freeze({
     discovered: null,   // { tariff, product, mpan, serial, deviceId, at }
     proxy: '',          // only if the browser can't reach Octopus directly: https://….workers.dev (docs/octopus.md)
   },
-  // Where electricity usage comes from: 'octopus' (Agile prices and the Octopus Home Mini) or
-  // 'bright' (Hildebrand's Bright app: any supplier, with a fixed price per kWh).
+  // Where usage comes from: 'octopus' (Agile prices and the Octopus Home Mini), 'bright'
+  // (Hildebrand's Bright app: any supplier, with a fixed price per kWh) or 'fuse' (the Fuse
+  // Energy app: electricity and gas, hourly).
   energy: {
     source: 'octopus',
     unitRate: 0,        // p/kWh including VAT (fixed tariff, for "today so far" in pounds)
@@ -26,6 +27,13 @@ export const DEFAULTS = Object.freeze({
     password: '',
     proxy: '',          // only if this browser can't reach Bright directly: https://….workers.dev (docs/bright.md)
     discovered: null,   // { ve, consumption, cost, live, at }
+  },
+  // Fuse Energy. The sign-in tokens and device ID are kept apart (fuse.js) and never exported.
+  fuse: {
+    phone: '',          // the mobile number on the Fuse account
+    proxy: '',          // only if this browser can't reach Fuse directly: https://….workers.dev (docs/fuse.md)
+    premisesId: '',     // found at sign-in
+    premisesName: '',
   },
   google: {
     clientId: '',

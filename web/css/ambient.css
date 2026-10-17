@@ -38,6 +38,8 @@
      checks. Past bars are a plain grey, so colour is only on what's still to come. */
   --plunge: #5194f0;
   --use: #5b9ff2;    /* usage bars (Bright) */
+  --elec: #3987e5;   /* Fuse: electricity bars */
+  --gas: #d95926;    /* Fuse: gas bars */
   --cheap: #17a58b;
   --mid: #d37e03;
   --high: #cb3b4d;
@@ -116,6 +118,8 @@
   --on-accent: #ffffff;
   --plunge: #2a71d6;
   --use: #2a6fd0;    /* usage bars (Bright) */
+  --elec: #2a6fd0;
+  --gas: #eb6834;
   --cheap: #0e8a73;
   --mid: #cf7305;
   --high: #bc2b42;
@@ -701,6 +705,24 @@ svg { display: block; }
 /* The average-prices and by-hour buttons are about Agile prices: not shown here. */
 .src-bright .price .stats-btn, .src-bright .price .usage-btn { display: none; }
 .src-bright .price > .dot { right: 12px; }
+/* ---------- Fuse (electricity and gas, hourly) ---------- */
+/* Series colours validated with the dataviz validate_palette (categorical, both fuels together):
+   dark #3987e5 + #d95926 on the card; light the --use blue + #eb6834 on the card. */
+.chart-svg .ch-bar.ch-elec, .chart-svg .ch-key.ch-elec { fill: var(--elec); }
+.chart-svg .ch-bar.ch-gas, .chart-svg .ch-key.ch-gas { fill: var(--gas); }
+.chart-svg .ch-bar.ch-sofar { fill-opacity: 0.5; } /* the hour in progress: "so far", Fuse is still topping it up */
+.chart-svg .ch-rowname { fill: var(--text); font-weight: 600; }
+.sw.sw-elec { background: var(--elec); }
+.sw.sw-gas { background: var(--gas); }
+.band-chip.chip-fuel { display: inline-flex; align-items: center; gap: 0.9em; }
+.band-chip.chip-fuel::before { content: none; } /* the two fuel icons are the key; no price-band dot */
+.chip-fuel .fz { display: inline-flex; align-items: center; gap: 0.35em; }
+.chip-fuel .fz svg { width: 0.95em; height: 0.95em; flex: none; }
+.chip-fuel .fz-elec svg { color: var(--elec); }
+.chip-fuel .fz-gas svg { color: var(--gas); }
+/* The average-prices and by-hour buttons are about Agile prices: not shown here either. */
+.src-fuse .price .stats-btn, .src-fuse .price .usage-btn { display: none; }
+.src-fuse .price > .dot { right: 12px; }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */
 .cam.expanded.ring { z-index: 75; } /* above night (60), the music controls (65) and Settings (70); below toasts (80) */

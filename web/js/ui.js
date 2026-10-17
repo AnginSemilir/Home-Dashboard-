@@ -5,7 +5,7 @@ import { h, svg } from './util.js';
 import { UI, WEATHER } from './icons.js';
 import { hhmm, longDate, weekdayShort, dayMonth, ago, partsInTz, startOfDay, DEFAULT_TZ } from './time.js';
 import { priceSummary, band, round1 } from './agile.js';
-import { renderChart, renderHours, renderUsageDay } from './chart.js';
+import { renderChart, renderHours, renderUsageDay, renderFuseDay } from './chart.js';
 import { groupDays } from './calendar.js';
 import { describe } from './weather.js';
 import { MUSIC_APPS, musicApp, ASSISTANTS, assistantApp } from './launcher.js';
@@ -805,8 +805,9 @@ function sparkline(points, now, minutes = 60) {
 
 const fmtKw = (w) => (w >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`);
 
-export function renderTiles(r, st, s, now, tz = DEFAULT_TZ, bright = null) {
-  if (bright) renderBrightTiles(r, bright, now, tz);
+export function renderTiles(r, st, s, now, tz = DEFAULT_TZ, bright = null, fuse = null) {
+  if (fuse) renderFuseTiles(r, fuse, now, tz);
+  else if (bright) renderBrightTiles(r, bright, now, tz);
   else renderOctopusTiles(r, st, s, now);
 
   // Indoor (Nest)
@@ -870,6 +871,12 @@ export function dayWords(t, now, tz = DEFAULT_TZ) {
   return `${weekdayShort(t, tz)} ${dayMonth(t, tz)}`;
 }
 const capital = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+
+/** Where readings reach, in words: '14:30', 'yesterday 23:00', 'yesterday midnight' (the end of the day, not the start of the next). */
+export function untilWords(ms, now, tz = DEFAULT_TZ) {
+  const day = dayWords(ms - 1, now, tz);
+  return `${day === 'today' ? '' : `${day} `}${hhmm(ms, tz) === '00:00' ? 'midnight' : hhmm(ms, tz)}`;
+}
 
 /** A half hour in words: '13:00–13:30' today, else with its day ('yesterday 23:30–00:00'). */
 export function slotWhen(slot, now, tz = DEFAULT_TZ) {
@@ -953,6 +960,115 @@ function renderBrightTiles(r, v, now, tz) {
     r.tCost.value.textContent = '–';
     r.tCost.extra.replaceChildren();
   }
+}
+
+// ---------- Fuse (electricity and gas, hourly) ----------
+
+/** Pence as people say them: '3.4p', '11p', '£1.85'. */
+const pence = (p) => (p >= 100 ? pounds(p) : `${p < 10 ? p.toFixed(1) : Math.round(p)}p`);
+
+/** How far each fuel's readings reach, in words: 'electricity to 14:30, gas to yesterday 23:00'. */
+export function fuseNewestText(v, now, tz = DEFAULT_TZ) {
+  return [
+    v.newest.elec ? `electricity to ${untilWords(v.newest.elec, now, tz)}` : '',
+    v.hasGas && v.newest.gas ? `gas to ${untilWords(v.newest.gas, now, tz)}` : '',
+  ].filter(Boolean).join(', ');
+}
+
+/** What the card says while it has no usage for today: never just "waiting", always why. */
+function fuseQuiet(v, now, tz) {
+  if (v.notSetUp) return [h('div', {}, "Fuse isn't connected on this panel yet"), h('div', {}, '⚙ → Electricity → Send code')];
+  if (v.signedOut) return [h('div', {}, 'Fuse signed the panel out'), h('div', {}, '⚙ → Electricity → Send code to sign in again')];
+  if (v.status?.error) return ['Usage unavailable (tap for why)'];
+  if (!v.status) return ['Asking Fuse…'];
+  const upTo = fuseNewestText(v, now, tz);
+  return upTo ? [h('div', {}, 'No usage for today yet · tap for why'), h('div', {}, "Fuse's newest: ", h('b', {}, upTo))] : ['No readings from Fuse yet'];
+}
+
+/**
+ * Fuse: the hero says what today has cost so far (electricity and gas, standing charges included, as
+ * the Fuse app counts it), the chart shows each fuel's hours. `v` from main.js fuseView.
+ */
+export function renderFuse(r, v, now, tz = DEFAULT_TZ) {
+  r.panel.classList.add('src-fuse');
+  r.priceLabel.textContent = 'Today so far';
+  setDot(r.priceDot, v.status);
+  setDot(r.chartDot, v.status);
+  delete r.price.dataset.band;
+  const e = v.today.elec, g = v.today.gas;
+  if (!v.hasToday) {
+    r.priceBig.className = 'big none';
+    r.priceBig.textContent = '–';
+    r.priceBand.className = 'band-chip hidden';
+    r.priceSub.replaceChildren(...fuseQuiet(v, now, tz));
+  } else {
+    r.priceBig.className = 'big';
+    r.priceBig.replaceChildren(h('span', { class: 'num' }, pounds(v.totalP)));
+    r.priceBand.className = 'band-chip chip-fuel';
+    r.priceBand.replaceChildren(
+      h('span', { class: 'fz fz-elec' }, icon('bolt'), `${e.kwh.toFixed(1)} kWh`),
+      v.hasGas ? h('span', { class: 'fz fz-gas' }, icon('flame'), g.kwh > 0 ? `${g.kwh.toFixed(1)} kWh` : '–') : '');
+    // Where the readings reach. Gas often comes later than electricity: say so when it does.
+    const lag = now - (v.newest.elec ?? now);
+    const gasBehind = v.hasGas && (!v.newest.gas || (v.newest.elec ?? 0) - v.newest.gas > 2 * 3600e3);
+    const to = untilWords(v.newest.elec ?? now, now, tz);
+    const reach = v.status?.error ? ['readings to ', h('b', {}, to), ' · Usage unavailable (tap for why)']
+      : gasBehind ? [fuseNewestText(v, now, tz), v.newest.gas ? '' : ' · no gas readings yet']
+        : ['readings to ', h('b', {}, to), lag <= 2 * 3600e3 ? ' · Fuse is about an hour behind' : ` · Fuse is ${Math.round(lag / 3600e3)} hours behind`];
+    r.priceSub.replaceChildren(
+      h('div', {}, ...reach),
+      h('div', {}, 'Electricity ', h('b', {}, pounds(Math.round(e.pence))), !v.hasGas ? ' · standing charge included' : g.kwh > 0 ? [' · Gas ', h('b', {}, pounds(Math.round(g.pence)))] : ' · gas not reported yet'));
+  }
+  // The chart: today, or until today has a reading the newest day Fuse has, dated.
+  const day = dayWords(v.shown.start, now, tz);
+  r.chartLabel.replaceChildren(`Usage ${day} `, h('span', { class: 'unit' }, 'kWh per hour'));
+  r.legend.dataset.key = `fuse/${v.hasGas}`;
+  const item = (cls, text) => h('span', { class: 'lg' }, h('span', { class: `sw sw-${cls}` }), text);
+  r.legend.replaceChildren(...(v.hasGas ? [item('elec', 'Electricity'), item('gas', 'Gas')] : []));
+  const box = r.chartBox.getBoundingClientRect();
+  const fs = parseFloat(getComputedStyle(r.chartBox).fontSize) || 12;
+  const rows = [{ fuel: 'elec', label: 'Electricity', min: 0.5, hours: v.shownDay?.elec || [] }];
+  if (v.hasGas) rows.push({ fuel: 'gas', label: 'Gas', min: 1, hours: v.shownDay?.gas || [] });
+  r.chartBox.replaceChildren(svg(renderFuseDay({ rows, now, dayStart: v.shown.start, dayEnd: v.shown.end, width: box.width || 500, height: box.height || 260, fs, tz, day })));
+}
+
+/** Electricity (replaces "Using now": Fuse has nothing live) and Gas (or yesterday, with no gas). */
+function renderFuseTiles(r, v, now, tz) {
+  setDot(r.tUsage.dot, v.status);
+  setDot(r.tCost.dot, v.status);
+  const why = (what) => (v.notSetUp ? 'Fuse not set up yet' : v.signedOut ? 'Signed out · tap' : v.status?.error ? '' : !v.status ? 'Asking Fuse…' : what);
+  const money = (t) => pounds(Math.round(t.pence));
+  // Yesterday, with how far its readings reach if Fuse hasn't sent all of it.
+  const yesterday = (y) => (y.hours ? h('div', { class: 'muted' }, `Yesterday ${money(y)}`, y.complete ? '' : ` · to ${hhmm(y.last, tz)}`) : '');
+  const tile = (t, label, today, yest, none) => {
+    t.label.textContent = label;
+    if (today.kwh > 0) {
+      t.value.textContent = money(today);
+      t.extra.replaceChildren(h('div', { class: 'muted' }, `${today.kwh.toFixed(1)} kWh today`), yesterday(yest));
+    } else {
+      t.value.textContent = '–';
+      t.extra.replaceChildren(h('div', { class: 'muted' }, why(none)), v.notSetUp || v.signedOut ? '' : yesterday(yest));
+    }
+  };
+  tile(r.tUsage, 'Electricity', v.today.elec, v.yesterday.elec, 'No readings yet today · tap');
+  if (v.hasGas) {
+    r.tCost.el.querySelector('.ico').replaceChildren(icon('flame'));
+    tile(r.tCost, 'Gas', v.today.gas, v.yesterday.gas, 'No gas readings yet today · tap');
+  } else {
+    // No gas on the account: the tile says what yesterday cost instead.
+    const y = v.yesterday.elec;
+    r.tCost.label.textContent = 'Yesterday';
+    r.tCost.value.textContent = y.hours ? money(y) : '–';
+    r.tCost.extra.replaceChildren(y.hours ? h('div', { class: 'muted' }, `${y.kwh.toFixed(1)} kWh`, y.complete ? '' : ` · to ${hhmm(y.last, tz)}`) : '');
+  }
+}
+
+/** The pop-up over a tapped hour: "Electricity 13:00–14:00 · 0.42 kWh · 11p (so far)". */
+export function showFuseTip(r, hit, tz = DEFAULT_TZ) {
+  const start = Number(hit.dataset.start), end = Number(hit.dataset.end), kwh = Number(hit.dataset.kwh), p = Number(hit.dataset.pence);
+  r.chartTip.replaceChildren(h('b', {}, hit.dataset.fuel === 'gas' ? 'Gas' : 'Electricity'), ` ${hhmm(start, tz)}–${hhmm(end, tz)}`,
+    h('span', { class: 'tip-band' }, ` · ${kwh.toFixed(2)} kWh · ${pence(p)}${hit.dataset.sofar === '1' ? ' so far' : ''}`));
+  placeTip(r, hit);
 }
 
 const AI_ICON = { claude: 'spark', gemini: 'gem' };
