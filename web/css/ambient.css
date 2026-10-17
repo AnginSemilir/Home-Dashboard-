@@ -714,6 +714,7 @@ svg { display: block; }
 .chart-svg .ch-rowname { fill: var(--text); font-weight: 600; }
 .sw.sw-elec { background: var(--elec); }
 .sw.sw-gas { background: var(--gas); }
+.settings .diag { white-space: pre-wrap; word-break: break-word; font: 0.8em/1.45 ui-monospace, monospace; color: var(--muted); margin: 0.6em 0 0; }
 .band-chip.chip-fuel { display: inline-flex; align-items: center; gap: 0.9em; }
 .band-chip.chip-fuel::before { content: none; } /* the two fuel icons are the key; no price-band dot */
 .chip-fuel .fz { display: inline-flex; align-items: center; gap: 0.35em; }

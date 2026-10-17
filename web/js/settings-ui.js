@@ -10,14 +10,14 @@ import { listTaskLists, createTaskList } from './tasks.js';
 import { lookupPlace } from './weather.js';
 import { newKey } from './kia.js';
 import { detectEnv, MUSIC_APPS, ASSISTANTS } from './launcher.js';
-import { hhmm } from './time.js';
+import { hhmm, dayKey, startOfDay } from './time.js';
 import { exportSpotify, importSpotify, spotifyEnded } from './spotify.js';
 import { LOCATION_WHY } from './sun.js';
 import { checkSubName } from './doorbell.js';
 import { Chime } from './chime.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 import { Bright } from './bright.js';
-import { Fuse, normaliseDateAnswer } from './fuse.js';
+import { Fuse, normaliseDateAnswer, chartSummary } from './fuse.js';
 import { slotWhen, untilWords } from './ui.js';
 
 const ENV_LABEL = {
@@ -187,6 +187,7 @@ export function openSettings(root, ctx) {
   const codeIn = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 8, placeholder: '6-digit code', spellcheck: 'false' });
   const codeRow = h('div', { class: 'hidden' }, field('Code from the text message', codeIn));
   const questionsBox = h('div', { class: 'hidden' });
+  const fuseDiag = h('pre', { class: 'diag hidden' }); // what Fuse sent, for a photo
   // The code worked (the sign-in is saved) but the property lookup after it didn't: pressing the button
   // again retries that, instead of asking for a code that has been used up.
   let pendingFinish = false;
@@ -251,6 +252,14 @@ export function openSettings(root, ctx) {
     }),
     questionsBox,
     fuseInfo,
+    btn('Show what Fuse sent (for troubleshooting)', async () => {
+      if (!draft.fuse.premisesId || !fuseApi.signedIn) throw new Error('Sign in to Fuse first.');
+      const now = Date.now(), out = [];
+      for (const ymd of [dayKey(now, draft.tz), dayKey(startOfDay(now, draft.tz, -1), draft.tz)]) out.push(chartSummary(await fuseApi.rawDay(draft.fuse.premisesId, ymd), ymd));
+      fuseDiag.textContent = out.join('\n\n');
+      fuseDiag.classList.remove('hidden');
+    }, true),
+    fuseDiag,
     btn('Sign out of Fuse', async () => {
       fuseApi.signOut();
       Object.assign(draft.fuse, { premisesId: '', premisesName: '' });

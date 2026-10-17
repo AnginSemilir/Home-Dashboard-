@@ -6,7 +6,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Fuse, FuseRefusal, FuseSignedOut, FUSE_APP_VERSION, parseChart, dayTotals, refusalCode,
-  normalisePhone, normaliseDateAnswer, explainFuseError,
+  normalisePhone, normaliseDateAnswer, explainFuseError, chartSummary,
 } from '../../js/fuse.js';
 import { loadSettings } from '../../js/config.js';
 import { HttpError } from '../../js/util.js';
@@ -582,4 +582,21 @@ test('the clock-change hour that comes twice: only the one it really is now is "
 
 test('normalisePhone: the trunk 0 written as (0) or after +44 is dropped', () => {
   for (const n of ['+44 (0)7700 900123', '0044 (0)7700 900123', '+44 07700 900123', '4407700900123', '+44 7700 900123']) assert.equal(normalisePhone(n), '+447700900123', n);
+});
+
+test('chartSummary: the hour and kWh of every bar and the field names, never IDs or addresses', () => {
+  const body = chartOf({
+    ELEC_IMPORT: [bar('2026-10-17', 8, '0.422', '0.12', { usage: '0.1086', standing: '0.0181' }), bar('2026-10-17', 9, '0.1', '0.05', { type: 'FORECASTED' })],
+    GAS: [bar('2026-10-17', 8, '1.5', '0.10', { usage: '0.09' })],
+  }, { current_index: { year: 2026, month: 10, day: 17, hour: 9 }, premises_address: '1 Secret Street', supply_fid_extra: 'abc' });
+  body.supplies[0].supply_fid = 'secret-supply-id';
+  const text = chartSummary(body, '2026-10-17');
+  assert.match(text, /^Fuse's chart for 2026-10-17\n/);
+  assert.match(text, /ELEC_IMPORT: 2 bars\n08=0\.422 09=0\.1\?/, 'an unrealised bar is marked');
+  assert.match(text, /GAS: 1 bars\n08=1\.5\n/);
+  assert.match(text, /first realised bar: money 0\.12, parts \[\["USAGE","0\.1086","0\.422"\],\["STANDING","0\.0181",null\]\]/);
+  assert.match(text, /fields: chart\[.*premises_address.*\] supply\[.*supply_fid.*\]/, 'the names of the fields are listed');
+  assert.match(text, /current_index: \{"year":2026,"month":10,"day":17,"hour":9\}/);
+  assert.ok(!/Secret|secret-supply-id|abc/.test(text), 'no values from outside the numbers');
+  assert.equal(chartSummary(null, '2026-10-17').split('\n').length, 3, 'a body that is not a chart still gives a summary');
 });

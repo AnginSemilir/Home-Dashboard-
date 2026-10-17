@@ -371,3 +371,21 @@ test('figures kept from another Fuse property are not shown as yesterday\'s', as
   assert.equal(await text(page, '.tile.usage .extra'), `${T.elec.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.elec.pence)}`);
   await ctx.close();
 });
+
+test('"Show what Fuse sent" puts the day\'s numbers on screen, for troubleshooting', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true });
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByRole('button', { name: 'Show what Fuse sent (for troubleshooting)' }).click();
+  const diag = set.locator('pre.diag');
+  await diag.waitFor();
+  const t = await diag.innerText();
+  assert.match(t, /Fuse's chart for 2026-09-25/);
+  assert.match(t, /Fuse's chart for 2026-09-24/);
+  assert.match(t, /GAS: 24 bars/);
+  assert.match(t, /06=2\.9 07=2\.9 08=2\.9/);
+  assert.match(t, /10=0\.25\?/, 'the hours still to come are marked');
+  assert.ok(!/prem-1|supply_fid=|1 Test Street|dev-test|fuse-acc/.test(t), 'no IDs, address or tokens');
+  await ctx.close();
+});

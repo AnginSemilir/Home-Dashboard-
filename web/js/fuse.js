@@ -371,11 +371,15 @@ export class Fuse {
     throw new Error("Fuse shows no property on this account. Open the Fuse app and check it's set up.");
   }
 
-  /** One day's hourly bars (ymd 'YYYY-MM-DD', UK time): { elec, gas, export, current }. */
-  async day(premisesId, ymd, tz = DEFAULT_TZ) {
+  /** One day's chart exactly as Fuse sent it (ymd 'YYYY-MM-DD', UK time). */
+  rawDay(premisesId, ymd) {
     const [year, month, day] = ymd.split('-').map(Number);
-    const body = await this.api(`/api/v1/premises/${encodeURIComponent(premisesId)}/chart`, { year, month, day });
-    return parseChart(body, ymd, { tz, now: this.now() });
+    return this.api(`/api/v1/premises/${encodeURIComponent(premisesId)}/chart`, { year, month, day });
+  }
+
+  /** One day's hourly bars: { elec, gas, export, has, current }. */
+  async day(premisesId, ymd, tz = DEFAULT_TZ) {
+    return parseChart(await this.rawDay(premisesId, ymd), ymd, { tz, now: this.now() });
   }
 }
 
@@ -463,6 +467,26 @@ export function dayTotals(hours) {
     if (h.kwh > 0) { n++; last = Math.max(last ?? 0, h.inProgress ? h.start + HOUR / 2 : h.end); }
   }
   return { kwh, pence, hours: n, last };
+}
+
+/**
+ * What Fuse sent for a day, as plain text for troubleshooting ("how does gas arrive?"): the hour and kWh of
+ * every bar (a ? marks one that isn't realised), the cost parts of the first realised bar, and the field names
+ * Fuse used. Numbers and names only: no IDs, no address.
+ */
+export function chartSummary(body, ymd) {
+  const keys = (o) => (o && typeof o === 'object' ? Object.keys(o).sort().join(',') : '-');
+  const supplies = Array.isArray(body?.supplies) ? body.supplies : [];
+  const s0 = supplies[0], b0 = Array.isArray(s0?.bars) ? s0.bars[0] : null;
+  const lines = [`Fuse's chart for ${ymd}`, `fields: chart[${keys(body)}] supply[${keys(s0)}] bar[${keys(b0)}] bar.bar[${keys(b0?.bar)}]`, `current_index: ${JSON.stringify(body?.current_index ?? null)}`];
+  for (const s of supplies) {
+    const bars = Array.isArray(s?.bars) ? s.bars : [];
+    lines.push(`${s?.supply_type}: ${bars.length} bars`);
+    lines.push(bars.map((e) => `${String(e?.bar?.index?.hour).padStart(2, '0')}=${e?.bar?.kWh}${e?.bar?.type === 'REALISED' ? '' : '?'}`).join(' '));
+    const first = bars.find((e) => e?.bar?.type === 'REALISED');
+    if (first) lines.push(`first realised bar: money ${first.bar.money?.amount}, parts ${JSON.stringify((Array.isArray(first.breakdown) ? first.breakdown : []).map((c) => [c?.name, c?.value?.amount, c?.kWh]))}`);
+  }
+  return lines.join('\n');
 }
 
 /** Today's date as the chart wants it. */
