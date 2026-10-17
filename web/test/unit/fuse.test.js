@@ -472,3 +472,114 @@ test('explainFuseError: plain words for a blocked browser, a refused sign-in, an
   const other = new HttpError(500, 'x');
   assert.equal(explainFuseError(other), other);
 });
+
+// ---------- Found by the review ----------
+
+/** Lets a renewal be held open while the test does something else (sign out, sign in) meanwhile. */
+function heldRenewal(then) {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  fakeFetch(async (c) => {
+    if (path(c) === '/api/v1/auth/refresh') { await gate; return then(c); }
+    return c.headers.Authorization === 'Bearer fresh-acc' ? { body: DAY } : { status: 401, body: {} };
+  });
+  return { release, wait: () => new Promise((r) => setTimeout(r, 15)) };
+}
+
+test('signing out while a renewal is in flight is not undone by its answer', async () => {
+  const { fuse, storage } = setup();
+  SIGNED_IN(storage, 'old', 'ref-1');
+  const held = heldRenewal(() => ({ body: { access_token: 'new', refresh_token: 'ref-2' } }));
+  const call = fuse.api('/api/v2/customer/premises').catch((e) => e);
+  await held.wait();
+  fuse.signOut();
+  held.release();
+  assert.ok(await call instanceof FuseSignedOut);
+  assert.equal(fuse.signedIn, false);
+  assert.deepEqual(stored(storage), { deviceId: 'dev-1' }, 'the pair Fuse just rotated is not written back');
+});
+
+test('signing in afresh while a renewal is in flight keeps the new sign-in, whatever the old one is told', async () => {
+  for (const answer of [() => ({ status: 401, body: { status_string: 'refresh_failed' } }), () => ({ body: { access_token: 'rotated-old', refresh_token: 'ref-old-2' } })]) {
+    const { fuse, storage } = setup();
+    SIGNED_IN(storage, 'old', 'ref-1');
+    const held = heldRenewal(answer);
+    const call = fuse.api('/api/v2/customer/premises');
+    await held.wait();
+    SIGNED_IN(storage, 'fresh-acc', 'fresh-ref'); // what the Settings page saves after "Sign in"
+    held.release();
+    assert.deepEqual(await call, DAY, 'carries on with the new sign-in');
+    assert.deepEqual([stored(storage).access, stored(storage).refresh], ['fresh-acc', 'fresh-ref']);
+  }
+});
+
+test('only Fuse ending the session signs the panel out: a block, a relay\'s 403 or 404, a 426, a 429 or a server fault keep it', async () => {
+  const cases = [
+    [400, {}, true], [401, {}, true], [403, { status_string: 'refresh_failed' }, true],
+    [403, undefined, false], [403, '<html>blocked</html>', false], [404, {}, false], [408, {}, false], [426, {}, false], [429, {}, false], [500, {}, false], [503, {}, false],
+  ];
+  for (const [status, body, wipes] of cases) {
+    const { fuse, storage } = setup();
+    SIGNED_IN(storage, 'old', 'ref-1');
+    fakeFetch((c) => (path(c) === '/api/v1/auth/refresh' ? { status, body } : { status: 401, body: {} }));
+    const err = await fuse.api('/api/v2/customer/premises').catch((e) => e);
+    assert.equal(err instanceof FuseSignedOut, wipes, `${status} ${JSON.stringify(body)}`);
+    assert.equal(fuse.signedIn, !wipes, `${status} ${JSON.stringify(body)}`);
+  }
+});
+
+test('sign-in errors blame the right thing: no code yet means Fuse turned the request away; 426 and 429 say what to do', async () => {
+  const run = async (handler, act) => { const { fuse } = setup(); fakeFetch(handler); return act(fuse).then(() => null, (e) => e); };
+  const initial = (status, body) => (c) => (path(c) === '/api/v3/auth' ? { status, body } : { body: {} });
+  let e = await run(initial(403, undefined), (f) => f.startSignIn('07700900123'));
+  assert.equal(e.code, 'http_403');
+  assert.match(e.message, /turned the request away \(403\).*docs\/fuse\.md/);
+  assert.doesNotMatch(e.message, /code isn't right/);
+  e = await run(initial(429, {}), (f) => f.startSignIn('07700900123'));
+  assert.match(e.message, /wait a few minutes/);
+  e = await run((c) => (path(c) === '/api/trpc/phoneSignIn' ? { status: 429, body: {} } : { body: { auth_flow_token: 'f' } }), (f) => f.startSignIn('07700900123'));
+  assert.equal(e.code, 'rate_limited');
+  e = await run((c) => (path(c) === '/api/trpc/phoneSignIn' ? { status: 426, body: {} } : { body: { auth_flow_token: 'f' } }), (f) => f.startSignIn('07700900123'));
+  assert.match(e.message, /FUSE_APP_VERSION/);
+  e = await run((c) => (path(c) === '/api/trpc/phoneSignIn' ? { status: 403, body: undefined } : { body: { auth_flow_token: 'f' } }), (f) => f.startSignIn('07700900123'));
+  assert.equal(e.code, 'http_403');
+  // With the flow token (the code step), a 403 with no reason does mean the code.
+  const { fuse } = setup();
+  fakeFetch((c) => (c.body?.challenge_type === 'INITIAL' ? { body: { auth_flow_token: 'f' } } : c.body?.challenge_type === 'PHONE_OTP' ? { status: 403, body: undefined } : { body: {} }));
+  await fuse.startSignIn('07700900123');
+  e = await fuse.submitCode('123456').then(() => null, (x) => x);
+  assert.equal(e.code, 'invalid_code');
+});
+
+test('a storage that takes no writes but still reads: the renewed pair in memory wins over the dead one stored', async () => {
+  const stuck = { v: JSON.stringify({ deviceId: 'd', access: 'dead-acc', refresh: 'ref-0' }), getItem() { return this.v; }, setItem() { throw new Error('QuotaExceededError'); }, removeItem() {} };
+  const { fuse } = setup({ storage: stuck });
+  let n = 0, rejectOnce = false;
+  fakeFetch((c) => {
+    if (path(c) === '/api/v1/auth/refresh') {
+      if (c.body.refresh_token !== `ref-${n}`) return { status: 401, body: { status_string: 'refresh_failed' } }; // Fuse killed the old one at once
+      n++;
+      return { body: { access_token: `acc-${n}`, refresh_token: `ref-${n}` } };
+    }
+    if (rejectOnce) { rejectOnce = false; return { status: 401, body: {} }; }
+    return c.headers.Authorization === `Bearer acc-${n}` ? { body: DAY } : { status: 401, body: {} };
+  });
+  await fuse.api('/api/v2/customer/premises'); // dead-acc is refused: renewed to acc-1/ref-1, which can't be stored
+  rejectOnce = true;
+  await fuse.api('/api/v2/customer/premises'); // refused once more: must renew with ref-1, not the stored ref-0
+  assert.equal(n, 2);
+  assert.equal(fuse.signedIn, true);
+});
+
+test('the clock-change hour that comes twice: only the one it really is now is "in progress"', () => {
+  const hours = [0, 1, 1, ...Array.from({ length: 22 }, (_, i) => i + 2)];
+  const body = chartOf({ ELEC_IMPORT: hours.map((h) => bar('2026-10-25', h, '0.1', '0.03', { usage: '0.03' })) }, { current_index: { year: 2026, month: 10, day: 25, hour: 1 } });
+  const flagged = (now) => parseChart(body, '2026-10-25', { now }).elec.filter((h) => h.inProgress).map((h) => iso(h.start));
+  assert.deepEqual(flagged(at('2026-10-25T00:30:00Z')), ['2026-10-25T00:00Z'], '00:30 UTC is still the first (BST) 01:30');
+  assert.deepEqual(flagged(at('2026-10-25T01:30:00Z')), ['2026-10-25T01:00Z'], '01:30 UTC is the second (GMT) one');
+  assert.deepEqual(flagged(at('2026-10-25T05:00:00Z')).length, 1);
+});
+
+test('normalisePhone: the trunk 0 written as (0) or after +44 is dropped', () => {
+  for (const n of ['+44 (0)7700 900123', '0044 (0)7700 900123', '+44 07700 900123', '4407700900123', '+44 7700 900123']) assert.equal(normalisePhone(n), '+447700900123', n);
+});

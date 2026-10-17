@@ -970,7 +970,7 @@ const pence = (p) => (p >= 100 ? pounds(p) : `${p < 10 ? p.toFixed(1) : Math.rou
 /** How far each fuel's readings reach, in words: 'electricity to 14:30, gas to yesterday 23:00'. */
 export function fuseNewestText(v, now, tz = DEFAULT_TZ) {
   return [
-    v.newest.elec ? `electricity to ${untilWords(v.newest.elec, now, tz)}` : '',
+    v.hasElec && v.newest.elec ? `electricity to ${untilWords(v.newest.elec, now, tz)}` : '',
     v.hasGas && v.newest.gas ? `gas to ${untilWords(v.newest.gas, now, tz)}` : '',
   ].filter(Boolean).join(', ');
 }
@@ -1006,28 +1006,32 @@ export function renderFuse(r, v, now, tz = DEFAULT_TZ) {
     r.priceBig.replaceChildren(h('span', { class: 'num' }, pounds(v.totalP)));
     r.priceBand.className = 'band-chip chip-fuel';
     r.priceBand.replaceChildren(
-      h('span', { class: 'fz fz-elec' }, icon('bolt'), `${e.kwh.toFixed(1)} kWh`),
+      v.hasElec ? h('span', { class: 'fz fz-elec' }, icon('bolt'), e.kwh > 0 ? `${e.kwh.toFixed(1)} kWh` : '–') : '',
       v.hasGas ? h('span', { class: 'fz fz-gas' }, icon('flame'), g.kwh > 0 ? `${g.kwh.toFixed(1)} kWh` : '–') : '');
-    // Where the readings reach. Gas often comes later than electricity: say so when it does.
-    const lag = now - (v.newest.elec ?? now);
-    const gasBehind = v.hasGas && (!v.newest.gas || (v.newest.elec ?? 0) - v.newest.gas > 2 * 3600e3);
-    const to = untilWords(v.newest.elec ?? now, now, tz);
+    // Where the readings reach (the newest of either fuel). Gas often comes later than electricity: say so when it does.
+    const reaches = v.newest.elec ?? v.newest.gas ?? now;
+    const lag = now - reaches;
+    const gasBehind = v.hasElec && v.hasGas && (!v.newest.gas || (v.newest.elec ?? 0) - v.newest.gas > 2 * 3600e3);
+    const to = untilWords(reaches, now, tz);
     const reach = v.status?.error ? ['readings to ', h('b', {}, to), ' · Usage unavailable (tap for why)']
       : gasBehind ? [fuseNewestText(v, now, tz), v.newest.gas ? '' : ' · no gas readings yet']
         : ['readings to ', h('b', {}, to), lag <= 2 * 3600e3 ? ' · Fuse is about an hour behind' : ` · Fuse is ${Math.round(lag / 3600e3)} hours behind`];
-    r.priceSub.replaceChildren(
-      h('div', {}, ...reach),
-      h('div', {}, 'Electricity ', h('b', {}, pounds(Math.round(e.pence))), !v.hasGas ? ' · standing charge included' : g.kwh > 0 ? [' · Gas ', h('b', {}, pounds(Math.round(g.pence)))] : ' · gas not reported yet'));
+    // The amounts that make up the total, for each fuel the account has (one that hasn't reported yet says so).
+    const bits = [v.hasElec && (e.kwh > 0 ? ['Electricity ', h('b', {}, pounds(v.parts.elec))] : 'electricity not reported yet'),
+      v.hasGas && (g.kwh > 0 ? ['Gas ', h('b', {}, pounds(v.parts.gas))] : 'gas not reported yet')].filter(Boolean);
+    const split = bits.flatMap((b, i) => (i ? [' · ', b] : [b]));
+    r.priceSub.replaceChildren(h('div', {}, ...reach), h('div', {}, ...split, bits.length === 1 ? ' · standing charge included' : ''));
   }
   // The chart: today, or until today has a reading the newest day Fuse has, dated.
   const day = dayWords(v.shown.start, now, tz);
   r.chartLabel.replaceChildren(`Usage ${day} `, h('span', { class: 'unit' }, 'kWh per hour'));
-  r.legend.dataset.key = `fuse/${v.hasGas}`;
+  r.legend.dataset.key = `fuse/${v.hasElec}/${v.hasGas}`;
   const item = (cls, text) => h('span', { class: 'lg' }, h('span', { class: `sw sw-${cls}` }), text);
-  r.legend.replaceChildren(...(v.hasGas ? [item('elec', 'Electricity'), item('gas', 'Gas')] : []));
+  r.legend.replaceChildren(...(v.hasElec && v.hasGas ? [item('elec', 'Electricity'), item('gas', 'Gas')] : []));
   const box = r.chartBox.getBoundingClientRect();
   const fs = parseFloat(getComputedStyle(r.chartBox).fontSize) || 12;
-  const rows = [{ fuel: 'elec', label: 'Electricity', min: 0.5, hours: v.shownDay?.elec || [] }];
+  const rows = [];
+  if (v.hasElec) rows.push({ fuel: 'elec', label: 'Electricity', min: 0.5, hours: v.shownDay?.elec || [] });
   if (v.hasGas) rows.push({ fuel: 'gas', label: 'Gas', min: 1, hours: v.shownDay?.gas || [] });
   r.chartBox.replaceChildren(svg(renderFuseDay({ rows, now, dayStart: v.shown.start, dayEnd: v.shown.end, width: box.width || 500, height: box.height || 260, fs, tz, day })));
 }
@@ -1050,13 +1054,17 @@ function renderFuseTiles(r, v, now, tz) {
       t.extra.replaceChildren(h('div', { class: 'muted' }, why(none)), v.notSetUp || v.signedOut ? '' : yesterday(yest));
     }
   };
-  tile(r.tUsage, 'Electricity', v.today.elec, v.yesterday.elec, 'No readings yet today · tap');
-  if (v.hasGas) {
-    r.tCost.el.querySelector('.ico').replaceChildren(icon('flame'));
-    tile(r.tCost, 'Gas', v.today.gas, v.yesterday.gas, 'No gas readings yet today · tap');
+  const FUEL = { elec: { label: 'Electricity', icon: 'bolt', none: 'No readings yet today · tap' }, gas: { label: 'Gas', icon: 'flame', none: 'No gas readings yet today · tap' } };
+  const fuels = [v.hasElec && 'elec', v.hasGas && 'gas'].filter(Boolean);
+  const first = fuels[0] || 'elec';
+  r.tUsage.el.querySelector('.ico').replaceChildren(icon(FUEL[first].icon));
+  tile(r.tUsage, FUEL[first].label, v.today[first], v.yesterday[first], FUEL[first].none);
+  if (fuels[1]) {
+    r.tCost.el.querySelector('.ico').replaceChildren(icon(FUEL[fuels[1]].icon));
+    tile(r.tCost, FUEL[fuels[1]].label, v.today[fuels[1]], v.yesterday[fuels[1]], FUEL[fuels[1]].none);
   } else {
-    // No gas on the account: the tile says what yesterday cost instead.
-    const y = v.yesterday.elec;
+    // One fuel on the account: the other tile says what yesterday cost instead.
+    const y = v.yesterday[first];
     r.tCost.label.textContent = 'Yesterday';
     r.tCost.value.textContent = y.hours ? money(y) : '–';
     r.tCost.extra.replaceChildren(y.hours ? h('div', { class: 'muted' }, `${y.kwh.toFixed(1)} kWh`, y.complete ? '' : ` · to ${hhmm(y.last, tz)}`) : '');

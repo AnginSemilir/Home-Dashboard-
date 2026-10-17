@@ -36,3 +36,4 @@ Everything researched while building the panel, saved here so it outlives the cl
 | [Usage data after leaving Octopus: the Home Mini, Fuse, Glow/Bright (Glowmarkt API), n3rgy, CT clamps, and browser access](2026-10-13-usage-after-octopus.md) | Current |
 | [Why the panel showed no Bright usage while the app had data (Glowmarkt API behaviour, 32 reproduced cases, fixes)](2026-10-15-bright-blank-panel.md) | Current |
 | [Fuse Energy's private API: community projects compared, and the protocol for a browser reimplementation](2026-10-17-fuse-api.md) | Current: the basis of [the Fuse plan](../plans/2026-10-17-fuse-usage.md) |
+| [Review of the Fuse change: what held up, nine defects found, how each was fixed](2026-10-17-review-fuse.md) | Code review findings (all fixed at the time) |

@@ -49,7 +49,7 @@ A web page can only read another site's data if that site allows it (CORS). Whet
      ['POST', /^\/api\/v3\/auth$/],
      ['POST', /^\/api\/v1\/auth\/refresh$/],
      ['GET', /^\/api\/v2\/customer\/premises$/],
-     ['GET', /^\/api\/v1\/premises\/[0-9a-f-]+\/chart$/],
+     ['GET', /^\/api\/v1\/premises\/[\w-]+\/chart$/],
    ];
    export default {
      async fetch(req) {
@@ -83,7 +83,7 @@ A web page can only read another site's data if that site allows it (CORS). Whet
 5. Allow the panel to talk to it. On GitHub, open `web/index.html` → ✏️ edit. In the `Content-Security-Policy` line, after `https://www.fuseenergy.com`, add a space and your worker's address, then **Commit changes**. (Or tell Claude the address and it does this.) After a few minutes the updated page is live.
 6. On the panel: ⚙ → Electricity → **Relay URL** → paste → **Send code**.
 
-The relay only passes those five calls through, and only for your panel's page. Your number, the code and the sign-in go via Cloudflare to Fuse, as they would from your browser. Cloudflare's free plan allows 100,000 requests a day; the panel uses a few hundred.
+The relay only passes those five calls through, and only for your panel's page. (The page check stops other websites, not other programs: keep the worker's address to yourself, as you would a password.) Your number, the code and the sign-in go via Cloudflare to Fuse, as they would from your browser. Cloudflare's free plan allows 100,000 requests a day; the panel uses a few hundred.
 
 If Fuse refuses the relay as well (an error mentioning 403), tell Claude: some sites turn away cloud servers.
 

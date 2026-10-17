@@ -50,7 +50,9 @@ const REFUSALS = {
   invalid_code: "That code isn't right, or it has run out. Check the text message, or press Send code for a new one.",
   flow_not_started: 'Press Send code first.',
 };
-const refusalWords = (code) => REFUSALS[code] || `Fuse wouldn't continue (${code}). Press Send code to start again.`;
+const refusalWords = (code) => REFUSALS[code]
+  || (/^http_\d+$/.test(code) ? `Fuse turned the request away (${code.slice(5)}). If it keeps happening, Fuse may be blocking this browser or the relay: see docs/fuse.md.`
+    : `Fuse wouldn't continue (${code}). Press Send code to start again.`);
 
 /** Plain words for what went wrong (like explainBrightError for Bright). */
 export function explainFuseError(e) {
@@ -99,10 +101,11 @@ function codeInError(error) {
 
 /** A mobile number in the +44… shape Fuse takes, or null if it can't be one. */
 export function normalisePhone(text) {
-  let t = String(text || '').replace(/[\s().-]/g, '');
+  let t = String(text || '').replace(/\(0\)/g, '').replace(/[\s().-]/g, '');
   if (/^\+?44/.test(t) && !t.startsWith('+')) t = `+${t}`;
   else if (t.startsWith('00')) t = `+${t.slice(2)}`;
   else if (t.startsWith('0')) t = `+44${t.slice(1)}`;
+  t = t.replace(/^\+440/, '+44'); // "+44 (0)7700…": the trunk 0 isn't part of the number
   return /^\+\d{10,15}$/.test(t) ? t : null;
 }
 
@@ -160,6 +163,7 @@ export class Fuse {
     this.flow = null; // the sign-in's short-lived token, between "Send code" and "Sign in" (memory only)
     this.refreshing = null;
     this.mem = null;
+    this.memNewer = false;
   }
 
   // ----- Where it talks to: Fuse, or the optional relay (docs/fuse.md) -----
@@ -182,7 +186,9 @@ export class Fuse {
 
   /** What's stored, read every time (another tab may have refreshed). Writes nothing. */
   #peek() {
-    // The copy in memory is for a storage that is full or blocked, so the sign-in isn't lost to it.
+    // The copy in memory is for a storage that is full or blocked, so the sign-in isn't lost to it. After
+    // a write that failed it is the newer one (storage still holds the pair Fuse has already killed).
+    if (this.memNewer && this.mem) return { ...this.mem };
     let t = null;
     try { t = JSON.parse(this.storage.getItem(TOKEN_KEY) || 'null'); } catch { /* use the copy in memory */ }
     return t && typeof t === 'object' ? t : { ...(this.mem || {}) };
@@ -198,7 +204,10 @@ export class Fuse {
     return t;
   }
 
-  #save(t) { this.mem = t; try { this.storage.setItem(TOKEN_KEY, JSON.stringify(t)); } catch { /* the sign-in only lasts until the page reloads then */ } }
+  #save(t) {
+    this.mem = t;
+    try { this.storage.setItem(TOKEN_KEY, JSON.stringify(t)); this.memNewer = false; } catch { this.memNewer = true; /* the sign-in only lasts until the page reloads then */ }
+  }
 
   get deviceId() { return this.#load().deviceId; }
 
@@ -214,10 +223,16 @@ export class Fuse {
     try {
       return await fetchJSON(this.url('/api/v3/auth'), { method: 'POST', headers, body: JSON.stringify(body) });
     } catch (e) {
-      // Fuse names its reason in `status_string`; a server fault isn't the user's to fix.
-      if (e instanceof HttpError && e.status >= 400 && e.status < 500 && ![401, 403, 426, 429].includes(e.status)) throw new FuseRefusal(String(e.body?.status_string || 'unknown'));
-      if (e instanceof HttpError && [401, 403].includes(e.status)) throw new FuseRefusal(String(e.body?.status_string || 'invalid_code'));
-      if (e instanceof HttpError && e.status >= 500) throw new Error(`Fuse had a problem (${e.status}). Try again in a few minutes.`);
+      if (e instanceof HttpError) {
+        // Fuse names its reason in `status_string`. With none, a 401/403 on a step that carries the flow
+        // token means the code was wrong; on the first step (no token yet) it means Fuse or a relay turned
+        // the request away. A server fault isn't the user's to fix.
+        const reason = e.body && typeof e.body === 'object' ? e.body.status_string : null;
+        if (e.status === 429) throw new FuseRefusal('rate_limited');
+        if (e.status === 426) throw explainFuseError(e);
+        if (e.status >= 500) throw new Error(`Fuse had a problem (${e.status}). Try again in a few minutes.`);
+        if (e.status >= 400) throw new FuseRefusal(String(reason || (bearer && [401, 403].includes(e.status) ? 'invalid_code' : `http_${e.status}`)));
+      }
       throw explainFuseError(e);
     }
   }
@@ -245,6 +260,8 @@ export class Fuse {
         body: JSON.stringify({ phone }),
       });
     } catch (e) {
+      if (e instanceof HttpError && e.status === 429) throw new FuseRefusal('rate_limited');
+      if (e instanceof HttpError && e.status === 426) throw explainFuseError(e);
       if (e instanceof HttpError && e.status < 500) throw new FuseRefusal(refusalCode(e.body) || `http_${e.status}`);
       if (e instanceof HttpError) throw new Error(`Fuse's website had a problem (${e.status}) sending the code. Try again in a few minutes.`);
       throw explainFuseError(e);
@@ -294,16 +311,35 @@ export class Fuse {
           body: JSON.stringify({ refresh_token: t.refresh, original_request_path: null }),
         });
       } catch (e) {
-        // A refusal means the session is over; a server or network fault just means try later.
-        if (e instanceof HttpError && e.status >= 400 && e.status < 500 && e.status !== 429) { this.#save({ deviceId: t.deviceId }); throw new FuseSignedOut(); }
+        // Only Fuse saying the session is over ends it: 400 or 401, or a 403 that carries Fuse's own
+        // reason. Anything else (a block in front of Fuse, a relay's 403 or 404, a 426, a 429, a server
+        // or network fault) leaves the sign-in alone for next time.
+        const own = e instanceof HttpError && e.body && typeof e.body === 'object' && e.body.status_string;
+        if (e instanceof HttpError && (e.status === 400 || e.status === 401 || (e.status === 403 && own))) {
+          const cur = this.#peek();
+          if (cur.refresh !== t.refresh) return this.#current(cur); // signed out or in again while Fuse answered
+          this.#save({ deviceId: t.deviceId });
+          throw new FuseSignedOut();
+        }
+        if (e instanceof HttpError && (e.status === 403 || e.status === 404)) throw new Error(`Fuse (or the relay) answered ${e.status} to the sign-in renewal. The panel will try again; if it keeps happening see docs/fuse.md.`);
         throw explainFuseError(e);
       }
       if (!body?.access_token || !body?.refresh_token) throw new Error("Fuse's reply to the sign-in renewal was missing its tokens. The panel will try again.");
+      // The user may have signed out, or signed in afresh, while Fuse was answering: that is the session
+      // that counts, and the pair just rotated belongs to the old one.
+      const cur = this.#peek();
+      if (cur.refresh !== t.refresh) return this.#current(cur);
       this.#save({ deviceId: t.deviceId, access: body.access_token, refresh: body.refresh_token });
       return body.access_token;
     };
     this.refreshing ??= (this.locks ? this.locks.request('wallpanel-fuse-refresh', run) : run()).finally(() => { this.refreshing = null; });
     return this.refreshing;
+  }
+
+  /** The access token of a session someone else set up meanwhile, or signed-out if it has gone. */
+  #current(cur) {
+    if (!cur.refresh) throw new FuseSignedOut();
+    return cur.access;
   }
 
   /** A signed-in GET (renewing the sign-in first if it's about to run out, or once on a 401). */
@@ -404,7 +440,9 @@ export function parseChart(body, ymd, { tz = DEFAULT_TZ, now = Date.now() } = {}
       const kwh = num(bar.kWh ?? bar.kwh);
       const pence = barPence(entry);
       if (start == null || kwh == null || pence == null || bar.type !== 'REALISED') continue;
-      const isCurrent = (sameDay(cur) && Number(cur.hour) === hour && nth === 0) || (start <= now && now < start + HOUR);
+      // Fuse's own "current" hour, or the clock's. A clock-change hour that comes twice is told apart by the clock alone.
+      const repeated = (byHour.get(hour)?.length || 0) > 1;
+      const isCurrent = (start <= now && now < start + HOUR) || (!repeated && sameDay(cur) && Number(cur.hour) === hour);
       out[fuel].push({ start, end: start + HOUR, kwh, pence, standingP: standingPence(entry), inProgress: isCurrent });
       if (isCurrent) out.current = start;
     }

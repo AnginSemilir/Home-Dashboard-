@@ -312,3 +312,61 @@ test('sign out of Fuse, and what "copy settings" leaves out', async () => {
   assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 0);
   await ctx.close();
 });
+
+// ---------- Found by the review ----------
+
+test('a gas meter that has only sent its standing charge: gas is "not reported yet", and the total is the sum of the parts shown', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-gas-standing-only']) });
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(T.elec.pence), 'the standing charge alone is not counted as gas used');
+  assert.match(await text(page, '#price .sub'), new RegExp(`Electricity ${gbp(T.elec.pence)} · gas not reported yet`));
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.elec.kwh.toFixed(1)} kWh`, '–']);
+  assert.equal(await text(page, '.tile.cost .t-value'), '–');
+  await ctx.close();
+});
+
+test('a gas-only account: one row, one chip, and the readings time is gas\'s (never "now")', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseNoElec: true });
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(T.gas.pence));
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.gas.kwh.toFixed(1)} kWh`]);
+  assert.match(await text(page, '#price .sub'), /readings to 09:30 · Fuse is about an hour behind/);
+  assert.match(await text(page, '#price .sub'), new RegExp(`Gas ${gbp(T.gas.pence)} · standing charge included`));
+  assert.doesNotMatch(await text(page, '#price .sub'), /Electricity/);
+  assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 0);
+  assert.equal(await page.locator('#chart .ch-bar.ch-gas').count(), 10);
+  assert.equal(await text(page, '.tile.usage .t-label'), 'Gas');
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Yesterday');
+  assert.equal(await text(page, '.tile.cost .t-value'), gbp(Y.gas.pence));
+  await ctx.close();
+});
+
+test('the property look-up failing after a good code: press the button again, no second text message and no used-up code', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: notSignedIn(), fail: new Set(['fuse-premises-once']) });
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByLabel('Mobile number on your Fuse account').fill('07700 900123');
+  await set.getByRole('button', { name: 'Send code' }).click();
+  await set.getByLabel('Code from the text message').fill('123456');
+  await set.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await set.getByText(/You're signed in, but Fuse didn't list your property.*no new code is needed/).waitFor();
+  await set.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await set.getByText(/Fuse connected and saved/).waitFor();
+  assert.equal(onPath(calls, '/api/trpc/phoneSignIn').length, 1);
+  assert.equal(fuseCalls(calls).filter((c) => c.body?.challenge_type === 'PHONE_OTP').length, 1, 'the code was only used once');
+  await ctx.close();
+});
+
+test('figures kept from another Fuse property are not shown as yesterday\'s', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, initScript: () => {
+    if (sessionStorage.getItem('seeded-cache')) return;
+    const start = Date.parse('2026-09-24T00:00:00+01:00');
+    const hours = Array.from({ length: 24 }, (_, i) => ({ start: start + i * 3600e3, end: start + (i + 1) * 3600e3, kwh: 50, pence: 5000, standingP: 1, inProgress: false }));
+    // Fetched a few minutes ago, so the panel's own rule would keep it: only the property tells them apart.
+    localStorage.setItem('wallpanel.cache.v1', JSON.stringify({ fuseDays: { '2026-09-24': { at: Date.parse('2026-09-25T09:30:00+01:00'), pid: 'someone-elses', elec: hours, gas: [], export: [], has: { elec: true, gas: false, export: false } } }, fuseNewest: { pid: 'someone-elses', elec: start + 864e5, gas: null } }));
+    sessionStorage.setItem('seeded-cache', '1');
+  } });
+  await page.locator('.tile.usage .extra', { hasText: 'Yesterday' }).waitFor();
+  assert.equal(await text(page, '.tile.usage .extra'), `${T.elec.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.elec.pence)}`);
+  await ctx.close();
+});

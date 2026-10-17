@@ -149,9 +149,14 @@ function explainBright(st = state.status.bright) {
  */
 function fuseView(now = Date.now()) {
   const todayKey = dayKey(now, tz), yKey = dayKey(startOfDay(now, tz, -1), tz);
-  const days = state.fuseDays || {};
+  // Only this property's figures: another Fuse account's, kept from before, are ignored.
+  const pid = settings.fuse.premisesId;
+  const days = Object.fromEntries(Object.entries(state.fuseDays || {}).filter(([, d]) => d?.pid === pid));
   const sum = (key) => ({ elec: dayTotals(days[key]?.elec), gas: dayTotals(days[key]?.gas) });
   const today = sum(todayKey), yesterday = sum(yKey);
+  const known = [todayKey, yKey].filter((k) => days[k]);
+  const hasGas = known.some((k) => days[k].has?.gas);
+  const hasElec = !known.length || known.some((k) => days[k].has?.elec);
   // Yesterday is whole once its readings reach midnight.
   const midnight = startOfDay(now, tz);
   for (const fuel of ['elec', 'gas']) yesterday[fuel].complete = yesterday[fuel].last >= midnight;
@@ -161,13 +166,16 @@ function fuseView(now = Date.now()) {
   const shownKey = hasToday || !hasYesterday ? todayKey : yKey;
   const shown = shownKey === todayKey ? { start: startOfDay(now, tz), end: startOfDay(now, tz, 1) } : { start: startOfDay(now, tz, -1), end: startOfDay(now, tz) };
   const newest = (fuel) => Math.max(today[fuel].last ?? 0, yesterday[fuel].last ?? 0) || null;
+  const part = (t) => (t.kwh > 0 ? Math.round(t.pence) : 0);
   const signedIn = fuse.signedIn;
   return {
     today, yesterday, hasToday, shown, shownDay: days[shownKey] || null,
     newest: { elec: newest('elec'), gas: newest('gas') },
-    hasGas: [todayKey, yKey].some((k) => days[k]?.has?.gas),
-    // Each part to the penny first, so the total is the sum of what's shown beside it.
-    totalP: Math.round(today.elec.pence) + Math.round(today.gas.pence),
+    hasGas, hasElec,
+    // A fuel counts once it has usage (a meter that has only its standing charge hasn't reported yet), each
+    // part to the penny first, so the total is the sum of what's shown beside it.
+    parts: { elec: part(today.elec), gas: part(today.gas) },
+    totalP: part(today.elec) + part(today.gas),
     signedIn, signedOut: !signedIn && !!settings.fuse.premisesId, notSetUp: !signedIn && !settings.fuse.premisesId,
     status: state.status.fuse,
   };
@@ -203,18 +211,18 @@ async function refreshFuse() {
   const id = settings.fuse.premisesId;
   const todayKey = dayKey(now, tz), yKey = dayKey(startOfDay(now, tz, -1), tz);
   const days = { ...state.fuseDays };
-  days[todayKey] = { at: now, ...(await fuse.day(id, todayKey, tz)) };
-  // Yesterday: if it isn't kept, was fetched before the day ended, or has had time to settle.
+  days[todayKey] = { at: now, pid: id, ...(await fuse.day(id, todayKey, tz)) };
+  // Yesterday: if it isn't kept (or is another property's), was fetched before the day ended, or has had time to settle.
   const y = days[yKey];
-  if (!y || y.at < startOfDay(now, tz) || now - y.at >= FUSE_REFETCH_YESTERDAY) {
-    try { days[yKey] = { at: now, ...(await fuse.day(id, yKey, tz)) }; } catch (e) {
+  if (!y || y.pid !== id || y.at < startOfDay(now, tz) || now - y.at >= FUSE_REFETCH_YESTERDAY) {
+    try { days[yKey] = { at: now, pid: id, ...(await fuse.day(id, yKey, tz)) }; } catch (e) {
       if (e instanceof FuseSignedOut) throw e;
       console.warn('[fuse] yesterday', e);
     }
   }
   state.fuseDays = Object.fromEntries(Object.entries(days).filter(([k]) => k === todayKey || k === yKey));
   const last = (fuel) => Math.max(0, ...Object.values(state.fuseDays).map((d) => dayTotals(d[fuel]).last ?? 0)) || null;
-  state.fuseNewest = { elec: last('elec'), gas: last('gas') };
+  state.fuseNewest = { pid: id, elec: last('elec'), gas: last('gas') };
 }
 
 /** When Fuse's newest electricity reading ends (to turn the dot amber when readings stop, or never came). */
@@ -928,7 +936,7 @@ async function boot() {
     tile: (key) => {
       if (key === 'car' && !settings.kia.url) return launch('car', false);
       // The live reading only while the tile shows it (a stopped Glow display: the tile and its tap are Bright's).
-      if ((key === 'usage' || key === 'cost') && useFuse()) return explainFuse(key === 'usage' ? 'elec' : 'gas');
+      if ((key === 'usage' || key === 'cost') && useFuse()) { const v = fuseView(); return explainFuse(key === 'usage' ? (v.hasElec ? 'elec' : 'gas') : v.hasElec && v.hasGas ? 'gas' : undefined); }
       if (key === 'usage' && useBright()) return settings.bright.discovered?.live && state.brightLive && Date.now() - state.brightLive.at < LIVE_FRESH ? explain(state.status.brightlive) : explainBright();
       if (key === 'cost' && useBright()) return explainBright();
       if (key === 'usage') return explain(state.status.homemini, homeMiniStaleWhy());

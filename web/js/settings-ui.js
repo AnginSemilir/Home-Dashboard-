@@ -46,7 +46,7 @@ export function checklist(s, st) {
     ] : s.energy.source === 'fuse' ? [
       // A property but no sign-in: Fuse ended the session (or it was moved here in copied settings).
       item(s.fuse.premisesId && st.fuseSignedIn ? res('fuse') : s.fuse.premisesId ? 'bad' : 'todo', 'Electricity and gas (Fuse)', s.fuse.premisesId && st.fuseSignedIn
-        ? [s.fuse.premisesName, st.fuseNewest?.elec ? `electricity to ${untilWords(st.fuseNewest.elec, Date.now(), s.tz)}` : '', st.fuseNewest?.gas ? `gas to ${untilWords(st.fuseNewest.gas, Date.now(), s.tz)}` : ''].filter(Boolean).join(' · ')
+        ? [s.fuse.premisesName, ...(st.fuseNewest?.pid === s.fuse.premisesId ? [st.fuseNewest.elec ? `electricity to ${untilWords(st.fuseNewest.elec, Date.now(), s.tz)}` : '', st.fuseNewest.gas ? `gas to ${untilWords(st.fuseNewest.gas, Date.now(), s.tz)}` : ''] : [])].filter(Boolean).join(' · ')
         : s.fuse.premisesId ? 'Fuse signed the panel out. Press Send code to sign in again.' : 'press Send code, then type the code Fuse texts you', 'fuse'),
     ] : [
       item(s.octopus.tariff || s.octopus.discovered ? res('rates') : 'todo', 'Octopus Agile prices', s.octopus.discovered?.tariff || s.octopus.tariff, 'rates'),
@@ -187,8 +187,16 @@ export function openSettings(root, ctx) {
   const codeIn = h('input', { type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 8, placeholder: '6-digit code', spellcheck: 'false' });
   const codeRow = h('div', { class: 'hidden' }, field('Code from the text message', codeIn));
   const questionsBox = h('div', { class: 'hidden' });
+  // The code worked (the sign-in is saved) but the property lookup after it didn't: pressing the button
+  // again retries that, instead of asking for a code that has been used up.
+  let pendingFinish = false;
   const finishFuse = async () => {
-    const p = await fuseApi.premises();
+    let p;
+    try { p = await fuseApi.premises(); } catch (e) {
+      pendingFinish = true;
+      throw new Error(`You're signed in, but Fuse didn't list your property (${describeError(e)}). Press the button again to retry: no new code is needed.`);
+    }
+    pendingFinish = false;
     Object.assign(draft.fuse, { premisesId: p.id, premisesName: p.name });
     // Saved straight away (the sign-in is, in storage; so are the switch and the property), so
     // Cancel can't lose a working sign-in. The rest of the page still waits for Save & close.
@@ -212,6 +220,7 @@ export function openSettings(root, ctx) {
       h('div', { class: 'help' }, [q.title, q.subtitle].filter(Boolean).join(': ') || 'Fuse wants to check who you are.'),
       ...answers.map(({ x, el }) => field(x.title, el)),
       btn('Continue', async () => {
+        if (pendingFinish) return finishFuse();
         const responses = {};
         for (const { x, el } of answers) {
           const value = x.kind === 'DATE' ? normaliseDateAnswer(el.value) : el.value.trim();
@@ -228,6 +237,7 @@ export function openSettings(root, ctx) {
     field('Mobile number on your Fuse account', input(draft.fuse, 'phone', { placeholder: '07700 900123' }), 'Fuse texts you a code to sign in, as its app does. There is no password.'),
     btn('Send code', async () => {
       connected = false;
+      pendingFinish = false;
       await fuseApi.startSignIn(draft.fuse.phone);
       codeRow.classList.remove('hidden');
       questionsBox.classList.add('hidden');
@@ -235,6 +245,7 @@ export function openSettings(root, ctx) {
     }),
     codeRow,
     btn('Sign in', async () => {
+      if (pendingFinish) return finishFuse();
       const r = await fuseApi.submitCode(codeIn.value);
       if (r.done) await finishFuse(); else askQuestions(r);
     }),
