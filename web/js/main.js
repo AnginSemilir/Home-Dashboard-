@@ -132,6 +132,15 @@ function brightView(now = Date.now()) {
 }
 
 /** What a tap on the Bright card or tiles says: never nothing while the card is empty or stale. */
+/** A tap on the weather: what it is showing, since a phone's weather app often differs by a degree or two. */
+function explainWeather(st = state.status.weather) {
+  if (st?.error || st?.stale) return explain(st);
+  const w = state.weather;
+  if (!w) return;
+  const where = settings.weather.place || 'your location';
+  ui.toast(refs, `Weather for ${where} (set in ⚙ → Weather): the forecast model's value${w.now.at ? ` for ${hhmm(w.now.at, tz)}` : ''}, checked every 10 minutes. It's a computer forecast, not a thermometer, so a phone's weather app can be a degree or two different.`, 9000);
+}
+
 function explainBright(st = state.status.bright) {
   if (!bright.configured) return ui.toast(refs, "Bright isn't set up on this panel yet: ⚙ → Electricity → type your Bright email and password → Save & close.", 8000);
   if (!st) return ui.toast(refs, 'Asking Bright for your readings…', 4000);
@@ -1024,7 +1033,7 @@ async function boot() {
       if (key === 'cost') return explain(ui.worst(state.status.homemini, state.status.rates), homeMiniStaleWhy());
       explain(state.status[{ indoor: 'thermostat', car: 'kia' }[key]]);
     },
-    status: (key) => (key === 'rates' && useFuse() ? explainFuse() : key === 'rates' && useBright() ? explainBright() : explain(state.status[key])),
+    status: (key) => (key === 'weather' ? explainWeather() : key === 'rates' && useFuse() ? explainFuse() : key === 'rates' && useBright() ? explainBright() : explain(state.status[key])),
     chartTap: (hit) => (useFuse() ? ui.showFuseTip(refs, hit, tz) : useBright() ? ui.showUsageTip(refs, hit, tz) : ui.showChartTip(refs, hit, priceOpts(), tz)),
     musicCmd,
     musicClose: closeMusic,
@@ -1095,7 +1104,7 @@ async function boot() {
   source('calendar', refreshCalendar, minutes(10), {
     staleAfter: 60 * 60e3, enabled: () => !!(google.signedIn && settings.google.calendars.length), clear: () => { state.events = null; },
   })();
-  source('weather', refreshWeather, minutes(30), { staleAfter: 3 * 3600e3, enabled: () => settings.weather.lat != null, clear: () => { state.weather = null; } })();
+  source('weather', refreshWeather, minutes(10), { staleAfter: 3 * 3600e3, enabled: () => settings.weather.lat != null, clear: () => { state.weather = null; } })();
   source('shopping', refreshShopping, minutes(2), {
     staleAfter: 30 * 60e3, enabled: () => !!(google.hasTasks && settings.google.shoppingList?.id), clear: () => { state.shopping = null; },
   })();

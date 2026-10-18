@@ -82,6 +82,10 @@ test('weather: postcode goes to postcodes.io, towns to Open-Meteo geocoding', as
   assert.equal((await lookupPlace('Leeds')).lat, 53.8);
   assert.match(urls[0], /api\.postcodes\.io\/postcodes\/sw1a%201aa/);
   assert.match(urls[1], /geocoding-api\.open-meteo\.com/);
+  await lookupPlace('m168ew');
+  assert.match(urls[2], /api\.postcodes\.io\/postcodes\/m168ew$/, 'a postcode typed without the space, in lower case, is still a postcode');
+  await lookupPlace(' M16 8EW ');
+  assert.match(urls[3], /api\.postcodes\.io\/postcodes\/M16%208EW$/);
   await assert.rejects(lookupPlace('  '), /Enter a postcode/);
 });
 

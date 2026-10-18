@@ -19,6 +19,20 @@ const waitFor = async (fn, what, ms = 5000) => {
   }
 };
 
+test('weather: refreshed every 10 minutes, and a tap says what the temperature is and for when', async () => {
+  const { ctx, page, calls, problems } = await openPanel(env);
+  await page.locator('.wx-temp', { hasText: '14°' }).waitFor();
+  assert.equal(calls.filter((c) => c.service === 'weather').length, 1);
+  await page.locator('.wx-temp').click();
+  const toast = page.locator('.toast', { hasText: 'Weather for ' });
+  await toast.waitFor();
+  const t = await toast.innerText();
+  assert.match(t, /^Weather for Westminster \(set in ⚙ → Weather\): the forecast model's value for 09:30, checked every 10 minutes\./);
+  assert.match(t, /not a thermometer, so a phone's weather app can be a degree or two different\.$/);
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
 test('shopping list: shows the Google Tasks list; tap ticks off (with undo); + adds', async () => {
   const { ctx, page, calls, problems } = await openPanel(env);
   const shop = page.locator('#shop');

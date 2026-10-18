@@ -54,7 +54,7 @@ export function consumptionResults(from, to, until) {
 export function weather(now) {
   const days = [...Array(5)].map((_, i) => new Date(now + i * 864e5).toISOString().slice(0, 10));
   return {
-    current: { temperature_2m: 14.2, apparent_temperature: 12.6, weather_code: 2, is_day: 1, wind_speed_10m: 9, relative_humidity_2m: 71, precipitation: 0 },
+    current: { time: new Date(Math.floor((now + 3600e3) / 900e3) * 900e3).toISOString().slice(0, 16), temperature_2m: 14.2, apparent_temperature: 12.6, weather_code: 2, is_day: 1, wind_speed_10m: 9, relative_humidity_2m: 71, precipitation: 0 },
     daily: {
       time: days,
       weather_code: [2, 61, 3, 0, 80],

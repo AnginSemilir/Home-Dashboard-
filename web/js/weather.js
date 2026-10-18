@@ -13,6 +13,8 @@ export async function fetchWeather({ lat, lon }, tz = 'Europe/London') {
   const b = await fetchJSON(`https://api.open-meteo.com/v1/forecast?${p}`);
   return {
     now: {
+      // The model's own time for this value ("2026-10-18T07:45", local), a quarter-hour step.
+      at: b.current?.time ? localToMs(b.current.time, tz) : null,
       temp: b.current?.temperature_2m,
       feels: b.current?.apparent_temperature,
       code: b.current?.weather_code,
