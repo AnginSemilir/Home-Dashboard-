@@ -213,6 +213,12 @@ function fuseView(now = Date.now()) {
   const known = [todayKey, yKey].filter((k) => days[k]);
   const hasGas = known.some((k) => days[k].has?.gas);
   const hasElec = !known.length || known.some((k) => days[k].has?.elec);
+  // Gas is shown by the hour only if Fuse really sends it that way: one figure repeated hour after hour is
+  // the day's gas shared out evenly (a gas meter reports about once a day). Yesterday's spread adds up to the
+  // day's real total, but today's hours are an estimate (Fuse's month view has nothing for today yet), so
+  // today's gas isn't counted until the meter has reported it.
+  const gasEven = hasGas && (isEvenSpread(days[todayKey]?.gas) || isEvenSpread(days[yKey]?.gas));
+  if (gasEven) today.gas = dayTotals([]);
   // Yesterday is whole once its readings reach midnight.
   const midnight = startOfDay(now, tz);
   for (const fuel of ['elec', 'gas']) yesterday[fuel].complete = yesterday[fuel].last >= midnight;
@@ -224,9 +230,6 @@ function fuseView(now = Date.now()) {
   const newest = (fuel) => Math.max(today[fuel].last ?? 0, yesterday[fuel].last ?? 0) || null;
   const part = (t) => (t.kwh > 0 ? Math.round(t.pence) : 0);
   const signedIn = fuse.signedIn;
-  // Gas is shown by the hour only if Fuse really sends it that way: one figure repeated hour after hour is
-  // the day's gas shared out evenly (a gas meter reports far less often than electricity).
-  const gasEven = hasGas && (isEvenSpread(days[todayKey]?.gas) || isEvenSpread(days[yKey]?.gas));
   const period = fusePeriod(fuseChartView, now);
   const ranged = period && state.fuseRanges[period.key]?.pid === pid ? state.fuseRanges[period.key] : null;
   const gasHourly = hasGas && !gasEven;
@@ -256,7 +259,7 @@ function explainFuse(which, st = state.status.fuse) {
   if (v.signedOut) return ui.toast(refs, 'Fuse signed the panel out. ⚙ → Electricity → Send code to sign in again.', 8000);
   if (!st) return ui.toast(refs, 'Asking Fuse for your usage…', 4000);
   if (st.error) return explain(st);
-  if (which === 'gas' && v.chart.gasEven) return ui.toast(refs, "Fuse shares gas out evenly through the day, so today's gas is an estimate, not hourly readings. The month and year views use Fuse's daily totals.", 9000);
+  if (which === 'gas' && v.chart.gasEven) return ui.toast(refs, "Fuse reads gas about once a day, so today's gas isn't known yet and isn't in the total. Its hourly gas bars are just the day's total shared out (for today, an estimate). Yesterday's figure is the real one; the month and year views use Fuse's daily totals.", 10000);
   const missing = !v.hasToday || (which === 'elec' && !(v.today.elec.kwh > 0)) || (which === 'gas' && v.hasGas && !(v.today.gas.kwh > 0));
   if (st.stale || missing) {
     const upTo = ui.fuseNewestText(v, Date.now(), tz);

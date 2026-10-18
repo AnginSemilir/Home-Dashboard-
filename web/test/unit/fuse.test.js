@@ -676,3 +676,41 @@ test('chartSummary: a month shows month.day and a year just the month, whatever 
   const year = chartSummary(chartOf({ ELEC_IMPORT: [coarse({ year: 2026, month: 1 }, 410, 110), coarse({ year: 2026, month: 2 }, 380, 100)] }), '2026 (this year, a bar per month)');
   assert.match(year, /ELEC_IMPORT: 2 bars\n01=410 02=380/);
 });
+
+// ---------- What a real account sent (18 October 2026, 07:xx; the account began on 9 October) ----------
+
+test("a real account's month, year and day: bars from the day the account began, zero days, gas as the day's total spread over 24 hours", () => {
+  const now = at('2026-10-18T07:40:00+01:00');
+  const gasDays = { 9: 19.091, 10: 24.467, 11: 0, 12: 1.071, 13: 34.830, 14: 17.615, 15: 14.652, 16: 41.577, 17: 9.465, 18: 0 };
+  const elecDays = { 9: 0, 10: 14.529, 11: 4.181, 12: 3.702, 13: 9.683, 14: 9.368, 15: 5.891, 16: 8.744, 17: 12.090, 18: 0.721 };
+  const days = (kwhOf, usageRate, standing) => Array.from({ length: 23 }, (_, i) => i + 9).map((d) => (d <= 18
+    ? coarse({ year: 2026, month: 10, day: d }, kwhOf[d], +(kwhOf[d] * usageRate).toFixed(4), { standing })
+    : coarse({ year: 2026, month: 10, day: d }, 8, 0.7, { type: 'FORECASTED' })));
+  const month = parseRange(chartOf({ GAS: days(gasDays, 0.085, '0.1100'), ELEC_IMPORT: days(elecDays, 0.247, '0.3400') }, { current_index: { year: 2026, month: 10, day: 18 } }), 'day', { year: 2026, month: 10 }, { now });
+  assert.equal(month.gas.length, 10, '9 to 18 October: the days before the account began are simply absent, and the forecasts are left out');
+  assert.equal(month.elec.length, 10);
+  assert.equal(+month.gas.reduce((t, d) => t + d.kwh, 0).toFixed(3), 162.768, "the year's October figure (162.771) within Fuse's own rounding");
+  assert.equal(month.elec[0].kwh, 0, 'the first day: no usage yet, just the standing charge');
+  assert.equal(month.elec[0].pence, 34, 'the standing charge is still the day\'s cost');
+  assert.equal(month.gas.find((d) => new Date(d.start + 3600e3).getUTCDate() === 11).kwh, 0, 'a day the gas meter did not report');
+  assert.equal(month.gas.filter((d) => d.inProgress).length, 1, 'the 18th is the day in progress');
+
+  // The year: one realised month, then forecasts.
+  const year = parseRange(chartOf({
+    GAS: [coarse({ year: 2026, month: 10 }, 162.771, 13.86, { standing: '1.19' }), coarse({ year: 2026, month: 11 }, 395.262, 33, { type: 'FORECASTED' }), coarse({ year: 2026, month: 12 }, 511.802, 43, { type: 'FORECASTED' })],
+    ELEC_IMPORT: [coarse({ year: 2026, month: 10 }, 68.910, 17.02, { standing: '3.49' }), coarse({ year: 2026, month: 11 }, 276.978, 70, { type: 'FORECASTED' })],
+  }, { current_index: { year: 2026, month: 10 } }), 'month', { year: 2026 }, { now });
+  assert.deepEqual([year.gas.length, year.elec.length], [1, 1], 'October only');
+  assert.deepEqual([year.gas[0].kwh, year.elec[0].kwh], [162.771, 68.910]);
+  assert.equal(year.gas[0].inProgress, true);
+  assert.equal(Math.round(year.gas[0].pence), 1505, 'usage plus standing');
+
+  // The day: gas the same every hour. Yesterday's 24 hours are even; today's 8 so far are too few on their own.
+  const hours = (ymd, n, kwh, nowIn) => Array.from({ length: n }, (_, h) => bar(ymd, h, String(kwh), '0.03', { usage: '0.0336', standing: '0.0049', type: 'REALISED' }));
+  const yesterday = parseChart(chartOf({ GAS: hours('2026-10-17', 24, 0.394) }), '2026-10-17', { now });
+  assert.equal(isEvenSpread(yesterday.gas), true);
+  assert.equal(+dayTotals(yesterday.gas).kwh.toFixed(3), 9.456, "the day's total, close to the daily figure (9.465) Fuse gives in the month");
+  const today = parseChart(chartOf({ GAS: hours('2026-10-18', 8, 0.428) }, { current_index: { year: 2026, month: 10, day: 18, hour: 7 } }), '2026-10-18', { now });
+  assert.equal(isEvenSpread(today.gas), false, "7 finished hours: not enough to call it even on today's own");
+  assert.equal(today.gas.filter((h) => h.inProgress).length, 1, 'hour 07 is the hour in progress');
+});

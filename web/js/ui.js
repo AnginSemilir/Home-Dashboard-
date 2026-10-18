@@ -1028,7 +1028,9 @@ export function renderFuse(r, v, now, tz = DEFAULT_TZ) {
         : ['readings to ', h('b', {}, to), lag <= 2 * 3600e3 ? ' · Fuse is about an hour behind' : ` · Fuse is ${Math.round(lag / 3600e3)} hours behind`];
     // The amounts that make up the total, for each fuel the account has (one that hasn't reported yet says so).
     const bits = [v.hasElec && (e.kwh > 0 ? ['Electricity ', h('b', {}, pounds(v.parts.elec))] : 'electricity not reported yet'),
-      v.hasGas && (g.kwh > 0 ? ['Gas ', h('b', {}, pounds(v.parts.gas)), v.chart.gasEven ? ' (even spread)' : ''] : 'gas not reported yet')].filter(Boolean);
+      v.hasGas && (g.kwh > 0 ? ['Gas ', h('b', {}, pounds(v.parts.gas))]
+        : v.chart.gasEven ? ['Gas comes once a day', ...(v.yesterday.gas.hours ? [' · yesterday ', h('b', {}, pounds(Math.round(v.yesterday.gas.pence)))] : [])]
+          : 'gas not reported yet')].filter(Boolean);
     const split = bits.flatMap((b, i) => (i ? [' · ', b] : [b]));
     r.priceSub.replaceChildren(h('div', {}, ...reach), h('div', {}, ...split, bits.length === 1 ? ' · standing charge included' : ''));
   }
@@ -1065,6 +1067,9 @@ function renderFuseChart(r, v, now, tz) {
   // Split rows carry their own swatch and name; the legend is for the stacked bars.
   r.legend.replaceChildren(...(stacked && rows.length > 1 ? [item('elec', 'Electricity'), item('gas', 'Gas')] : []));
 
+  // Gas alone, and not hourly: there is nothing to draw by the hour.
+  if (c.view === 'D' && !rows.length) { r.chartBox.replaceChildren(h('div', { class: 'chart-msg' }, "Fuse gives gas once a day, not by the hour. Choose M or Y to see it.")); return; }
+
   // A month or year that hasn't come, or can't be drawn, says why instead of leaving the box empty.
   const what = month ? 'month' : 'year';
   const nothing = !data ? (c.load.error ? `Couldn't load this ${what} from Fuse: ${c.load.error}` : `Loading this ${what} from Fuse…`)
@@ -1094,7 +1099,8 @@ function renderFuseTiles(r, v, now, tz) {
       t.extra.replaceChildren(h('div', { class: 'muted' }, why(none)), v.notSetUp || v.signedOut ? '' : yesterday(yest));
     }
   };
-  const FUEL = { elec: { label: 'Electricity', icon: 'bolt', none: 'No readings yet today · tap' }, gas: { label: 'Gas', icon: 'flame', none: 'No gas readings yet today · tap' } };
+  const FUEL = { elec: { label: 'Electricity', icon: 'bolt', none: 'No readings yet today · tap' },
+    gas: { label: 'Gas', icon: 'flame', none: v.chart.gasEven ? 'Comes once a day · tap' : 'No gas readings yet today · tap' } };
   const fuels = [v.hasElec && 'elec', v.hasGas && 'gas'].filter(Boolean);
   const first = fuels[0] || 'elec';
   r.tUsage.el.querySelector('.ico').replaceChildren(icon(FUEL[first].icon));

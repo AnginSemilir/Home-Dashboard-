@@ -506,13 +506,21 @@ test('gas that Fuse shares out evenly through the day: no hourly gas graph, and 
   const { ctx, page, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-gas-flat']),
     initScript: () => { try { localStorage.setItem('wallpanel.fuse.style', 'stacked'); } catch { /* none */ } } });
   await page.locator('#price .big .num').waitFor();
-  // The day: electricity only, saying why; gas stays on the card, marked.
+  // The day: electricity only, saying why. Today's even-spread gas is an estimate, so it isn't counted: the card,
+  // the total and the tile say gas comes once a day, with yesterday's real total.
   assert.equal(await label(page), "Usage today kWh per hour · gas isn't hourly");
   assert.deepEqual(await page.locator('#chart .ch-rowname').allTextContents(), ['Electricity']);
   assert.equal(await page.locator('#chart .ch-bar.ch-gas').count(), 0);
   assert.equal(await page.locator('#chart .ch-stack').count(), 0, 'stacked is saved, but there is no hourly gas to stack');
   assert.equal(await page.locator('#chart .fz-stack').isVisible(), false);
-  assert.match(await text(page, '#price .sub'), /Gas £\d+\.\d\d \(even spread\)/);
+  assert.match(await text(page, '#price .sub'), /Electricity £\d+\.\d\d · Gas comes once a day · yesterday £\d+\.\d\d/);
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence)), "the total is the electricity so far; today's estimated gas isn't in it");
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.elec.kwh.toFixed(1)} kWh`, '–']);
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas');
+  assert.equal(await text(page, '.tile.cost .t-value'), '–');
+  assert.match(await text(page, '.tile.cost .extra'), /^Comes once a day · tap\nYesterday £\d+\.\d\d$/);
+  await page.locator('.tile.cost').click();
+  await page.locator('.toast', { hasText: "Fuse reads gas about once a day, so today's gas isn't known yet and isn't in the total." }).waitFor();
   assert.equal(await page.locator('#chart .fz-seg').count(), 3, 'D, M and Y stay');
 
   // The month and the year have Fuse's daily and monthly gas, so both rows return, and stacking with them.
@@ -582,5 +590,16 @@ test('the month and year fail on their own without losing the day in "Show what 
   const t = await diag.innerText();
   assert.match(t, /Fuse's chart for 2026-09-25/);
   assert.match(t, /Fuse's chart for 2026-09 \(this month, a bar per day\)\ncouldn't be read: /);
+  await ctx.close();
+});
+
+test('a gas-only account whose gas comes once a day: the day says so instead of drawing nothing', async () => {
+  const { ctx, page, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseNoElec: true, fail: new Set(['fuse-gas-flat']) });
+  await page.locator('#chart .chart-msg').waitFor();
+  assert.equal(await text(page, '#chart .chart-msg'), 'Fuse gives gas once a day, not by the hour. Choose M or Y to see it.');
+  await view(page, 'M');
+  await page.locator('#chart .ch-bar.ch-gas').first().waitFor();
+  assert.equal(await page.locator('#chart .ch-rowname').count(), 1);
+  assert.deepEqual(problems, []);
   await ctx.close();
 });
