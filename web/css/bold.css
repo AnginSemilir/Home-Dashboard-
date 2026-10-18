@@ -337,6 +337,7 @@ svg { display: block; }
 }
 .tile .ico { width: 1.15em; height: 1.15em; color: var(--faint); align-self: center; }
 .tile .ico svg { width: 100%; height: 100%; }
+.tile[data-fuel="elec"] .ico { color: var(--elec); } .tile[data-fuel="gas"] .ico { color: var(--gas); } /* Fuse: the fuel's colour, as in the chart */
 .tile .t-label { color: var(--muted); font-size: max(11px, 0.95em); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 0.8em; }
 .tile .t-value { grid-column: 1 / -1; font-size: 2.15em; font-weight: 600; line-height: 1.1; letter-spacing: -0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile .t-value small { font-size: 0.48em; color: var(--muted); font-weight: 500; letter-spacing: 0; margin-left: 0.35em; }

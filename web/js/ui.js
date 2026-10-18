@@ -128,14 +128,14 @@ export function buildPanel(root, on) {
   r.tCar = tile('car', 'car', 'Car');
   r.tCost = tile('cost', 'pound', 'Today so far');
   r.tIndoor = tile('indoor', 'thermo', 'Indoor');
-  r.tiles = h('div', { class: 'tiles', id: 'tiles' }, r.tUsage.el, r.tCar.el, r.tCost.el, r.tIndoor.el);
+  r.tiles = h('div', { class: 'tiles', id: 'tiles' }, r.tUsage.el, r.tCost.el, r.tCar.el, r.tIndoor.el); // the two usage tiles (electricity, gas) side by side
   for (const [key, t] of Object.entries({ usage: r.tUsage, car: r.tCar, cost: r.tCost, indoor: r.tIndoor })) {
     t.el.addEventListener('click', () => on.tile?.(key));
   }
 
   // Shopping list (Google Tasks): tap an item to tick it off, + to add one.
   r.shopList = h('ul', { class: 'shop-items' });
-  r.shopInput = h('input', { type: 'text', placeholder: 'Add an item', enterkeyhint: 'done', autocomplete: 'off', maxlength: '200' });
+  r.shopInput = h('input', { type: 'text', placeholder: 'Add items, separated by commas', enterkeyhint: 'done', autocomplete: 'off', maxlength: '1000' });
   r.shopForm = h('form', { class: 'shop-add hidden' }, r.shopInput, h('button', { type: 'submit', class: 'shop-go' }, 'Add'));
   r.shopForm.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -816,6 +816,7 @@ function sparkline(points, now, minutes = 60) {
 const fmtKw = (w) => (w >= 1000 ? `${(w / 1000).toFixed(2)} kW` : `${Math.round(w)} W`);
 
 export function renderTiles(r, st, s, now, tz = DEFAULT_TZ, bright = null, fuse = null) {
+  delete r.tUsage.el.dataset.fuel; delete r.tCost.el.dataset.fuel;
   if (fuse) renderFuseTiles(r, fuse, now, tz);
   else if (bright) renderBrightTiles(r, bright, now, tz);
   else renderOctopusTiles(r, st, s, now);
@@ -1104,9 +1105,11 @@ function renderFuseTiles(r, v, now, tz) {
   const fuels = [v.hasElec && 'elec', v.hasGas && 'gas'].filter(Boolean);
   const first = fuels[0] || 'elec';
   r.tUsage.el.querySelector('.ico').replaceChildren(icon(FUEL[first].icon));
+  r.tUsage.el.dataset.fuel = first;
   tile(r.tUsage, FUEL[first].label, v.today[first], v.yesterday[first], FUEL[first].none);
   if (fuels[1]) {
     r.tCost.el.querySelector('.ico').replaceChildren(icon(FUEL[fuels[1]].icon));
+    r.tCost.el.dataset.fuel = fuels[1];
     tile(r.tCost, FUEL[fuels[1]].label, v.today[fuels[1]], v.yesterday[fuels[1]], FUEL[fuels[1]].none);
   } else {
     // One fuel on the account: the other tile says what yesterday cost instead.

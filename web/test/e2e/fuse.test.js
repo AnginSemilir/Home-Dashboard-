@@ -65,6 +65,8 @@ test('today so far: electricity and gas on the card, in the two-row chart, and i
   const now9 = half('gas', 9);
   assert.equal(await text(page, '#chart .chart-tip'), `Gas 09:00–10:00 · ${now9.kwh.toFixed(2)} kWh · ${short(now9.pence)} so far`);
 
+  // The tiles: Electricity and Gas side by side, then the car, then the thermostat.
+  assert.deepEqual(await page.locator('#tiles .t-label').allInnerTexts(), ['Electricity', 'Gas', 'e-Niro', 'Indoor']);
   // No live figure from Fuse: the "Using now" tile is Electricity, and the third tile is Gas.
   assert.equal(await text(page, '.tile.usage .t-label'), 'Electricity');
   assert.equal(await text(page, '.tile.usage .t-value'), gbp(e.pence));

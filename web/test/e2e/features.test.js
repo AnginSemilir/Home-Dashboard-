@@ -48,6 +48,24 @@ test('shopping list: shows the Google Tasks list; tap ticks off (with undo); + a
   await ctx.close();
 });
 
+test('shopping list: several items typed with commas are added one by one, in the order typed', async () => {
+  const { ctx, page, calls, problems } = await openPanel(env);
+  const shop = page.locator('#shop');
+  await shop.locator('li[data-id]', { hasText: 'Milk' }).waitFor();
+  await shop.locator('.shop-plus').click();
+  await shop.locator('.shop-add input').fill('Eggs, Butter,, Tea bags , ');
+  await shop.locator('.shop-add input').press('Enter');
+  await shop.locator('li[data-id]', { hasText: 'Tea bags' }).waitFor();
+  assert.deepEqual(await shop.locator('li[data-id] .what').allInnerTexts(), ['Eggs', 'Butter', 'Tea bags', 'Milk', 'Bread', 'Bananas', 'Washing-up liquid']);
+  // Google puts each new task at the top, so the last typed goes in first: the list ends up as typed.
+  const posts = calls.filter((c) => c.service === 'tasks' && c.method === 'POST').map((c) => c.body.title);
+  assert.deepEqual(posts, ['Tea bags', 'Butter', 'Eggs']);
+  await page.waitForTimeout(500); // the list is read again afterwards, and still reads as typed
+  assert.deepEqual(await shop.locator('li[data-id] .what').allInnerTexts(), ['Eggs', 'Butter', 'Tea bags', 'Milk', 'Bread', 'Bananas', 'Washing-up liquid']);
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
 test('shopping list: an older Google sign-in is asked to sign in again; no list chosen says so', async () => {
   const s = fullSettings(NOW);
   s.google.scopes = 'https://www.googleapis.com/auth/sdm.service https://www.googleapis.com/auth/calendar.readonly';

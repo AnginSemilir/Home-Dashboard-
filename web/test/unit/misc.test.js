@@ -167,6 +167,16 @@ test('shopping: Google Tasks items still to buy, in list order', async () => {
   ]), [{ id: 'a', title: 'Milk' }, { id: 'b', title: 'Bread' }]);
 });
 
+test('shopping: several items typed with commas become separate items, in order', async () => {
+  const { splitItems } = await import('../../js/tasks.js');
+  assert.deepEqual(splitItems('Eggs'), ['Eggs']);
+  assert.deepEqual(splitItems(' Eggs, milk ,, tea bags,  '), ['Eggs', 'milk', 'tea bags']);
+  assert.deepEqual(splitItems('Eggs，Milk'), ['Eggs', 'Milk'], 'a full-width comma too');
+  assert.deepEqual(splitItems(' , ,'), []);
+  assert.deepEqual(splitItems(''), []);
+  assert.equal(splitItems(Array.from({ length: 40 }, (_, i) => `item ${i}`).join(',')).length, 20, 'a sensible limit');
+});
+
 test('chart: tap targets carry each half hour; short window before tomorrow is published', () => {
   const now = iso('2026-09-25T09:41:00+01:00');
   const dayStart = iso('2026-09-24T23:00:00Z');

@@ -503,6 +503,7 @@ svg { display: block; }
 .tile .extra .muted { font-size: 0.92em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tile.usage .ico { color: var(--t-usage); } .tile.cost .ico { color: var(--t-cost); }
 .tile.indoor .ico { color: var(--t-indoor); } .tile.car .ico { color: var(--t-car); }
+.tile[data-fuel="elec"] .ico { color: var(--elec); } .tile[data-fuel="gas"] .ico { color: var(--gas); } /* Fuse: the fuel's colour, as in the chart */
 /* Heating is the one state worth noticing: a warm pill with a flame. Idle/Eco/Off stay plain. */
 .tile .heat {
   display: inline-flex; align-items: center; gap: 0.3em; vertical-align: middle;

@@ -33,6 +33,11 @@ export function setDone(google, listId, id, done = true) {
   return google.api(`${TASKS}/lists/${enc(listId)}/tasks/${enc(id)}`, json('PATCH', done ? { status: 'completed' } : { status: 'needsAction', completed: null }));
 }
 
+/** "Eggs, milk,, tea bags" → ['Eggs', 'milk', 'tea bags']: items separated by commas, in the order typed. */
+export function splitItems(text, max = 20) {
+  return String(text || '').split(/[,，]/).map((x) => x.trim()).filter(Boolean).slice(0, max);
+}
+
 export function addItem(google, listId, title) {
   const t = String(title || '').trim();
   if (!t) throw new Error('Type something to add');

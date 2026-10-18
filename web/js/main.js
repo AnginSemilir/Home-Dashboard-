@@ -18,7 +18,7 @@ import { fetchKia } from './kia.js';
 import { actionFor, detectEnv, perform, musicApp, assistantApp, MUSIC_APPS } from './launcher.js';
 import * as ui from './ui.js';
 import { sunToday, themeFor, locate } from './sun.js';
-import { fetchItems, setDone, addItem } from './tasks.js';
+import { fetchItems, setDone, addItem, splitItems } from './tasks.js';
 import { openSettings } from './settings-ui.js';
 
 const settings = loadSettings();
@@ -635,12 +635,23 @@ async function tickShopping(id, title) {
   }
 }
 
+/** Add one item, or several separated by commas (shown in the order typed, at the top of the list). */
 async function addShopping(text) {
   const list = settings.google.shoppingList?.id;
-  if (!list) return;
-  state.shopping = [{ id: `new-${Date.now()}`, title: text }, ...(state.shopping || [])];
+  const items = splitItems(text);
+  if (!list || !items.length) return;
+  const stamp = Date.now();
+  state.shopping = [...items.map((title, i) => ({ id: `new-${stamp}-${i}`, title })), ...(state.shopping || [])];
   renderAll();
-  try { await addItem(google, list, text); } catch (e) { ui.toast(refs, `Couldn't add ${text}: ${describeError(e)}`, 6000); }
+  // Google puts each new task first, so the last typed goes in first and the first typed ends up on top.
+  const order = [...items].reverse();
+  for (let i = 0; i < order.length; i++) {
+    try { await addItem(google, list, order[i]); } catch (e) {
+      const left = order.slice(i).reverse(); // this one and those after it were not added
+      ui.toast(refs, `Couldn't add ${left.join(', ')}: ${describeError(e)}`, 6000);
+      break;
+    }
+  }
   sources.shopping?.run();
 }
 
