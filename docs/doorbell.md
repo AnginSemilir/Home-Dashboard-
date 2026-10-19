@@ -82,6 +82,10 @@ In the Google Home app, go to the doorbell → **Settings → Notifications**. T
 
 The checklist in ⚙ has a line, **Doorbell alerts**, that says what's wrong in plain words if something isn't set up.
 
+## The doorbell volume bar
+
+⚙ → Google → **Doorbell volume** is a bar from 10% to 100%. **100% is the chime exactly as loud as it has always been** (the loudest a web page can make it, below). Moving it down makes the chime quieter in even steps: each 10% is about 4 dB, so 50% sounds roughly half as loud to the ear and 10% is very quiet. The bar sits after the loudness stage, so it doesn't change the chime's tone, only how much of it reaches the speaker. Press **Test chime** to hear where you've put it, and **Save & close** to keep it. The tablet's own media volume still sets how loud the full chime is, so a lower bar and a higher media volume (or the other way round) can give the same loudness.
+
 ## Making it louder (without turning the music up)
 
 A web page can't change the tablet's volume, and its sound always plays at the **media** volume, the same one your music uses. So:

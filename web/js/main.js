@@ -737,7 +737,8 @@ async function closeCamera() {
 
 // ---------- Doorbell ----------
 const RING_CLOSE_MS = 120e3; // an unanswered ring closes itself after 2 minutes without a touch
-const chime = SUB_RE.test(settings.google.doorbellSub.trim()) ? new Chime() : null;
+const chimeOptions = { volume: () => (Number(settings.panel.chimeVolume) || 100) / 100 }; // the volume bar in Settings
+const chime = SUB_RE.test(settings.google.doorbellSub.trim()) ? new Chime(chimeOptions) : null;
 let doorbell = null;
 
 /** Someone pressed the doorbell: its live view over everything, a chime, and the screen lit. */
@@ -755,7 +756,7 @@ function ring({ device } = {}) {
   nightSnoozeUntil = Date.now() + RING_CLOSE_MS;
   openCamera({ device: device || settings.google.cameraId, ring: true });
   updateNight();
-  (chime || new Chime()).ring().then((ok) => { if (!ok) ui.soundHint(refs, true); });
+  (chime || new Chime(chimeOptions)).ring().then((ok) => { if (!ok) ui.soundHint(refs, true); });
 }
 
 function resumeMusicAfterRing() {

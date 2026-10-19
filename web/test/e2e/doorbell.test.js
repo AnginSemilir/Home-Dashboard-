@@ -156,6 +156,43 @@ test('Test chime and Test doorbell buttons; a hidden panel doesn\'t take presses
   await ctx.close();
 });
 
+test('the doorbell volume bar: Test chime uses where it is, Save keeps it, and a real ring uses the saved level', async () => {
+  const { ctx, page, calls } = await openPanel(env, { now: NIGHT, settings: withDoorbell(), initScript: () => {
+    sessionStorage.setItem('wallpanel.autoreload', '1');
+    window.__notes = 0;
+    const start = OscillatorNode.prototype.start;
+    OscillatorNode.prototype.start = function (...a) { window.__notes++; return start.apply(this, a); };
+    window.__master = null;
+    const make = BaseAudioContext.prototype.createGain;
+    BaseAudioContext.prototype.createGain = function (...a) { const g = make.apply(this, a); window.__master ||= g; return g; };
+  } }); // (the output stage is the first gain the chime makes)
+  await waitFor(() => calls.pubsub.pulls >= 1, 'a pull');
+  await page.locator('#night').click();
+  const level = () => page.evaluate(() => window.__master?.gain.value);
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  const bar = set.getByLabel('Doorbell volume');
+  assert.equal(await bar.inputValue(), '100', 'starts at full, as the chime always was');
+  assert.equal(await set.locator('.vol-out').innerText(), '100%');
+  await bar.fill('50');
+  assert.equal(await set.locator('.vol-out').innerText(), '50%');
+  await set.getByRole('button', { name: 'Test chime' }).click();
+  await set.getByText('Ding-dong!').waitFor();
+  assert.ok(Math.abs((await level()) - 0.098) < 1e-6, `the test plays at 50%: ${await level()}`);
+  assert.equal(await page.evaluate(() => window.__notes), 30);
+  await set.getByRole('button', { name: 'Save & close' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('wallpanel.settings.v1')).panel.chimeVolume === 50);
+
+  // After a reload, a real press rings at the saved level.
+  const pulled = calls.pubsub.pulls;
+  await page.reload();
+  await waitFor(() => calls.pubsub.pulls >= pulled + 2, 'the reloaded page pulling');
+  calls.pubsub.queue.push(press(await page.evaluate(() => Date.now()), { eventId: 'chime-volume' })); // (the page's own clock: a reload doesn't keep the frozen one)
+  await waitFor(() => page.evaluate(() => window.__notes > 0), 'the ring\'s chime (the page has reloaded, so the count starts again)');
+  assert.ok(Math.abs((await level()) - 0.098) < 1e-6, `the ring plays at the saved 50%: ${await level()}`);
+  await ctx.close();
+});
+
 test('music on Spotify pauses while the doorbell rings, and carries on when the view closes', async () => {
   const { ctx, page, calls } = await openPanel(env, { now: NIGHT, settings: withDoorbell(), spotify: true, initScript: nightAndSound });
   await page.locator('.dock [data-app="music"] .d-label', { hasText: 'Here Comes the Sun' }).waitFor();

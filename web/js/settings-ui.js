@@ -350,9 +350,15 @@ export function openSettings(root, ctx) {
   };
   subInput.addEventListener('input', checkSub);
   checkSub();
+  // The volume bar: even steps of loudness (see chime.js); 100% is as loud as a page can make it.
+  const volume = h('input', { type: 'range', min: '10', max: '100', step: '5', value: String(Math.min(100, Math.max(10, Number(draft.panel.chimeVolume) || 100))), 'aria-label': 'Doorbell volume' });
+  const volumeOut = h('output', { class: 'vol-out' }, `${volume.value}%`);
+  volume.addEventListener('input', () => { draft.panel.chimeVolume = Number(volume.value); volumeOut.textContent = `${volume.value}%`; });
   const doorbellField = h('div', {}, h('label', {}, 'Doorbell subscription (optional)', subInput), subWhy,
+    h('label', { class: 'vol' }, 'Doorbell volume', h('span', { class: 'vol-row' }, volume, volumeOut)),
+    h('div', { class: 'help' }, "100% is the loudest the panel can make the chime; each step down is quieter. The tablet's own media volume still sets how loud that is: press Test chime after moving the bar."),
     btn('Test chime', async () => {
-      const ok = await (ctx.chime || new Chime()).test();
+      const ok = await (ctx.chime || new Chime()).test({ volume: Number(volume.value) / 100 });
       if (!ok) throw new Error('Sound is blocked. Tap the screen once, and in WebView Kiosk → Settings → Web Engine turn Media Playback Requires User Gesture off. Turn the media volume up.');
       say('Ding-dong! (Turn the media volume up if that was quiet.)');
     }, true),

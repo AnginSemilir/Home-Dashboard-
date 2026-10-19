@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DoorbellListener, checkSubName, decodeData, parseChime, explainDoorbellError, CHIME, PUBSUB, PULL_TIMEOUT_MS } from '../../js/doorbell.js';
-import { Chime } from '../../js/chime.js';
+import { Chime, volumeGain } from '../../js/chime.js';
 import { authUrl, Google, SCOPE_SDM, SCOPE_CAL, SCOPE_TASKS, SCOPE_PUBSUB } from '../../js/google.js';
 import { HttpError } from '../../js/util.js';
 import { loadSettings } from '../../js/config.js';
@@ -200,6 +200,28 @@ test('chime: a two-note ding-dong three times (five overtones each); not again w
   assert.equal(a.starts.length, 30, 'rang 3 s ago: no second chime');
   assert.equal(await c.test(), true);
   assert.equal(a.starts.length, 60);
+});
+
+test('chime: the volume bar moves in even steps of loudness, acts after the loudness stage, and is read at each ring', async () => {
+  const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} vs ${b}`);
+  near(volumeGain(1), 1);
+  near(volumeGain(0.5), 0.1);
+  near(volumeGain(0.1), 10 ** -1.8);
+  assert.equal(volumeGain(0), volumeGain(0.1), 'never quite silent');
+  assert.equal(volumeGain(7), 1);
+  assert.equal(volumeGain(NaN), 1);
+  assert.equal(volumeGain(undefined), 1);
+  const a = fakeAudio();
+  let bar = 1;
+  const c = new Chime({ win: a.win, volume: () => bar });
+  await c.ring();
+  near(c.master.gain.value, 0.98);
+  bar = 0.5;
+  await c.test();
+  near(c.master.gain.value, 0.098);
+  await c.test({ volume: 0.2 }); // the Settings test uses the bar's position before it is saved
+  near(c.master.gain.value, 0.98 * 10 ** -1.6);
+  assert.equal(a.starts.length, 90, 'the same chime at each level');
 });
 
 test('chime: blocked until a tap (pointerup, not pointerdown); a resume that never answers gives up', async () => {

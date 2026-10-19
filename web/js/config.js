@@ -65,6 +65,7 @@ export const DEFAULTS = Object.freeze({
     assistant: 'claude',   // claude | gemini: the AI button (the tablet's own assistant has its own button)
     style: 'bold',         // bold | ambient (two looks; see Settings → Panel)
     theme: 'auto',         // auto (light from sunrise to sunset where the tablet is) | dark | light
+    chimeVolume: 100,      // doorbell chime, 10–100 (100 = as loud as a page can make it; see chime.js)
   },
 });
 

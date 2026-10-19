@@ -788,6 +788,10 @@ svg { display: block; }
 }
 .settings input[type=checkbox], .settings input[type=radio] { accent-color: var(--accent); }
 .settings select option { background: var(--option); color: var(--text); }
+/* The doorbell volume bar in Settings. */
+.settings .vol-row { display: grid; grid-template-columns: 1fr 3.2em; align-items: center; gap: 0.8em; }
+.settings input[type=range] { width: 100%; min-height: 44px; accent-color: var(--accent); }
+.settings .vol-out { color: var(--text); text-align: right; font-variant-numeric: tabular-nums; }
 .settings textarea { min-height: 6em; font-family: monospace; font-size: 12px; }
 .settings .btn { background: var(--accent); color: var(--on-accent); font-weight: 600; padding: 0.65em 1.1em; border-radius: 10px; margin: 0.3em 0.4em 0.3em 0; }
 .settings h1 .btn { font-size: 0.68em; } /* the header's Cancel / Save & close */
