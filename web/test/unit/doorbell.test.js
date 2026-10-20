@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DoorbellListener, checkSubName, decodeData, parseChime, explainDoorbellError, CHIME, PUBSUB, PULL_TIMEOUT_MS } from '../../js/doorbell.js';
 import { Chime, volumeGain } from '../../js/chime.js';
+import { fakeAudio } from '../support/fake-audio.js';
 import { authUrl, Google, SCOPE_SDM, SCOPE_CAL, SCOPE_TASKS, SCOPE_PUBSUB } from '../../js/google.js';
 import { HttpError } from '../../js/util.js';
 import { loadSettings } from '../../js/config.js';
@@ -172,20 +173,6 @@ test('listener: a press already rung isn\'t rung again after a reload (kept in s
   assert.equal(a.rings.length + b.rings.length, 1);
   b.l.stop();
 });
-
-/** A stand-in for the browser's audio. */
-function fakeAudio({ state = 'running', resumes = true } = {}) {
-  const starts = [], listeners = {};
-  class Ctx {
-    constructor() { this.state = state; this.currentTime = 10; this.destination = {}; this.suspended = 0; }
-    resume() { if (resumes === 'never') return new Promise(() => {}); if (resumes) this.state = 'running'; return Promise.resolve(); }
-    suspend() { this.suspended++; return Promise.resolve(); }
-    addEventListener() {}
-    createGain() { return { gain: { value: 0, setValueAtTime() {}, linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
-    createOscillator() { return { type: '', frequency: { value: 0 }, connect() {}, start: (t) => starts.push(t), stop() {} }; }
-  }
-  return { win: { AudioContext: Ctx, addEventListener: (ev, fn) => { listeners[ev] = fn; } }, starts, listeners };
-}
 
 test('chime: a two-note ding-dong three times (five overtones each); not again within 5 s; test() always plays', async () => {
   const a = fakeAudio();

@@ -15,6 +15,8 @@ import { exportSpotify, importSpotify, spotifyEnded } from './spotify.js';
 import { LOCATION_WHY } from './sun.js';
 import { checkSubName } from './doorbell.js';
 import { Chime } from './chime.js';
+import { SOUNDS, soundById } from './chime-sounds.js';
+import { listTracks, addTrack, removeTrack, MAX_BYTES } from './tracks.js';
 import { Octopus, regionFromTariff } from './octopus.js';
 import { Bright } from './bright.js';
 import { Fuse, normaliseDateAnswer, chartSummary } from './fuse.js';
@@ -350,18 +352,71 @@ export function openSettings(root, ctx) {
   };
   subInput.addEventListener('input', checkSub);
   checkSub();
+  // The sound: a built-in one, or a track of your own (kept on this tablet; only its first 30 seconds ever play).
+  const soundSel = h('select', { 'aria-label': 'Doorbell sound' });
+  const soundMsg = h('div', { class: 'help' });
+  const soundSay = (t, bad = false) => { soundMsg.textContent = t; soundMsg.classList.toggle('bad', bad); };
+  let myTracks = [];
+  const fillSounds = async () => {
+    try { myTracks = await listTracks(); } catch (e) { myTracks = []; soundSay(describeError(e), true); }
+    const current = draft.panel.chimeSound || 'classic';
+    const mine = myTracks.map((t) => ({ value: `track:${t.id}`, label: t.name }));
+    const known = SOUNDS.some((x) => x.id === current) || mine.some((t) => t.value === current);
+    const opt = (value, label) => h('option', { value, selected: value === current }, label);
+    soundSel.replaceChildren(
+      ...SOUNDS.map((x) => opt(x.id, x.label)),
+      ...(mine.length ? [h('optgroup', { label: 'My tracks' }, ...mine.map((t) => opt(t.value, t.label)))] : []),
+      ...(known ? [] : [opt(current, 'A track that is not on this tablet (the classic chime plays)')]));
+    removeTrackBtn.classList.toggle('hidden', !current.startsWith('track:') || !known);
+  };
+  const addInput = h('input', { type: 'file', accept: 'audio/*,.mp3,.m4a,.aac,.ogg,.oga,.wav,.flac', class: 'hidden', 'aria-label': 'Choose a sound file' });
+  const removeTrackBtn = h('button', { type: 'button', class: 'btn secondary hidden' }, 'Remove this track');
+  const addTrackBtn = h('button', { type: 'button', class: 'btn secondary' }, 'Add my own track…');
+  let testChime = ctx.chime || null; // one for the Test buttons, made when first needed
+  const chimeForTest = () => (testChime ||= new Chime());
+  soundSel.addEventListener('change', () => { draft.panel.chimeSound = soundSel.value; soundSay(''); fillSounds(); });
+  addTrackBtn.addEventListener('click', () => addInput.click());
+  addInput.addEventListener('change', async () => {
+    const file = addInput.files?.[0];
+    addInput.value = '';
+    if (!file) return;
+    soundSay(`Checking "${file.name}"…`);
+    try {
+      const t = await addTrack(file);
+      draft.panel.chimeSound = `track:${t.id}`;
+      await fillSounds();
+      soundSay(`Added "${t.name}"${t.seconds ? ` (${Math.floor(t.seconds / 60)}:${String(Math.round(t.seconds % 60)).padStart(2, '0')})` : ''}. Only its first 30 seconds will play. Press Test chime to hear it, then Save & close.`);
+    } catch (e) { soundSay(describeError(e), true); }
+  });
+  removeTrackBtn.addEventListener('click', async () => {
+    const id = String(draft.panel.chimeSound || '').replace(/^track:/, '');
+    const name = myTracks.find((t) => t.id === id)?.name || 'the track';
+    try { await removeTrack(id); } catch (e) { return soundSay(describeError(e), true); }
+    chimeForTest().stop();
+    draft.panel.chimeSound = 'classic';
+    await fillSounds();
+    soundSay(`Removed "${name}". The classic chime is chosen. Save & close to keep that.`);
+  });
+  fillSounds();
+
   // The volume bar: even steps of loudness (see chime.js); 100% is as loud as a page can make it.
   const volume = h('input', { type: 'range', min: '10', max: '100', step: '5', value: String(Math.min(100, Math.max(10, Number(draft.panel.chimeVolume) || 100))), 'aria-label': 'Doorbell volume' });
   const volumeOut = h('output', { class: 'vol-out' }, `${volume.value}%`);
   volume.addEventListener('input', () => { draft.panel.chimeVolume = Number(volume.value); volumeOut.textContent = `${volume.value}%`; });
   const doorbellField = h('div', {}, h('label', {}, 'Doorbell subscription (optional)', subInput), subWhy,
+    h('label', {}, 'Doorbell sound', soundSel),
+    h('div', {}, addTrackBtn, removeTrackBtn, addInput),
+    soundMsg,
+    h('div', { class: 'help' }, `Your own tracks (mp3, m4a, ogg or wav, up to ${MAX_BYTES / 1048576} MB each) are kept on this tablet only: they are not uploaded and not in Copy settings. Any sound is cut at 30 seconds, and stops when you close the doorbell view.`),
     h('label', { class: 'vol' }, 'Doorbell volume', h('span', { class: 'vol-row' }, volume, volumeOut)),
     h('div', { class: 'help' }, "100% is the loudest the panel can make the chime; each step down is quieter. The tablet's own media volume still sets how loud that is: press Test chime after moving the bar."),
     btn('Test chime', async () => {
-      const ok = await (ctx.chime || new Chime()).test({ volume: Number(volume.value) / 100 });
+      const sound = draft.panel.chimeSound || 'classic';
+      const ok = await chimeForTest().test({ volume: Number(volume.value) / 100, sound });
       if (!ok) throw new Error('Sound is blocked. Tap the screen once, and in WebView Kiosk → Settings → Web Engine turn Media Playback Requires User Gesture off. Turn the media volume up.');
-      say('Ding-dong! (Turn the media volume up if that was quiet.)');
+      say(sound === 'classic' ? 'Ding-dong! (Turn the media volume up if that was quiet.)' : `Playing ${sound.startsWith('track:') ? 'your track' : soundById(sound).label.replace(/ \(.*\)$/, '')}. (Turn the media volume up if that was quiet.)`);
     }, true),
+    btn('Stop', async () => { chimeForTest().stop(); }, true),
     btn('Test doorbell', async () => {
       if (!draft.google.cameraId) throw new Error('Choose the doorbell (camera & thermostat) first');
       ctx.testRing?.();

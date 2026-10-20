@@ -82,6 +82,20 @@ In the Google Home app, go to the doorbell → **Settings → Notifications**. T
 
 The checklist in ⚙ has a line, **Doorbell alerts**, that says what's wrong in plain words if something isn't set up.
 
+## Choosing the sound, and your own tracks
+
+⚙ → Google → **Doorbell sound** lists:
+
+- **Ding-dong (the classic, loudest)**: the original, and still the one to pick if you want the loudest.
+- **Cuckoo clock, Music box, Wind chimes, Retro arcade, Old telephone, Fanfare**: built into the panel (made with Web Audio, no files). They go through the same loudness stage and volume bar as the classic, but a gentler sound is not as loud to the ear as the bright ding-dong at the same setting.
+- **My tracks**: **Add my own track…** opens a file picker (mp3, m4a, ogg or wav, up to 15 MB each, up to 10 kept). Add a song, a recording, anything you own. The panel keeps the file in this browser (never uploaded, and not part of **Copy settings**), so add it in the app where the panel runs. If the kiosk app has no file picker, tell Claude. **Remove this track** deletes it.
+
+**Whatever plays is cut at 30 seconds**, fading out over the last second and a half, and it **stops at once when you close the doorbell view**. A track plays from its start, so the first 30 seconds are what you hear; trim the file first if you want a different part. **Test chime** plays the chosen sound at the volume bar's level; **Stop** ends it.
+
+If a chosen track has gone (you pasted settings from another tablet, or cleared the browser), the classic ding-dong plays instead: the doorbell is never silent. If the browser refuses to start a track until you tap the screen, the panel shows its usual "Tap once to turn on the doorbell sound".
+
+The sounds are free of copyright. Songs and recordings you add are yours to use at home; they are not shared or published.
+
 ## The doorbell volume bar
 
 ⚙ → Google → **Doorbell volume** is a bar from 10% to 100%. **100% is the chime exactly as loud as it has always been** (the loudest a web page can make it, below). Moving it down makes the chime quieter in even steps: each 10% is about 4 dB, so 50% sounds roughly half as loud to the ear and 10% is very quiet. The bar sits after the loudness stage, so it doesn't change the chime's tone, only how much of it reaches the speaker. Press **Test chime** to hear where you've put it, and **Save & close** to keep it. The tablet's own media volume still sets how loud the full chime is, so a lower bar and a higher media volume (or the other way round) can give the same loudness.

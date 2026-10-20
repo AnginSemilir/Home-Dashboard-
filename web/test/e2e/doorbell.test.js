@@ -193,6 +193,142 @@ test('the doorbell volume bar: Test chime uses where it is, Save keeps it, and a
   await ctx.close();
 });
 
+// ---------- The sound: built-ins, your own tracks, and the 30-second cut ----------
+
+/** A mono 8-bit WAV of a 440 Hz tone, `seconds` long: a sound file to add. */
+const wav = (seconds, rate = 8000) => {
+  const n = seconds * rate, buf = Buffer.alloc(44 + n);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n, 4); buf.write('WAVE', 8); buf.write('fmt ', 12);
+  buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22); buf.writeUInt32LE(rate, 24);
+  buf.writeUInt32LE(rate, 28); buf.writeUInt16LE(1, 32); buf.writeUInt16LE(8, 34); buf.write('data', 36); buf.writeUInt32LE(n, 40);
+  for (let i = 0; i < n; i++) buf[44 + i] = 128 + Math.round(40 * Math.sin((2 * Math.PI * 440 * i) / rate));
+  return buf;
+};
+// Count notes and the panel's own sound-file playback (the camera's video has no blob: address).
+const soundSpies = () => {
+  window.__notes = 0; window.__plays = 0; window.__audio = null;
+  const start = OscillatorNode.prototype.start;
+  OscillatorNode.prototype.start = function (...a) { window.__notes++; return start.apply(this, a); };
+  const play = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...a) {
+    if (String(this.src).startsWith('blob:') && !this.srcObject) { window.__plays++; window.__audio = this; }
+    return play.apply(this, a);
+  };
+};
+
+test('the doorbell sound: a list of built-in sounds; Test chime plays the one chosen; Save keeps it', async () => {
+  const { ctx, page } = await openPanel(env, { now: NIGHT, settings: withDoorbell(), initScript: soundSpies });
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  const pick = set.getByLabel('Doorbell sound');
+  assert.deepEqual(await pick.locator('option').allTextContents(), [
+    'Ding-dong (the classic, loudest)', 'Cuckoo clock', 'Music box', 'Wind chimes', 'Retro arcade', 'Old telephone', 'Fanfare']);
+  assert.equal(await pick.inputValue(), 'classic', 'the classic ding-dong to start with');
+  await pick.selectOption('cuckoo');
+  await set.getByRole('button', { name: 'Test chime' }).click();
+  await set.getByText('Playing Cuckoo clock.').waitFor();
+  assert.equal(await page.evaluate(() => window.__notes), 24, 'four cuckoos of two notes, three tones each');
+  await pick.selectOption('fanfare');
+  await set.getByRole('button', { name: 'Test chime' }).click();
+  await set.getByText('Playing Fanfare.').waitFor();
+  assert.ok(await page.evaluate(() => window.__notes) > 24);
+  await set.getByRole('button', { name: 'Save & close' }).click();
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('wallpanel.settings.v1')).panel.chimeSound === 'fanfare');
+  await ctx.close();
+});
+
+test('your own track: add a file, it is kept, plays for 30 seconds at most, and can be stopped and removed', async () => {
+  const { ctx, page, problems } = await openPanel(env, { clock: 'install', now: NIGHT, settings: withDoorbell(), initScript: soundSpies });
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  const pick = set.getByLabel('Doorbell sound');
+
+  // Something that isn't sound is refused in plain words, and nothing is kept.
+  await set.getByLabel('Choose a sound file').setInputFiles({ name: 'notes.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from('this is not audio') });
+  await set.getByText("This browser can't play that file. Try an mp3, m4a, ogg or wav.").waitFor();
+  assert.equal(await pick.locator('optgroup').count(), 0);
+
+  // A 45-second file: added, chosen, and its length shown.
+  await set.getByLabel('Choose a sound file').setInputFiles({ name: 'Doorbell_tone.wav', mimeType: 'audio/wav', buffer: wav(45) });
+  await set.getByText(/^Added "Doorbell tone" \(0:45\)\. Only its first 30 seconds will play\./).waitFor();
+  assert.deepEqual(await pick.locator('optgroup option').allTextContents(), ['Doorbell tone']);
+  assert.match(await pick.inputValue(), /^track:/);
+  assert.equal(await set.getByRole('button', { name: 'Remove this track' }).isVisible(), true);
+
+  // Test chime plays the file (not a built-in sound), until 30 seconds, then it is cut.
+  await set.getByRole('button', { name: 'Test chime' }).click();
+  await set.getByText('Playing your track.').waitFor();
+  assert.equal(await page.evaluate(() => window.__plays), 1);
+  assert.equal(await page.evaluate(() => window.__notes), 0, 'no built-in notes');
+  assert.equal(await page.evaluate(() => window.__audio.paused), false);
+  await page.clock.runFor(29_000);
+  assert.equal(await page.evaluate(() => window.__audio.paused), false, 'still going at 29 s');
+  await page.clock.runFor(2_000);
+  assert.equal(await page.evaluate(() => window.__audio.paused), true, 'cut at 30 s');
+
+  // Stop ends it at once.
+  await set.getByRole('button', { name: 'Test chime' }).click();
+  await page.waitForFunction(() => window.__plays === 2);
+  await set.getByRole('button', { name: 'Stop' }).click();
+  assert.equal(await page.evaluate(() => window.__audio.paused), true);
+
+  // Saved, it is what the panel plays; remove it and the classic is chosen again.
+  await set.getByRole('button', { name: 'Save & close' }).click();
+  await page.waitForFunction(() => /^track:/.test(JSON.parse(localStorage.getItem('wallpanel.settings.v1')).panel.chimeSound));
+  await page.locator('#clock .gear').click();
+  await set.getByRole('button', { name: 'Remove this track' }).click();
+  await set.getByText(/^Removed "Doorbell tone"\. The classic chime is chosen\./).waitFor();
+  assert.equal(await pick.inputValue(), 'classic');
+  assert.equal(await pick.locator('optgroup').count(), 0);
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+test('a real press plays the saved track, and answering the doorbell stops it', async () => {
+  const { ctx, page, calls } = await openPanel(env, { now: NIGHT, settings: withDoorbell(), initScript: () => {
+    sessionStorage.setItem('wallpanel.autoreload', '1');
+    window.__RTC = true;
+    const Real = window.RTCPeerConnection;
+    window.RTCPeerConnection = class extends Real {
+      async setRemoteDescription() {
+        const track = document.createElement('canvas').captureStream().getVideoTracks()[0];
+        const ev = new Event('track');
+        ev.track = track;
+        this.dispatchEvent(ev);
+      }
+    };
+    window.__notes = 0; window.__plays = 0; window.__audio = null;
+    const start = OscillatorNode.prototype.start;
+    OscillatorNode.prototype.start = function (...a) { window.__notes++; return start.apply(this, a); };
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function (...a) {
+      if (String(this.src).startsWith('blob:') && !this.srcObject) { window.__plays++; window.__audio = this; }
+      return play.apply(this, a);
+    };
+  } });
+  await page.locator('#night').click();
+  await page.locator('#clock .gear').click();
+  const set = page.locator('#settings');
+  await set.getByLabel('Choose a sound file').setInputFiles({ name: 'ding.wav', mimeType: 'audio/wav', buffer: wav(40) });
+  await set.getByText(/^Added "ding"/).waitFor();
+  await set.getByRole('button', { name: 'Save & close' }).click();
+  await page.waitForFunction(() => /^track:/.test(JSON.parse(localStorage.getItem('wallpanel.settings.v1')).panel.chimeSound));
+
+  const pulled = calls.pubsub.pulls;
+  await page.reload();
+  await waitFor(() => calls.pubsub.pulls >= pulled + 2, 'the reloaded page pulling');
+  calls.pubsub.queue.push(press(await page.evaluate(() => Date.now()), { eventId: 'chime-track' }));
+  await waitFor(() => page.evaluate(() => window.__plays === 1), 'the track playing');
+  assert.equal(await page.evaluate(() => window.__notes), 0, 'the track, not a built-in chime');
+  assert.equal(await page.evaluate(() => window.__audio.paused), false);
+
+  // Close the doorbell view: the sound stops with it.
+  await page.locator('#cam.expanded.ring').waitFor();
+  await page.locator('#cam .cam-bar .close').click();
+  await waitFor(() => page.evaluate(() => window.__audio.paused), 'the track stopping');
+  await ctx.close();
+});
+
 test('music on Spotify pauses while the doorbell rings, and carries on when the view closes', async () => {
   const { ctx, page, calls } = await openPanel(env, { now: NIGHT, settings: withDoorbell(), spotify: true, initScript: nightAndSound });
   await page.locator('.dock [data-app="music"] .d-label', { hasText: 'Here Comes the Sun' }).waitFor();

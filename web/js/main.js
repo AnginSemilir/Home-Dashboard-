@@ -729,7 +729,7 @@ async function closeCamera() {
   const s = live?.stream;
   const wasRing = !!live?.ring;
   live = null;
-  if (wasRing) resumeMusicAfterRing();
+  if (wasRing) { chime?.stop(); resumeMusicAfterRing(); } // answered: the chime stops with the view
   ui.renderCamera(refs, settings, state, live);
   updateNight();
   await s?.stop();
@@ -737,7 +737,8 @@ async function closeCamera() {
 
 // ---------- Doorbell ----------
 const RING_CLOSE_MS = 120e3; // an unanswered ring closes itself after 2 minutes without a touch
-const chimeOptions = { volume: () => (Number(settings.panel.chimeVolume) || 100) / 100 }; // the volume bar in Settings
+// The volume bar and the sound chosen in Settings, read at each ring.
+const chimeOptions = { volume: () => (Number(settings.panel.chimeVolume) || 100) / 100, sound: () => settings.panel.chimeSound || 'classic' };
 const chime = SUB_RE.test(settings.google.doorbellSub.trim()) ? new Chime(chimeOptions) : null;
 let doorbell = null;
 

@@ -1,24 +1,27 @@
-// The doorbell chime: a two-note ding-dong made with Web Audio (no sound file). Browsers only
-// let a page make sound after a tap, except in WebView Kiosk and an installed Chrome app, where
-// a top-level page may play without one; any tap on the panel unlocks it for the rest of the day.
+// The doorbell sound, made with Web Audio. Browsers only let a page make sound after a tap, except in
+// WebView Kiosk and an installed Chrome app, where a top-level page may play without one; any tap on the
+// panel unlocks it for the rest of the day.
 //
-// A page can't raise the tablet's volume, so the chime is made as loud as a page can make it at
-// whatever the media volume is: a bright bell pitched where ears and small speakers are most
-// sensitive, driven hard into a clipper so it sits at almost full level the whole time (close
-// to the loudest any sound can be at that volume), and played three times.
+// What plays is chosen in Settings: one of the built-in sounds (chime-sounds.js: the classic ding-dong, a
+// cuckoo, a music box…) or a track you added (tracks.js). Whatever it is, it is cut at 30 seconds, and it
+// stops at once when the doorbell view is closed.
 //
-// Measured (offline render, 5 s, hearing-weighted): about 18 dB louder than the first chime and
-// 7 dB louder than the previous one at the same volume, peaks still under full scale. The price
-// is tone: a harder, more alarm-like ding-dong.
+// A page can't raise the tablet's volume, so the built-in sounds are made as loud as a page can make them at
+// whatever the media volume is: driven hard into a clipper so they sit at almost full level the whole time
+// (close to the loudest any sound can be at that volume). The classic ding-dong is a bright bell pitched
+// where ears and small speakers are most sensitive, played three times: about 18 dB louder than the first
+// chime and 7 dB louder than the second, at the same volume, peaks still under full scale. The price is
+// tone: a harder, more alarm-like ding-dong. The volume bar in Settings acts after the clipper.
 
-const NOTES = [987.77, 783.99]; // B5, G5
-const REPEATS = 3;              // ding-dong, three times
-const REPEAT_GAP = 1.9;         // seconds between them
-// Bell overtones: [multiple of the note, level, seconds to fade].
-const PARTIALS = [[1, 1, 3.5], [2, 0.6, 2.5], [3, 0.45, 1.9], [4.2, 0.35, 1.45], [5.4, 0.25, 1.05]];
+import { soundById } from './chime-sounds.js';
+import { getTrack } from './tracks.js';
+
 const LEVEL = 0.98;             // the loudest the output stage goes (full scale is 1)
+const CUT_AT = 30;              // seconds: nothing plays longer than this
+const CUT_FADE = 1.5;           // …fading out over the last of them
 const WAKE_LEAD = 0.5;          // Bluetooth speakers can miss the first half second after a pause
 const QUIET_AFTER = 15e3;       // suspend the audio this long after a chime (saves power)
+const QUIET_AFTER_TRACK = 35e3; // (after a track, which may run to the cut)
 const AGAIN_WITHIN = 5e3;       // a second ring this soon doesn't chime again
 
 /**
@@ -31,11 +34,20 @@ export function volumeGain(volume) {
 }
 
 export class Chime {
-  /** `volume`: a function giving the volume bar's value now, 0.1 to 1 (read at each ring, so Settings changes count). */
-  constructor({ win = globalThis, now = () => Date.now(), volume = () => 1 } = {}) {
+  /**
+   * @param {object} [o]
+   * @param {() => number} [o.volume]  the volume bar's value now, 0.1 to 1 (read at each ring, so Settings changes count)
+   * @param {() => string} [o.sound]   what to play now: a built-in sound's id, or 'track:<id>' (read at each ring)
+   * @param {(id: string) => Promise<Blob|null>} [o.loadTrack]
+   * @param {() => HTMLAudioElement} [o.makeAudio]
+   */
+  constructor({ win = globalThis, now = () => Date.now(), volume = () => 1, sound = () => 'classic', loadTrack = (id) => getTrack(id), makeAudio = () => new Audio() } = {}) {
     this.win = win;
     this.now = now;
     this.volume = volume;
+    this.sound = sound;
+    this.loadTrack = loadTrack;
+    this.makeAudio = makeAudio;
     this.last = -Infinity; // when it last chimed
     this.unlocked = false;
     this.onChange = () => {};
@@ -53,7 +65,7 @@ export class Chime {
     this.ctx.addEventListener?.('statechange', () => this.check());
   }
 
-  /** Notes → soft clipper → volume → speakers. The clipper keeps the loudness up as each note decays. */
+  /** Sounds → soft clipper → volume → speakers. The clipper keeps the loudness up as each note decays. */
   chain() {
     const c = this.ctx;
     this.master = c.createGain(); // the volume bar acts here, after the clipper
@@ -83,7 +95,7 @@ export class Chime {
   get ready() { return !!this.ctx && this.unlocked; }
 
   /** Ring. Resolves true if the chime played (or had just played), false if sound is blocked. */
-  async ring({ force = false, volume } = {}) {
+  async ring({ force = false, volume, sound } = {}) {
     if (!this.ctx) return false;
     const now = this.now();
     if (!force && now - this.last < AGAIN_WITHIN) return true;
@@ -96,32 +108,95 @@ export class Chime {
       if (this.ctx.state !== 'running') return false;
     }
     this.last = now;
+    this.stop(); // anything still sounding from an earlier ring
     this.master.gain.value = LEVEL * volumeGain(volume ?? this.volume());
-    const t0 = this.ctx.currentTime + lead;
-    for (let rep = 0; rep < REPEATS; rep++) NOTES.forEach((f, i) => this.note(f, t0 + rep * REPEAT_GAP + i * 0.55));
+    const id = String(sound ?? this.sound() ?? 'classic');
+    let ok = true;
+    if (id.startsWith('track:')) ok = await this.playTrack(id.slice(6), lead);
+    if (!id.startsWith('track:') || ok === 'fallback') this.playBuiltIn(id.startsWith('track:') ? 'classic' : id, lead);
     clearTimeout(this.quiet);
-    this.quiet = setTimeout(() => { if (this.now() - this.last >= QUIET_AFTER - 50) this.ctx.suspend().catch(() => {}); }, QUIET_AFTER);
+    const quietAfter = id.startsWith('track:') && ok === true ? QUIET_AFTER_TRACK : QUIET_AFTER;
+    this.quiet = setTimeout(() => { if (this.now() - this.last >= quietAfter - 50) this.ctx.suspend().catch(() => {}); }, quietAfter);
     this.quiet?.unref?.(); // (tests in Node: don't hold the process open)
-    return true;
+    return ok === 'fallback' ? true : ok;
   }
 
-  /** The Settings "Test chime" button (the tap itself unlocks the sound), at the volume on the bar there. */
-  test({ volume } = {}) { return this.ring({ force: true, volume }); }
+  /** The Settings "Test chime" button (the tap itself unlocks the sound), at the volume bar's and the sound's choice there. */
+  test({ volume, sound } = {}) { return this.ring({ force: true, volume, sound }); }
 
-  note(freq, at) {
+  /** A gate every sound of this ring goes through: the cut at 30 seconds, and a way to stop it at once. */
+  openGate(at) {
     const c = this.ctx;
-    for (const [mult, level, fade] of PARTIALS) {
-      const gain = c.createGain();
-      gain.gain.setValueAtTime(0, at);
-      gain.gain.linearRampToValueAtTime(level, at + 0.005);
-      gain.gain.exponentialRampToValueAtTime(0.001, at + fade);
-      gain.connect(this.out || c.destination);
-      const osc = c.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq * mult;
-      osc.connect(gain);
-      osc.start(at);
-      osc.stop(at + fade + 0.05);
+    const gate = c.createGain();
+    gate.gain.setValueAtTime(1, at);
+    gate.gain.setValueAtTime(1, at + CUT_AT - CUT_FADE);
+    gate.gain.linearRampToValueAtTime(0, at + CUT_AT);
+    gate.connect(this.out || c.destination);
+    this.gate = gate;
+    clearTimeout(this.cut);
+    this.cut = setTimeout(() => this.stop(), CUT_AT * 1000 + 100);
+    this.cut?.unref?.();
+    return gate;
+  }
+
+  playBuiltIn(id, lead) {
+    const at = this.ctx.currentTime + lead;
+    const gate = this.openGate(at);
+    soundById(id).play({ ctx: this.ctx, dest: gate }, at);
+  }
+
+  /**
+   * A track the user added: the first 30 seconds. Resolves true (playing), false (the browser needs a tap
+   * first) or 'fallback' (the file is gone or can't be played: the classic chime plays instead; never silence).
+   */
+  async playTrack(id, lead) {
+    let blob;
+    try { blob = await this.loadTrack(id); } catch { blob = null; }
+    if (!blob) return 'fallback';
+    const el = this.makeAudio();
+    const url = URL.createObjectURL(blob);
+    try {
+      el.src = url;
+      el.preload = 'auto';
+      const source = this.ctx.createMediaElementSource(el);
+      const gate = this.openGate(this.ctx.currentTime + lead);
+      source.connect(gate);
+      this.media = { el, url, source };
+      await new Promise((r) => setTimeout(r, lead * 1000)); // a Bluetooth speaker wakes first
+      if (this.media?.el !== el) return true; // stopped while waiting
+      await el.play();
+      // The cut counts from when it really starts.
+      const t = this.ctx.currentTime;
+      gate.gain.cancelScheduledValues?.(0);
+      gate.gain.setValueAtTime(1, t);
+      gate.gain.setValueAtTime(1, t + CUT_AT - CUT_FADE);
+      gate.gain.linearRampToValueAtTime(0, t + CUT_AT);
+      clearTimeout(this.cut);
+      this.cut = setTimeout(() => this.stop(), CUT_AT * 1000);
+      this.cut?.unref?.();
+      return true;
+    } catch (e) {
+      if (this.media?.el !== el) return true; // closed (or another ring began) meanwhile: not a failure
+      this.stop();
+      return e?.name === 'NotAllowedError' ? false : 'fallback';
+    }
+  }
+
+  /** Stop whatever is sounding now (the doorbell view was closed, or another ring starts). */
+  stop() {
+    clearTimeout(this.cut);
+    const gate = this.gate, media = this.media;
+    this.gate = this.media = null;
+    if (gate) {
+      gate.gain.cancelScheduledValues?.(0);
+      gate.gain.setTargetAtTime?.(0, this.ctx.currentTime, 0.02);
+      const off = setTimeout(() => { try { gate.disconnect?.(); } catch { /* gone already */ } }, 300);
+      off?.unref?.();
+    }
+    if (media) {
+      try { media.el.pause(); media.source.disconnect?.(); } catch { /* fine */ }
+      URL.revokeObjectURL(media.url);
     }
   }
 }
+
