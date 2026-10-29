@@ -6,7 +6,7 @@ import { inWindow, partsInTz, hhmm, startOfDay, weekdayShort, dayKey, localToMs 
 import { Octopus, costToday } from './octopus.js';
 import { PriceStats } from './stats.js';
 import { Bright, usageBetween, fixedCost } from './bright.js';
-import { Fuse, FuseSignedOut, dayTotals, isEvenSpread } from './fuse.js';
+import { Fuse, FuseSignedOut, dayTotals, isEvenSpread, periodTotals } from './fuse.js';
 import { Google, redirectUri } from './google.js';
 import { Spotify, spotifyEnded } from './spotify.js';
 import { DoorbellListener, SUB_RE } from './doorbell.js';
@@ -152,38 +152,74 @@ function explainBright(st = state.status.bright) {
   explain(st);
 }
 
-// The Fuse chart's view: D (hours of today), M (days of this month) or Y (months of this year), split or
-// stacked. Remembered on this device.
-const FUSE_VIEW_KEY = 'wallpanel.fuse.view', FUSE_STYLE_KEY = 'wallpanel.fuse.style';
+// The Fuse card's range and fuels: D (hours of today), M (days of this month) or Y (months of this year) for the
+// chart and the headline total; both fuels, just electricity or just gas; and the chart split or stacked.
+// Remembered on this device. (The range starts on M: the headline is the month so far.)
+const FUSE_VIEW_KEY = 'wallpanel.fuse.view.v2', FUSE_FUEL_KEY = 'wallpanel.fuse.fuel', FUSE_STYLE_KEY = 'wallpanel.fuse.style';
 const readPref = (key, allowed, fallback) => { try { const v = localStorage.getItem(key); return allowed.includes(v) ? v : fallback; } catch { return fallback; } };
 const writePref = (key, v) => { try { localStorage.setItem(key, v); } catch { /* fine: it starts as it was */ } };
-let fuseChartView = readPref(FUSE_VIEW_KEY, ['D', 'M', 'Y'], 'D');
+let fuseChartView = readPref(FUSE_VIEW_KEY, ['D', 'M', 'Y'], 'M');
+let fuseChartFuel = readPref(FUSE_FUEL_KEY, ['both', 'elec', 'gas'], 'both');
 let fuseChartStyle = readPref(FUSE_STYLE_KEY, ['split', 'stacked'], 'split');
 let fuseRangeLoad = { loading: false, error: '' };
 const FUSE_RANGE_FRESH = 30 * 60e3; // a month's or year's totals change slowly
 
+const pad2 = (n) => String(n).padStart(2, '0');
+const firstOfMonth = (y, m) => startOfDay(localToMs(`${y}-${pad2(m)}-01T12:00`, tz), tz);
+/** A month (`back` months before this one): { key, level: 'day', year, month, start, end }. */
+function monthPeriod(now, back = 0) {
+  const p = partsInTz(now, tz);
+  let y = p.y, m = p.m + back;
+  while (m < 1) { m += 12; y--; }
+  return { key: `M:${y}-${pad2(m)}`, level: 'day', year: y, month: m, start: firstOfMonth(y, m), end: m === 12 ? firstOfMonth(y + 1, 1) : firstOfMonth(y, m + 1) };
+}
+/** This year: { key, level: 'month', year, start, end }. */
+function yearPeriod(now) {
+  const y = partsInTz(now, tz).y;
+  return { key: `Y:${y}`, level: 'month', year: y, start: firstOfMonth(y, 1), end: firstOfMonth(y + 1, 1) };
+}
 /** The month or year the chart is showing: { key, level, start, end } (null for the day view). */
-function fusePeriod(view, now) {
-  if (view === 'D') return null;
-  const p = partsInTz(now, tz), pad = (n) => String(n).padStart(2, '0');
-  const at = (y, m) => startOfDay(localToMs(`${y}-${pad(m)}-01T12:00`, tz), tz);
-  if (view === 'M') return { key: `M:${p.y}-${pad(p.m)}`, level: 'day', start: at(p.y, p.m), end: p.m === 12 ? at(p.y + 1, 1) : at(p.y, p.m + 1) };
-  return { key: `Y:${p.y}`, level: 'month', start: at(p.y, 1), end: at(p.y + 1, 1) };
+const fusePeriod = (view, now) => (view === 'D' ? null : view === 'M' ? monthPeriod(now) : yearPeriod(now));
+
+/** What this property's day figures say: which fuels it has, and whether its gas is real hours or the day's total shared out. */
+function fuseAccount(now = Date.now()) {
+  const todayKey = dayKey(now, tz), yKey = dayKey(startOfDay(now, tz, -1), tz);
+  const pid = settings.fuse.premisesId;
+  const days = Object.fromEntries(Object.entries(state.fuseDays || {}).filter(([, d]) => d?.pid === pid));
+  const known = [todayKey, yKey].filter((k) => days[k]);
+  const hasGas = known.some((k) => days[k].has?.gas);
+  const hasElec = !known.length || known.some((k) => days[k].has?.elec);
+  const gasEven = hasGas && (isEvenSpread(days[todayKey]?.gas) || isEvenSpread(days[yKey]?.gas));
+  const fuel = !hasGas ? 'elec' : !hasElec ? 'gas' : fuseChartFuel; // the one account has no choice
+  return { pid, days, todayKey, yKey, known, hasGas, hasElec, gasEven, fuel, fuels: { elec: hasElec && fuel !== 'gas', gas: hasGas && fuel !== 'elec' } };
 }
 
-/** Fetch the month's or year's bars when that view is showing (once in a while, not on every refresh). */
+/**
+ * Fetch what the headline and chart need beyond today's hours (once in a while, not on every refresh): this
+ * month's days, last month's (the week before can start there: gas is estimated from it) and this year's months.
+ * Real hourly gas needs none of it for the day.
+ */
 async function loadFuseRange() {
-  if (fuseChartView === 'D' || !fuse.signedIn || !settings.fuse.premisesId || fuseRangeLoad.loading) return;
-  const now = Date.now(), period = fusePeriod(fuseChartView, now), id = settings.fuse.premisesId;
-  const have = state.fuseRanges[period.key];
-  if (have?.pid === id && now - have.at < FUSE_RANGE_FRESH) return;
-  const p = partsInTz(now, tz);
+  if (!fuse.signedIn || !settings.fuse.premisesId || fuseRangeLoad.loading) return;
+  const now = Date.now(), id = settings.fuse.premisesId, acc = fuseAccount(now);
+  // The headline's gas needs the month's days (estimating the newest ones from the week before) unless it is today's
+  // real hourly gas; an account with gas alone shows the month in its second box.
+  const gasAlone = acc.hasGas && !acc.hasElec;
+  const gasNeedsDays = (acc.fuels.gas && !(fuseChartView === 'D' && !acc.gasEven)) || gasAlone;
+  const wanted = [];
+  if (fuseChartView !== 'D' || gasNeedsDays) wanted.push(monthPeriod(now));
+  if (gasNeedsDays) wanted.push(monthPeriod(now, -1));
+  if (fuseChartView === 'Y') wanted.push(yearPeriod(now));
+  const stale = wanted.filter((p) => { const have = state.fuseRanges[p.key]; return !(have?.pid === id && now - have.at < FUSE_RANGE_FRESH); });
+  if (!stale.length) return;
   fuseRangeLoad = { loading: true, error: '' };
   renderAll();
+  const keep = new Set([monthPeriod(now).key, monthPeriod(now, -1).key, yearPeriod(now).key]); // nothing older is kept
   try {
-    const got = fuseChartView === 'M' ? await fuse.month(id, p.y, p.m, tz) : await fuse.year(id, p.y, tz);
-    // Only the month and year being shown are kept.
-    state.fuseRanges = { ...Object.fromEntries(Object.entries(state.fuseRanges).filter(([k]) => k[0] !== fuseChartView)), [period.key]: { at: now, pid: id, ...got } };
+    for (const p of stale) {
+      const got = p.level === 'day' ? await fuse.month(id, p.year, p.month, tz) : await fuse.year(id, p.year, tz);
+      state.fuseRanges = { ...Object.fromEntries(Object.entries(state.fuseRanges).filter(([k]) => keep.has(k))), [p.key]: { at: now, pid: id, ...got } };
+    }
     fuseRangeLoad = { loading: false, error: '' };
   } catch (e) {
     console.warn('[fuse] range', e);
@@ -201,6 +237,14 @@ function setFuseView(view) {
   loadFuseRange(); // a month or year fetched in the last half hour is used as it is
 }
 
+function setFuseFuel(fuel) {
+  if (!['both', 'elec', 'gas'].includes(fuel) || fuel === fuseChartFuel) return;
+  fuseChartFuel = fuel;
+  writePref(FUSE_FUEL_KEY, fuel);
+  renderAll();
+  loadFuseRange();
+}
+
 function toggleFuseStyle() {
   fuseChartStyle = fuseChartStyle === 'stacked' ? 'split' : 'stacked';
   writePref(FUSE_STYLE_KEY, fuseChartStyle);
@@ -213,46 +257,56 @@ function toggleFuseStyle() {
  * standing charge for the hours so far, as the Fuse app does.
  */
 function fuseView(now = Date.now()) {
-  const todayKey = dayKey(now, tz), yKey = dayKey(startOfDay(now, tz, -1), tz);
-  // Only this property's figures: another Fuse account's, kept from before, are ignored.
-  const pid = settings.fuse.premisesId;
-  const days = Object.fromEntries(Object.entries(state.fuseDays || {}).filter(([, d]) => d?.pid === pid));
+  // Only this property's figures: another Fuse account's, kept from before, are ignored (fuseAccount).
+  const { pid, days, todayKey, yKey, hasGas, hasElec, gasEven, fuel, fuels } = fuseAccount(now);
   const sum = (key) => ({ elec: dayTotals(days[key]?.elec), gas: dayTotals(days[key]?.gas) });
   const today = sum(todayKey), yesterday = sum(yKey);
-  const known = [todayKey, yKey].filter((k) => days[k]);
-  const hasGas = known.some((k) => days[k].has?.gas);
-  const hasElec = !known.length || known.some((k) => days[k].has?.elec);
   // Gas is shown by the hour only if Fuse really sends it that way: one figure repeated hour after hour is
   // the day's gas shared out evenly (a gas meter reports about once a day). Yesterday's spread adds up to the
   // day's real total, but today's hours are an estimate (Fuse's month view has nothing for today yet), so
-  // today's gas isn't counted until the meter has reported it.
-  const gasEven = hasGas && (isEvenSpread(days[todayKey]?.gas) || isEvenSpread(days[yKey]?.gas));
+  // today's hours of gas aren't counted as readings: the headline estimates the gas instead (periodTotals).
+  const liveToday = { elec: today.elec, gas: today.gas }; // (real hourly gas counts as it is)
   if (gasEven) today.gas = dayTotals([]);
   // Yesterday is whole once its readings reach midnight.
   const midnight = startOfDay(now, tz);
-  for (const fuel of ['elec', 'gas']) yesterday[fuel].complete = yesterday[fuel].last >= midnight;
+  for (const f of ['elec', 'gas']) yesterday[f].complete = yesterday[f].last >= midnight;
   const hasToday = today.elec.kwh > 0 || today.gas.kwh > 0;
   const hasYesterday = yesterday.elec.hours + yesterday.gas.hours > 0;
   // Before today's first reading the chart shows the newest day Fuse has.
   const shownKey = hasToday || !hasYesterday ? todayKey : yKey;
   const shown = shownKey === todayKey ? { start: startOfDay(now, tz), end: startOfDay(now, tz, 1) } : { start: startOfDay(now, tz, -1), end: startOfDay(now, tz) };
-  const newest = (fuel) => Math.max(today[fuel].last ?? 0, yesterday[fuel].last ?? 0) || null;
-  const part = (t) => (t.kwh > 0 ? Math.round(t.pence) : 0);
+  const newest = (f) => Math.max(today[f].last ?? 0, yesterday[f].last ?? 0) || null;
   const signedIn = fuse.signedIn;
   const period = fusePeriod(fuseChartView, now);
-  const ranged = period && state.fuseRanges[period.key]?.pid === pid ? state.fuseRanges[period.key] : null;
+  const rng = (key) => (state.fuseRanges[key]?.pid === pid ? state.fuseRanges[key] : null);
+  const ranged = period ? rng(period.key) : null;
   const gasHourly = hasGas && !gasEven;
+
+  // The headline: what the day, month or year so far has cost, for the fuels chosen (gas's unreported days estimated).
+  const month = rng(monthPeriod(now).key), year = rng(yearPeriod(now).key);
+  const prevMonth = rng(monthPeriod(now, -1).key) || (fuseRangeLoad.error || !fuels.gas ? null : undefined); // undefined: still loading
+  const totalsFor = (view, f = fuels) => periodTotals({ view, fuels: f, now, tz, today: liveToday, gasHourly, month, prevMonth, year });
+  const t = totalsFor(fuseChartView);
+  // A fuel counts once it has usage today (a meter that has only its standing charge hasn't reported yet); each
+  // part to the penny first, so the total is the sum of what's shown beside it.
+  const penny = (x) => (x && (fuseChartView !== 'D' || x.kwh > 0) ? Math.round(x.pence) : 0);
+  const total = {
+    view: fuseChartView, fuel, fuels, ready: t.ready, wait: t.wait, load: fuseRangeLoad,
+    elec: t.elec, gas: t.gas,
+    parts: { elec: penny(t.elec), gas: penny(t.gas), est: Math.round(t.gas?.estPence || 0) },
+    has: (t.elec?.kwh > 0) || (t.gas?.kwh > 0),
+  };
+  total.totalP = total.parts.elec + total.parts.gas;
+  // For an account with gas only: the month, which the second small box shows.
+  const monthGas = hasGas && !hasElec ? totalsFor('M', { elec: false, gas: true }).gas : null;
   return {
-    chart: { view: fuseChartView, style: fuseChartStyle, gasEven, gasHourly, period, range: ranged, load: fuseRangeLoad,
+    chart: { view: fuseChartView, style: fuseChartStyle, fuel, fuels, gasEven, gasHourly, period, range: ranged, load: fuseRangeLoad,
       // Stacking has something to stack when both fuels are in the view (by the hour, only if gas is hourly).
-      canStack: hasElec && hasGas && (fuseChartView !== 'D' || gasHourly) },
+      canStack: fuels.elec && fuels.gas && (fuseChartView !== 'D' || gasHourly) },
+    total, monthGas,
     today, yesterday, hasToday, shown, shownDay: days[shownKey] || null,
     newest: { elec: newest('elec'), gas: newest('gas') },
     hasGas, hasElec,
-    // A fuel counts once it has usage (a meter that has only its standing charge hasn't reported yet), each
-    // part to the penny first, so the total is the sum of what's shown beside it.
-    parts: { elec: part(today.elec), gas: part(today.gas) },
-    totalP: part(today.elec) + part(today.gas),
     signedIn, signedOut: !signedIn && !!settings.fuse.premisesId, notSetUp: !signedIn && !settings.fuse.premisesId,
     status: state.status.fuse,
   };
@@ -268,8 +322,15 @@ function explainFuse(which, st = state.status.fuse) {
   if (v.signedOut) return ui.toast(refs, 'Fuse signed the panel out. ⚙ → Electricity → Send code to sign in again.', 8000);
   if (!st) return ui.toast(refs, 'Asking Fuse for your usage…', 4000);
   if (st.error) return explain(st);
-  if (which === 'gas' && v.chart.gasEven) return ui.toast(refs, "Fuse reads gas about once a day, so today's gas isn't known yet and isn't in the total. Its hourly gas bars are just the day's total shared out (for today, an estimate). Yesterday's figure is the real one; the month and year views use Fuse's daily totals.", 10000);
-  const missing = !v.hasToday || (which === 'elec' && !(v.today.elec.kwh > 0)) || (which === 'gas' && v.hasGas && !(v.today.gas.kwh > 0));
+  if (which === 'gas' && v.chart.gasEven) return ui.toast(refs, "The Gas box is yesterday's gas: Fuse reads gas about once a day, so today's isn't in yet. Its hourly gas bars are just the day's total shared out. The big total estimates the newest days from the daily average of the week before; the month and year views use Fuse's daily totals.", 10000);
+  // The big total includes an estimate for gas the meter hasn't reported yet: say how much, and what from.
+  const est = v.total.gas;
+  if (!which && v.total.ready && est?.estDays > 0 && !st.stale) {
+    const money = (p) => `£${(p / 100).toFixed(2)}`;
+    const per = est.estPence / est.estDays;
+    return ui.toast(refs, `Gas isn't in yet for the newest ${est.estDays > 1.5 ? 'days' : 'day'}, so ${money(est.estPence)} of this ${{ D: 'day', M: 'month', Y: 'year' }[v.total.view]} is an estimate: the daily average of the week before (about ${money(per)} a day). Fuse's own figure replaces it when the gas meter reports, usually a day late.`, 10000);
+  }
+  const missing = which === 'gas' ? !(v.yesterday.gas.kwh > 0) : which === 'elec' ? !(v.today.elec.kwh > 0) : !v.total.has || (v.total.fuels.gas && !(v.total.gas?.kwh > 0));
   if (st.stale || missing) {
     const upTo = ui.fuseNewestText(v, Date.now(), tz);
     return ui.toast(refs, `${upTo ? `Fuse's newest readings: ${upTo}. ` : 'Fuse has sent no readings yet. '}Fuse is usually about an hour behind, and gas can be a day behind; the Fuse app shows the same.`, 9000);
@@ -1048,6 +1109,7 @@ async function boot() {
     usagePick: pickUsageHour,
     usageView: setUsageView,
     fuseView: setFuseView,
+    fuseFuel: setFuseFuel,
     fuseStyle: toggleFuseStyle,
     ringClose: closeCamera,
     shopTick: tickShopping,

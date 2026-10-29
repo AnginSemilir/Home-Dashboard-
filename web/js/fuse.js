@@ -535,6 +535,118 @@ export function dayTotals(hours) {
   return { kwh, pence, hours: n, last };
 }
 
+const DAY_MS = 864e5;
+const sumOf = (bars) => (bars || []).reduce((t, b) => ({ kwh: t.kwh + b.kwh, pence: t.pence + b.pence }), { kwh: 0, pence: 0 });
+
+/**
+ * Gas comes from the meter about once a day, so the newest days are missing (or have no usage yet) and
+ * turn up late. This finds the last day with gas usage, the daily average of the week ending there (the
+ * week before the missing days), and lists the days since: each full day counts 1, today the part of it
+ * that has gone.
+ * @param {{start:number,end:number,kwh:number,pence:number}[]} days  daily gas bars, e.g. last month's and this month's
+ * @returns {{ lastReported: number|null,
+ *   avg: {kwh:number,pence:number,days:number}|null,
+ *   trailing: {start:number,end:number,weight:number,pence:number}[] }}
+ *   a trailing day's own `pence` is what its bar says (a standing charge: it has no usage, by definition): it
+ *   comes off before the estimate goes on
+ */
+export function gasEstimate(days, { now = Date.now(), tz = DEFAULT_TZ } = {}) {
+  const bars = (days || []).filter((d) => d && d.start < now).sort((a, b) => a.start - b.start);
+  const used = bars.filter((d) => d.kwh > 0);
+  if (!used.length) return { lastReported: null, avg: null, trailing: [] };
+  const last = used[used.length - 1];
+  const noon = last.start + 12 * HOUR;
+  const windowStart = startOfDay(noon, tz, -6);
+  const earliest = Math.max(windowStart, bars[0].start);
+  const covered = Math.round((last.start - earliest) / DAY_MS) + 1; // days the average is over: a young account has fewer than 7
+  const week = sumOf(bars.filter((d) => d.start >= windowStart && d.start <= last.start));
+  const avg = { kwh: week.kwh / covered, pence: week.pence / covered, days: covered };
+  const trailing = [];
+  const today = startOfDay(now, tz);
+  for (let n = 1; ; n++) {
+    const start = startOfDay(noon, tz, n);
+    if (start > today) break;
+    const end = startOfDay(noon, tz, n + 1);
+    const own = bars.find((d) => d.start === start);
+    trailing.push({ start, end, weight: start === today ? Math.min(1, Math.max(0, (now - start) / (end - start))) : 1, pence: own?.pence ?? 0 });
+  }
+  return { lastReported: last.start, avg, trailing };
+}
+
+/**
+ * Gas for a period (a day, month or year): what Fuse reports for it, with the days it hasn't reported yet
+ * replaced by the estimate (the daily average of the week before), for the part of them inside the period.
+ * @param {{kwh:number,pence:number}} reported  Fuse's own total for the whole period
+ * @param {number} from  where the period starts (epoch ms)
+ */
+export function gasForPeriod(reported, est, from) {
+  const kwh = reported.kwh; // (the missing days have no usage in it)
+  let pence = reported.pence, estKwh = 0, estPence = 0, estDays = 0;
+  if (est?.avg) {
+    for (const t of est.trailing) {
+      if (t.start < from) continue;
+      pence -= t.pence;
+      estKwh += est.avg.kwh * t.weight;
+      estPence += est.avg.pence * t.weight;
+      estDays += t.weight;
+    }
+  }
+  return { kwh: kwh + estKwh, pence: pence + estPence, estKwh, estPence, estDays, basedOn: est?.avg?.days || 0 };
+}
+
+/** Where today, this month and this year began (epoch ms). */
+export function periodStarts(now, tz = DEFAULT_TZ) {
+  const p = partsInTz(now, tz), pad = (n) => String(n).padStart(2, '0');
+  const first = (y, m) => startOfDay(localToMs(`${y}-${pad(m)}-01T12:00`, tz), tz);
+  return { day: startOfDay(now, tz), month: first(p.y, p.m), year: first(p.y, 1) };
+}
+
+/**
+ * The headline: what a day, month or year has cost so far, for the fuels chosen, from the same figures the
+ * chart uses. Electricity is Fuse's own (today's hours live); gas has its unreported newest days estimated.
+ * @param {object} o
+ * @param {'D'|'M'|'Y'} o.view
+ * @param {{elec:boolean,gas:boolean}} o.fuels  which fuels to total
+ * @param {{elec:{kwh,pence},gas:{kwh,pence}}} o.today  today's hours added up (dayTotals)
+ * @param {boolean} o.gasHourly  gas really arrives by the hour (so today's hours count as they are)
+ * @param {object|null} o.month  this month's daily bars (parseRange), if loaded
+ * @param {object|null} [o.prevMonth]  last month's, if loaded (null: not available, go without it; left out: still loading)
+ * @param {object|null} o.year  this year's monthly bars, if loaded
+ * @returns {{ ready: boolean, wait: 'month'|'year'|null, elec: {kwh,pence}|null,
+ *   gas: {kwh,pence,estKwh,estPence,estDays,basedOn}|null }}
+ */
+export function periodTotals({ view, fuels, now = Date.now(), tz = DEFAULT_TZ, today, gasHourly = false, month = null, prevMonth, year = null }) {
+  const at = periodStarts(now, tz);
+  const out = { ready: true, wait: null, elec: null, gas: null };
+  const need = (what) => { out.ready = false; out.wait = out.wait || what; };
+  const before = (bars, t) => (bars || []).filter((b) => b.start < t);
+
+  if (fuels.elec) {
+    if (view === 'D') out.elec = { ...today.elec };
+    else if (!month) need('month');
+    else if (view === 'M') {
+      const done = sumOf(before(month.elec, at.day));
+      out.elec = { kwh: done.kwh + today.elec.kwh, pence: done.pence + today.elec.pence };
+    } else if (!year) need('year');
+    else {
+      const done = sumOf(before(year.elec, at.month)), thisMonth = sumOf(before(month.elec, at.day));
+      out.elec = { kwh: done.kwh + thisMonth.kwh + today.elec.kwh, pence: done.pence + thisMonth.pence + today.elec.pence };
+    }
+  }
+
+  if (fuels.gas) {
+    if (view === 'D' && gasHourly) out.gas = { ...today.gas, estKwh: 0, estPence: 0, estDays: 0, basedOn: 0 };
+    else if (!month || prevMonth === undefined || (view === 'Y' && !year)) need(!month || prevMonth === undefined ? 'month' : 'year');
+    else {
+      const est = gasEstimate([...(prevMonth?.gas || []), ...month.gas], { now, tz });
+      const from = at[{ D: 'day', M: 'month', Y: 'year' }[view]];
+      const reported = view === 'D' ? sumOf(month.gas.filter((b) => b.start === at.day)) : view === 'M' ? sumOf(month.gas) : sumOf(year.gas);
+      out.gas = gasForPeriod(reported, est, from);
+    }
+  }
+  return out;
+}
+
 /**
  * What Fuse sent for a day, as plain text for troubleshooting ("how does gas arrive?"): the hour and kWh of
  * every bar (a ? marks one that isn't realised), the cost parts of the first realised bar, and the field names

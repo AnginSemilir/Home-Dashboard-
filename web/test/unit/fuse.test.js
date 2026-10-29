@@ -714,3 +714,125 @@ test("a real account's month, year and day: bars from the day the account began,
   assert.equal(isEvenSpread(today.gas), false, "7 finished hours: not enough to call it even on today's own");
   assert.equal(today.gas.filter((h) => h.inProgress).length, 1, 'hour 07 is the hour in progress');
 });
+
+// ---------- Period totals: the headline for a day, month or year, with gas estimated for its unreported days ----------
+
+const { gasEstimate, gasForPeriod, periodTotals, periodStarts } = await import('../../js/fuse.js');
+/** A daily bar for 2026-10-<d> (BST until the 25th), pence = usage at 8.5p plus 11.8p standing. */
+const gday = (d, kwh, tz = '+01:00') => {
+  const start = Date.parse(`2026-10-${String(d).padStart(2, '0')}T00:00:00${tz}`);
+  return { start, end: start + 864e5, kwh, pence: kwh * 8.5 + 11.8 };
+};
+// The real account of 18 October: gas arrives late, in lumps.
+const REAL_GAS = { 9: 19.091, 10: 24.467, 11: 0, 12: 1.071, 13: 34.830, 14: 17.615, 15: 14.652, 16: 41.577, 17: 9.465, 18: 0 };
+const realBars = () => Object.entries(REAL_GAS).map(([d, k]) => gday(+d, k));
+const NOW18 = at('2026-10-18T07:40:00+01:00');
+const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
+
+test('gasEstimate: the daily average of the week before the missing days; today counts the part of it that has gone', () => {
+  const e = gasEstimate(realBars(), { now: NOW18 });
+  assert.equal(e.lastReported, gday(17, 0).start, '17 October: the 18th has none yet');
+  const weekKwh = 0 + 1.071 + 34.830 + 17.615 + 14.652 + 41.577 + 9.465; // 11th to 17th
+  near(e.avg.kwh, weekKwh / 7);
+  near(e.avg.pence, (weekKwh * 8.5 + 7 * 11.8) / 7, 1e-9);
+  assert.equal(e.avg.days, 7);
+  assert.equal(e.trailing.length, 1);
+  near(e.trailing[0].weight, (7 + 40 / 60) / 24, 1e-9); // 07:40 of 24 hours
+  assert.equal(e.trailing[0].pence, 11.8, "the 18th's own bar: a standing charge only");
+});
+
+test('gasEstimate: missing days since the last reading count whole; a young account averages the days it has; nothing reported means no estimate', () => {
+  // Last reading on the 12th, now the 15th at noon: the 13th and 14th whole, the 15th half.
+  const young = [9, 10, 11, 12].map((d) => gday(d, 10));
+  const e = gasEstimate(young, { now: at('2026-10-15T12:00:00+01:00') });
+  assert.deepEqual(e.trailing.map((t) => +t.weight.toFixed(3)), [1, 1, 0.5]);
+  assert.equal(e.avg.days, 4, 'only 9 to 12 exist: the window starts on the 6th but the account began on the 9th');
+  near(e.avg.kwh, 10);
+  assert.deepEqual(gasEstimate([gday(9, 0), gday(10, 0)], { now: NOW18 }), { lastReported: null, avg: null, trailing: [] });
+  assert.deepEqual(gasEstimate([], { now: NOW18 }), { lastReported: null, avg: null, trailing: [] });
+  const today = gasEstimate([...realBars().slice(0, 9), gday(18, 5)], { now: NOW18 });
+  assert.deepEqual(today.trailing, [], 'reported for today: nothing to estimate');
+});
+
+test('gasEstimate: across the clock change, the 25th is 25 hours and counts as one day', () => {
+  const bars = [gday(21, 12), gday(22, 12), gday(23, 12), gday(24, 12)];
+  const e = gasEstimate(bars, { now: at('2026-10-26T06:00:00Z') }); // 06:00 on the 26th (GMT)
+  assert.deepEqual(e.trailing.map((t) => +t.weight.toFixed(3)), [1, 0.25]);
+  assert.equal((e.trailing[0].end - e.trailing[0].start) / 3600e3, 25);
+});
+
+test('gasForPeriod: the unreported days come off as Fuse has them and go on as the estimate, only if inside the period', () => {
+  const est = gasEstimate(realBars(), { now: NOW18 });
+  const reported = { kwh: Object.values(REAL_GAS).reduce((a, b) => a + b, 0), pence: realBars().reduce((t, b) => t + b.pence, 0) };
+  const m = gasForPeriod(reported, est, gday(1, 0).start);
+  near(m.estKwh, est.avg.kwh * est.trailing[0].weight);
+  near(m.kwh, reported.kwh + m.estKwh);
+  near(m.pence, reported.pence - 11.8 + est.avg.pence * est.trailing[0].weight, 1e-9);
+  assert.equal(m.basedOn, 7);
+  const none = gasForPeriod(reported, est, gday(19, 0).start);
+  assert.deepEqual([none.kwh, none.estKwh], [reported.kwh, 0], 'a period starting after those days has none of them');
+  const noAvg = gasForPeriod({ kwh: 1, pence: 2 }, { avg: null, trailing: [] }, 0);
+  assert.deepEqual([noAvg.kwh, noAvg.pence, noAvg.estPence], [1, 2, 0]);
+});
+
+const parsed = (bars, elec = []) => ({ elec, gas: bars, export: [], has: { elec: true, gas: true, export: false }, skipped: 0 });
+const EL = (d, kwh, pence) => { const g = gday(d, 0); return { start: g.start, end: g.end, kwh, pence }; };
+const elecBars = [9, 10, 11, 12, 13, 14, 15, 16, 17].map((d) => EL(d, 10, 300)).concat([EL(18, 0.7, 60)]);
+
+test('periodTotals: day, month and year for both fuels, electricity as Fuse has it (today live), gas estimated for the days not in yet', () => {
+  const est = gasEstimate(realBars(), { now: NOW18 });
+  const w = est.trailing[0].weight;
+  const today = { elec: { kwh: 0.8, pence: 70, hours: 8, last: 0 }, gas: { kwh: 3.4, pence: 40, hours: 8, last: 0 } };
+  const month = parsed(realBars(), elecBars);
+  const base = { now: NOW18, today, month, prevMonth: parsed([]), fuels: { elec: true, gas: true } };
+
+  const d = periodTotals({ ...base, view: 'D' });
+  assert.deepEqual(d.elec, today.elec, "today's own hours");
+  near(d.gas.kwh, est.avg.kwh * w);
+  near(d.gas.estKwh, d.gas.kwh, 1e-9);
+
+  const m = periodTotals({ ...base, view: 'M' });
+  near(m.elec.kwh, 9 * 10 + 0.8, 1e-9);
+  near(m.elec.pence, 9 * 300 + 70, 1e-9);
+  near(m.gas.kwh, Object.values(REAL_GAS).reduce((a, b) => a + b, 0) + est.avg.kwh * w, 1e-6);
+  assert.equal(m.ready, true);
+
+  // The year: the months before this one (none here: the account began in October) and this month.
+  const year = { elec: [{ start: periodStarts(NOW18).month, end: periodStarts(NOW18).month + 31 * 864e5, kwh: 68.9, pence: 2052 }], gas: [{ start: periodStarts(NOW18).month, end: periodStarts(NOW18).month + 31 * 864e5, kwh: 162.771, pence: 1506 }], has: { elec: true, gas: true } };
+  const y = periodTotals({ ...base, view: 'Y', year });
+  near(y.elec.kwh, m.elec.kwh, 1e-9);
+  near(y.gas.kwh, 162.771 + est.avg.kwh * w, 1e-6);
+  const withEarlier = periodTotals({ ...base, view: 'Y', year: { ...year, elec: [{ start: Date.parse('2026-03-01T00:00:00Z'), end: Date.parse('2026-04-01T00:00:00Z'), kwh: 200, pence: 5000 }, ...year.elec] } });
+  near(withEarlier.elec.kwh, m.elec.kwh + 200, 1e-9);
+  near(withEarlier.elec.pence, m.elec.pence + 5000, 1e-9);
+});
+
+test('periodTotals: only the fuels chosen; real hourly gas counts as it is; what is still loading says so', () => {
+  const today = { elec: { kwh: 0.8, pence: 70 }, gas: { kwh: 3.4, pence: 40 } };
+  const month = parsed(realBars(), elecBars);
+  const common = { now: NOW18, today, month, prevMonth: parsed([]) };
+  const g = periodTotals({ ...common, view: 'M', fuels: { elec: false, gas: true } });
+  assert.equal(g.elec, null);
+  assert.ok(g.gas.kwh > 162);
+  const e = periodTotals({ ...common, view: 'M', fuels: { elec: true, gas: false } });
+  assert.equal(e.gas, null);
+  const hourly = periodTotals({ ...common, view: 'D', fuels: { elec: false, gas: true }, gasHourly: true, month: null });
+  assert.deepEqual([hourly.ready, hourly.gas.kwh, hourly.gas.estKwh], [true, 3.4, 0], "real hourly gas needs no month, and isn't estimated");
+  const loading = periodTotals({ ...common, view: 'M', fuels: { elec: true, gas: true }, month: null });
+  assert.deepEqual([loading.ready, loading.wait], [false, 'month']);
+  const noPrev = periodTotals({ ...common, view: 'D', fuels: { elec: false, gas: true }, prevMonth: undefined });
+  assert.deepEqual([noPrev.ready, noPrev.wait], [false, 'month'], "last month's bars are waited for (the week before can start there)");
+  const skipPrev = periodTotals({ ...common, view: 'D', fuels: { elec: false, gas: true }, prevMonth: null });
+  assert.equal(skipPrev.ready, true, 'null: unavailable, go without it');
+  const noYear = periodTotals({ ...common, view: 'Y', fuels: { elec: true, gas: true } });
+  assert.deepEqual([noYear.ready, noYear.wait], [false, 'year']);
+  const early = periodTotals({ ...common, view: 'M', fuels: { elec: false, gas: true }, month: parsed([]) });
+  assert.deepEqual([early.ready, early.gas.estKwh], [true, 0], 'no gas at all yet: nothing to estimate from');
+});
+
+test('periodStarts: where today, this month and this year began, in UK time', () => {
+  const s = periodStarts(at('2026-10-18T07:40:00+01:00'));
+  assert.equal(new Date(s.day).toISOString(), '2026-10-17T23:00:00.000Z');
+  assert.equal(new Date(s.month).toISOString(), '2026-09-30T23:00:00.000Z');
+  assert.equal(new Date(s.year).toISOString(), '2026-01-01T00:00:00.000Z');
+});

@@ -66,14 +66,14 @@ test('today so far: electricity and gas on the card, in the two-row chart, and i
   assert.equal(await text(page, '#chart .chart-tip'), `Gas 09:00–10:00 · ${now9.kwh.toFixed(2)} kWh · ${short(now9.pence)} so far`);
 
   // The tiles: Electricity and Gas side by side, then the car, then the thermostat.
-  assert.deepEqual(await page.locator('#tiles .t-label').allInnerTexts(), ['Electricity', 'Gas', 'e-Niro', 'Indoor']);
+  assert.deepEqual(await page.locator('#tiles .t-label').allInnerTexts(), ['Electricity', 'Gas · yesterday', 'e-Niro', 'Indoor']);
   // No live figure from Fuse: the "Using now" tile is Electricity, and the third tile is Gas.
   assert.equal(await text(page, '.tile.usage .t-label'), 'Electricity');
   assert.equal(await text(page, '.tile.usage .t-value'), gbp(e.pence));
   assert.equal(await text(page, '.tile.usage .extra'), `${e.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.elec.pence)}`);
-  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas');
-  assert.equal(await text(page, '.tile.cost .t-value'), gbp(g.pence));
-  assert.equal(await text(page, '.tile.cost .extra'), `${g.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.gas.pence)}`);
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas · yesterday', "the Gas box is yesterday's total: gas is read about once a day");
+  assert.equal(await text(page, '.tile.cost .t-value'), gbp(Y.gas.pence));
+  assert.equal(await text(page, '.tile.cost .extra'), `${Y.gas.kwh.toFixed(1)} kWh`);
   assert.equal(await page.locator('#tiles', { hasText: 'Using now' }).count(), 0);
   assert.equal(await page.locator('#price .stats-btn').isVisible(), false, 'the Agile buttons are hidden');
   assert.equal(await page.locator('#price .usage-btn').isVisible(), false);
@@ -108,10 +108,10 @@ test('gas not reported yet today: said so on the card and tile, with yesterday s
   assert.equal(await text(page, '#price .big .num'), gbp(T.elec.pence));
   assert.match(await text(page, '#price .sub'), /electricity to 09:30, gas to yesterday midnight/);
   assert.match(await text(page, '#price .sub'), /Electricity .* · gas not reported yet/);
-  assert.equal(await text(page, '.tile.cost .t-value'), '–');
-  assert.equal(await text(page, '.tile.cost .extra'), `No gas readings yet today · tap\nYesterday ${gbp(Y.gas.pence)}`);
+  assert.equal(await text(page, '.tile.cost .t-value'), gbp(Y.gas.pence), "the Gas box is yesterday's, which is in");
+  assert.equal(await text(page, '.tile.cost .extra'), `${Y.gas.kwh.toFixed(1)} kWh`);
   assert.match(await text(page, '#chart'), /No gas readings yet today/);
-  await page.locator('.tile.cost').click();
+  await page.locator('#price .big').click();
   await page.locator('.toast', { hasText: "Fuse's newest readings: electricity to 09:30, gas to yesterday midnight." }).waitFor();
   await ctx.close();
 });
@@ -187,7 +187,7 @@ test('signing in from Settings: number, code, identity question; saved at once, 
   await set.getByRole('button', { name: 'Cancel' }).click();
   await page.waitForLoadState('load');
   await page.locator('#price .big .num').waitFor();
-  assert.equal(await text(page, '#price .label'), 'Today so far');
+  assert.equal(await text(page, '#price .label'), 'This month so far', 'the headline starts on the month');
   const saved = await page.evaluate(() => ({ s: JSON.parse(localStorage.getItem('wallpanel.settings.v1')), t: JSON.parse(localStorage.getItem('wallpanel.fuse.v1')) }));
   assert.deepEqual([saved.s.energy.source, saved.s.fuse.premisesId, saved.s.fuse.premisesName], ['fuse', 'prem-1', '1 Test Street']);
   assert.deepEqual([saved.t.access, saved.t.refresh], ['fuse-acc-1', 'fuse-ref-1']);
@@ -336,14 +336,17 @@ test('a gas-only account: one row, one chip, and the readings time is gas\'s (ne
   await page.locator('#price .big .num').waitFor();
   assert.equal(await text(page, '#price .big .num'), gbp(T.gas.pence));
   assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.gas.kwh.toFixed(1)} kWh`]);
-  assert.match(await text(page, '#price .sub'), /readings to 09:30 · Fuse is about an hour behind/);
+  assert.match(await text(page, '#price .sub'), /gas readings to 09:30 · Fuse reads gas about once a day/);
   assert.match(await text(page, '#price .sub'), new RegExp(`Gas ${gbp(T.gas.pence)} · standing charge included`));
+  assert.equal(await text(page, '#price .label'), 'Today so far', 'one fuel on the account: nothing to say about which');
+  assert.equal(await page.locator('#price .fuel-ctl').isVisible(), false, 'nothing to choose between with one fuel');
   assert.doesNotMatch(await text(page, '#price .sub'), /Electricity/);
   assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 0);
   assert.equal(await page.locator('#chart .ch-bar.ch-gas').count(), 10);
-  assert.equal(await text(page, '.tile.usage .t-label'), 'Gas');
-  assert.equal(await text(page, '.tile.cost .t-label'), 'Yesterday');
-  assert.equal(await text(page, '.tile.cost .t-value'), gbp(Y.gas.pence));
+  assert.equal(await text(page, '.tile.usage .t-label'), 'Gas · yesterday');
+  assert.equal(await text(page, '.tile.usage .t-value'), gbp(Y.gas.pence));
+  assert.equal(await text(page, '.tile.cost .t-label'), 'This month', "gas alone: the other box is the month so far");
+  await page.locator('.tile.cost .t-value', { hasText: '£' }).waitFor();
   await ctx.close();
 });
 
@@ -429,7 +432,7 @@ test('D, M and Y: the day by the hour, the month by the day, the year by the mon
   await page.locator('#chart .ch-hit[data-fuel="elec"]').nth(24).click(); // the 25th: hours 00–08, and half of the 09:00 hour
   const e25 = spanOf('elec', total([...day('elec', [...Array(9).keys()], midnightOfDay(25)), half('elec', 9)]).kwh, 10);
   assert.equal(await text(page, '#chart .chart-tip'), `Electricity Fri 25 September · ${kwhText(e25.kwh)} · ${short(e25.pence)} so far`);
-  assert.deepEqual(rangeCalls(calls), [{ year: '2026', month: '9' }], 'one call for the month: no day in it');
+  assert.deepEqual(rangeCalls(calls), [{ year: '2026', month: '9' }, { year: '2026', month: '8' }], "this month and last (gas's week-before average can start there): no day in either");
 
   // Y: a bar a month, January to September.
   await view(page, 'Y');
@@ -442,7 +445,7 @@ test('D, M and Y: the day by the hour, the month by the day, the year by the mon
   let jan = 0;
   for (let t = Date.parse('2026-01-01T00:00:00Z'); t < Date.parse('2026-02-01T00:00:00Z'); t += HOUR) jan += elecHour(t);
   assert.match(await text(page, '#chart .chart-tip'), new RegExp(`^Electricity January 2026 · ${kwhText(jan).replace('.', '\\.')} · £\\d+\\.\\d\\d$`));
-  assert.deepEqual(rangeCalls(calls), [{ year: '2026', month: '9' }, { year: '2026' }], 'the year: no month, no day');
+  assert.deepEqual(rangeCalls(calls), [{ year: '2026', month: '9' }, { year: '2026', month: '8' }, { year: '2026' }], 'the year: no month, no day');
 
   // Back and forth within the half hour uses what it has; D never asks again either.
   await view(page, 'M');
@@ -450,7 +453,7 @@ test('D, M and Y: the day by the hour, the month by the day, the year by the mon
   assert.equal(await label(page), 'Usage today kWh per hour');
   assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 10);
   await view(page, 'Y');
-  assert.equal(rangeCalls(calls).length, 2);
+  assert.equal(rangeCalls(calls).length, 3);
 
   // The choice is remembered across a reload.
   await page.reload();
@@ -504,33 +507,45 @@ test('stacked: pounds a bar with the electricity under the gas, for the day, the
   await ctx.close();
 });
 
-test('gas that Fuse shares out evenly through the day: no hourly gas graph, and no stacking by the hour', async () => {
-  const { ctx, page, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-gas-flat']),
+test('gas that Fuse shares out evenly through the day: no hourly gas graph, today\'s gas estimated from the week before, no stacking by the hour', async () => {
+  const { ctx, page, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-gas-flat', 'fuse-no-gas-today']),
     initScript: () => { try { localStorage.setItem('wallpanel.fuse.style', 'stacked'); } catch { /* none */ } } });
   await page.locator('#price .big .num').waitFor();
-  // The day: electricity only, saying why. Today's even-spread gas is an estimate, so it isn't counted: the card,
-  // the total and the tile say gas comes once a day, with yesterday's real total.
+  // Gas hasn't reported for today (the 25th): its total is the daily average of the week before, for the part of the day gone.
+  const avg = septDay('gas', 20); // every day of the mock month is alike
+  const w = (NOW - MID) / 864e5;
+  const est = { kwh: avg.kwh * w, pence: avg.pence * w };
+  const day25 = Math.round(T.elec.pence) + Math.round(est.pence);
   assert.equal(await label(page), "Usage today kWh per hour · gas isn't hourly");
+  assert.equal(await text(page, '#price .label'), 'Today so far');
+  assert.equal(await text(page, '#price .big .num'), gbp(day25));
+  assert.match(await text(page, '#price .sub'), new RegExp(`Electricity ${gbp(T.elec.pence)} · Gas ${gbp(Math.round(est.pence))} \\(${gbp(Math.round(est.pence))} estimated\\)`));
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.elec.kwh.toFixed(1)} kWh`, `≈${est.kwh.toFixed(1)} kWh`]);
+  // The chart: electricity only, saying why; stacked is saved but there is no hourly gas to stack.
   assert.deepEqual(await page.locator('#chart .ch-rowname').allTextContents(), ['Electricity']);
   assert.equal(await page.locator('#chart .ch-bar.ch-gas').count(), 0);
-  assert.equal(await page.locator('#chart .ch-stack').count(), 0, 'stacked is saved, but there is no hourly gas to stack');
+  assert.equal(await page.locator('#chart .ch-stack').count(), 0);
   assert.equal(await page.locator('#chart .fz-stack').isVisible(), false);
-  assert.match(await text(page, '#price .sub'), /Electricity £\d+\.\d\d · Gas comes once a day · yesterday £\d+\.\d\d/);
-  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence)), "the total is the electricity so far; today's estimated gas isn't in it");
-  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.elec.kwh.toFixed(1)} kWh`, '–']);
-  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas');
-  assert.equal(await text(page, '.tile.cost .t-value'), '–');
-  assert.match(await text(page, '.tile.cost .extra'), /^Comes once a day · tap\nYesterday £\d+\.\d\d$/);
+  // The Gas box is yesterday's (the spread hours add up to the day), and says what the estimate is.
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas · yesterday');
+  assert.equal(await text(page, '.tile.cost .t-value'), '£0.89');
+  assert.equal(await text(page, '.tile.cost .extra'), '8.9 kWh');
+  await page.locator('#price .big').click();
+  await page.locator('.toast', { hasText: `Gas isn't in yet for the newest day, so ${gbp(Math.round(est.pence))} of this day is an estimate: the daily average of the week before (about ${gbp(Math.round(avg.pence))} a day).` }).waitFor();
   await page.locator('.tile.cost').click();
-  await page.locator('.toast', { hasText: "Fuse reads gas about once a day, so today's gas isn't known yet and isn't in the total." }).waitFor();
+  await page.locator('.toast', { hasText: "The Gas box is yesterday's gas: Fuse reads gas about once a day" }).waitFor();
   assert.equal(await page.locator('#chart .fz-seg').count(), 3, 'D, M and Y stay');
 
-  // The month and the year have Fuse's daily and monthly gas, so both rows return, and stacking with them.
+  // The month: Fuse's own days, then the estimate for today. Both rows return, and stacking with them.
   await view(page, 'M');
   await page.locator('#chart .ch-stack').first().waitFor();
   assert.equal(await label(page), 'Cost this month £ per day', 'the saved stacked choice applies where gas can be stacked');
   assert.equal(await page.locator('#chart .fz-stack').isVisible(), true);
-  assert.equal(await page.locator('#chart .ch-stack').count(), 25);
+  assert.equal(await page.locator('#chart .ch-stack').count(), 25, 'the 25th has electricity only: its gas is not in yet');
+  assert.equal(await text(page, '#price .label'), 'This month so far');
+  let elecM = T.elec.pence, gasM = est.pence;
+  for (let d = 1; d <= 24; d++) { elecM += septDay('elec', d).pence; gasM += septDay('gas', d).pence; }
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(elecM) + Math.round(gasM)));
   await page.locator('#chart .fz-stack').click();
   assert.equal(await page.locator('#chart .ch-rowname').count(), 2);
   await view(page, 'D');
@@ -539,26 +554,39 @@ test('gas that Fuse shares out evenly through the day: no hourly gas graph, and 
   await ctx.close();
 });
 
-test('a month or year Fuse will not give: it says so in the chart, and the day still works', async () => {
+test('gas Fuse has already reported for today: the day counts it as Fuse has it, nothing is estimated', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-gas-flat']) });
+  await page.locator('#price .big .num').waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence) + Math.round(T.gas.pence)), "today's gas bar as Fuse has it");
+  assert.doesNotMatch(await text(page, '#price .sub'), /estimated/);
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [`${T.elec.kwh.toFixed(1)} kWh`, `${T.gas.kwh.toFixed(1)} kWh`]);
+  await ctx.close();
+});
+
+test('a month or year Fuse will not give: it says so in the chart and on the headline, and the day still works', async () => {
   const { ctx, page, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-range-fails']) });
   await page.locator('#price .big .num').waitFor();
+  const day = gbp(Math.round(T.elec.pence) + Math.round(T.gas.pence));
+  assert.equal(await text(page, '#price .big .num'), day);
   await view(page, 'M');
-  await page.locator('#chart .chart-msg').waitFor();
   await page.locator('#chart .chart-msg', { hasText: "Couldn't load this month from Fuse: " }).waitFor();
   assert.equal(await page.locator('#chart .ch-bar').count(), 0);
+  await page.locator('#price .sub', { hasText: "Couldn't load this month from Fuse: " }).waitFor();
+  assert.equal(await text(page, '#price .big'), '–', 'no month total to show, so no wrong one');
   await view(page, 'Y');
   await page.locator('#chart .chart-msg', { hasText: "Couldn't load this year from Fuse: " }).waitFor();
-  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence) + Math.round(T.gas.pence)), 'today so far is untouched');
   await view(page, 'D');
   assert.equal(await page.locator('#chart .chart-msg').count(), 0);
+  assert.equal(await text(page, '#price .big .num'), day, "today's total is untouched");
   assert.equal(await page.locator('#chart .ch-bar.ch-elec').count(), 10);
+  assert.deepEqual(problems.filter((p) => !/503/.test(p)), []);
   await ctx.close();
 });
 
 test('a month Fuse has nothing for yet: said plainly, not an empty box', async () => {
-  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fail: new Set(['fuse-empty']),
-    initScript: () => { try { localStorage.setItem('wallpanel.fuse.view', 'M'); } catch { /* none */ } } });
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseView: 'M', fail: new Set(['fuse-empty']) });
   await page.locator('#chart .chart-msg', { hasText: 'Fuse sent no daily figures for this month yet.' }).waitFor();
+  assert.equal(await text(page, '#price .big'), '–');
   await view(page, 'Y');
   await page.locator('#chart .chart-msg', { hasText: 'Fuse sent no monthly figures for this year yet.' }).waitFor();
   await ctx.close();
@@ -603,5 +631,128 @@ test('a gas-only account whose gas comes once a day: the day says so instead of 
   await page.locator('#chart .ch-bar.ch-gas').first().waitFor();
   assert.equal(await page.locator('#chart .ch-rowname').count(), 1);
   assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+// ---------- The headline: the range (D / M / Y) and the fuels (Both / Electric / Gas) ----------
+
+/** What the month so far is, as the mock's days add up (the 25th's hours so far, live). */
+const monthSoFar = () => {
+  let elec = { kwh: T.elec.kwh, pence: T.elec.pence }, gas = { kwh: T.gas.kwh, pence: T.gas.pence };
+  for (let d = 1; d <= 24; d++) {
+    const e = septDay('elec', d), g = septDay('gas', d);
+    elec = { kwh: elec.kwh + e.kwh, pence: elec.pence + e.pence };
+    gas = { kwh: gas.kwh + g.kwh, pence: gas.pence + g.pence };
+  }
+  return { elec, gas };
+};
+const kwhChip = (x) => `${x.kwh >= 100 ? Math.round(x.kwh) : x.kwh.toFixed(1)} kWh`;
+const fuelBtn = (page, f) => page.locator(`#price .fuel-ctl [data-fuel="${f}"]`);
+const fuelOn = (page) => page.locator('#price .fuel-ctl [aria-pressed="true"]').innerText();
+
+test('the headline starts as the month so far, for both fuels, with a Both / Electric / Gas choice', async () => {
+  const { ctx, page, problems } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseView: null });
+  await page.locator('#price .big .num').waitFor();
+  const m = monthSoFar();
+  assert.equal(await text(page, '#price .label'), 'This month so far');
+  assert.equal(await pressed(page), 'M', 'the chart is on the month too');
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(m.elec.pence) + Math.round(m.gas.pence)));
+  assert.ok((await text(page, '#price .sub')).includes(`Electricity ${gbp(m.elec.pence)} · Gas ${gbp(m.gas.pence)}`));
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [kwhChip(m.elec), kwhChip(m.gas)]);
+  assert.deepEqual(await page.locator('#price .fuel-ctl [data-fuel]').allInnerTexts(), ['Both', 'Electric', 'Gas']);
+  assert.equal(await fuelOn(page), 'Both');
+  assert.equal(await page.locator('#price .stats-btn').isVisible(), false);
+  assert.deepEqual(problems, []);
+  await ctx.close();
+});
+
+test('Both / Electric / Gas: the headline, its kWh and the chart follow the choice, and it is remembered', async () => {
+  const { ctx, page, calls } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseView: 'M' });
+  await page.locator('#price .big .num').waitFor();
+  const m = monthSoFar();
+  await fuelBtn(page, 'gas').click();
+  await page.locator('#price .label', { hasText: 'This month so far · gas' }).waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(m.gas.pence)));
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [kwhChip(m.gas)]);
+  assert.match(await text(page, '#price .sub'), new RegExp(`^gas readings to 09:30.*\\nGas ${gbp(m.gas.pence).replace('.', '\\.')} · standing charge included`));
+  assert.deepEqual(await page.locator('#chart .ch-rowname').allTextContents(), ['Gas']);
+  assert.equal(await page.locator('#chart .fz-stack').isVisible(), false, 'nothing to stack with one fuel');
+  assert.equal(await text(page, '.tile.usage .t-label'), 'Electricity', 'the small boxes are not part of the choice');
+
+  await fuelBtn(page, 'elec').click();
+  await page.locator('#price .label', { hasText: 'This month so far · electricity' }).waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(m.elec.pence)));
+  assert.deepEqual(await page.locator('#price .band-chip .fz').allInnerTexts(), [kwhChip(m.elec)]);
+  assert.deepEqual(await page.locator('#chart .ch-rowname').allTextContents(), ['Electricity']);
+
+  // The day, for one fuel: today's hours of just that fuel.
+  await view(page, 'D');
+  assert.equal(await text(page, '#price .label'), 'Today so far · electricity');
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence)));
+  await fuelBtn(page, 'gas').click();
+  await page.locator('#price .label', { hasText: 'Today so far · gas' }).waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.gas.pence)));
+
+  // Remembered, and back to both.
+  await page.reload();
+  await page.locator('#price .label', { hasText: 'Today so far · gas' }).waitFor();
+  assert.equal(await fuelOn(page), 'Gas');
+  await fuelBtn(page, 'both').click();
+  await page.locator('#price .label', { hasText: /^Today so far$/ }).waitFor();
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence) + Math.round(T.gas.pence)));
+  assert.equal(await page.locator('#chart .ch-rowname').count(), 2);
+  assert.ok(calls.length > 0);
+  await ctx.close();
+});
+
+test('D, M and Y change the headline: today, the month, and the year so far', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseView: 'D' });
+  await page.locator('#price .big .num').waitFor();
+  const m = monthSoFar();
+  const monthP = Math.round(m.elec.pence) + Math.round(m.gas.pence);
+  assert.equal(await text(page, '#price .label'), 'Today so far');
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(T.elec.pence) + Math.round(T.gas.pence)));
+
+  await view(page, 'M');
+  await page.locator('#price .label', { hasText: 'This month so far' }).waitFor();
+  await page.locator('#price .big .num', { hasText: gbp(monthP) }).waitFor();
+
+  // The year: the months before this one, as the year chart has them, plus this month.
+  await view(page, 'Y');
+  await page.locator('#price .label', { hasText: 'This year so far' }).waitFor();
+  await page.locator('#chart .ch-bar.ch-gas').nth(8).waitFor();
+  const before = async (fuel) => (await page.locator(`#chart .ch-hit[data-fuel="${fuel}"]`).evaluateAll((els) => els.slice(0, 8).map((e) => Number(e.dataset.pence)))).reduce((a, b) => a + b, 0);
+  const yearP = Math.round((await before('elec')) + m.elec.pence) + Math.round((await before('gas')) + m.gas.pence);
+  assert.ok(yearP > monthP * 5, 'eight earlier months are a lot more than one');
+  assert.equal(await text(page, '#price .big .num'), gbp(yearP));
+  const yearKwh = (await page.locator('#price .band-chip .fz').allInnerTexts());
+  assert.ok(yearKwh.every((t) => /^\d+ kWh$/.test(t)), `a year's kWh are whole numbers: ${yearKwh}`);
+  assert.equal(await text(page, '.tile.usage .t-label'), 'Electricity', 'the small boxes stay as they are');
+  await ctx.close();
+});
+
+test('the year so far with gas not in yet for today: Fuse\'s months, and the estimate for the missing day', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true, fuseView: 'Y', fail: new Set(['fuse-no-gas-today']) });
+  await page.locator('#price .big .num').waitFor();
+  await page.locator('#chart .ch-bar.ch-gas').nth(8).waitFor();
+  const avg = septDay('gas', 20), w = (NOW - MID) / 864e5;
+  const gasYear = (await page.locator('#chart .ch-hit[data-fuel="gas"]').evaluateAll((els) => els.map((e) => Number(e.dataset.pence)))).reduce((a, b) => a + b, 0) + avg.pence * w;
+  let elecYear = T.elec.pence;
+  for (const hit of (await page.locator('#chart .ch-hit[data-fuel="elec"]').evaluateAll((els) => els.slice(0, 8).map((e) => Number(e.dataset.pence))))) elecYear += hit;
+  for (let d = 1; d <= 24; d++) elecYear += septDay('elec', d).pence;
+  assert.equal(await text(page, '#price .big .num'), gbp(Math.round(elecYear) + Math.round(gasYear)));
+  assert.match(await text(page, '#price .sub'), new RegExp(`\\(${gbp(Math.round(avg.pence * w)).replace('.', '\\.')} estimated\\)`));
+  await page.locator('#price .big').click();
+  await page.locator('.toast', { hasText: 'of this year is an estimate: the daily average of the week before' }).waitFor();
+  await ctx.close();
+});
+
+test('the Gas box is yesterday\'s total even when gas is hourly; electricity stays today\'s', async () => {
+  const { ctx, page } = await openPanel(env, { settings: fuseSettings(NOW), fuse: true });
+  await page.locator('.tile.cost .t-value', { hasText: '£' }).waitFor();
+  assert.equal(await text(page, '.tile.cost .t-label'), 'Gas · yesterday');
+  assert.equal(await text(page, '.tile.cost .t-value'), gbp(Y.gas.pence));
+  assert.equal(await text(page, '.tile.usage .t-value'), gbp(T.elec.pence), "electricity: today's");
+  assert.equal(await text(page, '.tile.usage .extra'), `${T.elec.kwh.toFixed(1)} kWh today\nYesterday ${gbp(Y.elec.pence)}`);
   await ctx.close();
 });

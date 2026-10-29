@@ -116,7 +116,15 @@ export function buildPanel(root, on) {
   r.statsBtn = h('button', { class: 'stats-btn', 'aria-label': 'Average prices' }, icon('stats'));
   r.statsBtn.addEventListener('click', () => on.stats?.());
   r.priceLabel = h('div', { class: 'label' }, 'Agile price now');
-  r.price = h('section', { class: 'card price', id: 'price' }, r.priceLabel,
+  // Fuse: which fuel the headline (and chart) is for.
+  const fuelNames = { both: 'Both', elec: 'Electric', gas: 'Gas' };
+  r.fuelViews = Object.keys(fuelNames).map((k) => {
+    const b = h('button', { class: 'fz-seg', type: 'button', 'data-fuel': k, 'aria-pressed': 'false' }, fuelNames[k]);
+    b.addEventListener('click', (e) => { e.stopPropagation(); on.fuseFuel?.(k); });
+    return b;
+  });
+  r.fuelCtl = h('div', { class: 'fz-segs fuel-ctl hidden', role: 'group', 'aria-label': 'Which fuel' }, ...r.fuelViews);
+  r.price = h('section', { class: 'card price', id: 'price' }, h('div', { class: 'price-head' }, r.priceLabel, r.fuelCtl),
     h('div', { class: 'price-main' }, r.priceBig, r.priceBand), r.priceSub, r.usageBtn, r.statsBtn, (r.priceDot = dot()));
 
   const tile = (cls, ico, label) => {
@@ -986,52 +994,67 @@ export function fuseNewestText(v, now, tz = DEFAULT_TZ) {
   ].filter(Boolean).join(', ');
 }
 
-/** What the card says while it has no usage for today: never just "waiting", always why. */
+const FUSE_RANGE_WORDS = { D: 'Today', M: 'This month', Y: 'This year' };
+
+/** What the card says while it has no total to show: never just "waiting", always why. */
 function fuseQuiet(v, now, tz) {
   if (v.notSetUp) return [h('div', {}, "Fuse isn't connected on this panel yet"), h('div', {}, '⚙ → Electricity → Send code')];
   if (v.signedOut) return [h('div', {}, 'Fuse signed the panel out'), h('div', {}, '⚙ → Electricity → Send code to sign in again')];
   if (v.status?.error) return ['Usage unavailable (tap for why)'];
   if (!v.status) return ['Asking Fuse…'];
+  const T = v.total, when = T.wait === 'year' || T.view === 'Y' ? 'this year' : 'this month';
+  if (!T.ready) return [T.load.error ? `Couldn't load ${when} from Fuse: ${T.load.error}` : `Loading ${when} from Fuse…`];
   const upTo = fuseNewestText(v, now, tz);
-  return upTo ? [h('div', {}, 'No usage for today yet · tap for why'), h('div', {}, "Fuse's newest: ", h('b', {}, upTo))] : ['No readings from Fuse yet'];
+  const none = { D: 'No usage for today yet', M: 'No usage this month yet', Y: 'No usage this year yet' }[T.view];
+  return upTo ? [h('div', {}, `${none} · tap for why`), h('div', {}, "Fuse's newest: ", h('b', {}, upTo))] : ['No readings from Fuse yet'];
 }
 
 /**
- * Fuse: the hero says what today has cost so far (electricity and gas, standing charges included, as
- * the Fuse app counts it), the chart shows each fuel's hours. `v` from main.js fuseView.
+ * Fuse: the headline says what the day, month or year so far has cost (the range chosen with D / M / Y, the
+ * fuels with Both / Electric / Gas; standing charges included, as the Fuse app counts it; gas's newest days,
+ * which Fuse hasn't got yet, estimated from the daily average of the week before). The chart shows the same
+ * range by the hour, day or month. `v` from main.js fuseView.
  */
 export function renderFuse(r, v, now, tz = DEFAULT_TZ) {
+  const T = v.total;
   r.panel.classList.add('src-fuse');
-  r.priceLabel.textContent = 'Today so far';
+  // With both fuels on the account the label says which one the total is for (when it isn't both).
+  const which = v.hasElec && v.hasGas && !(T.fuels.elec && T.fuels.gas) ? (T.fuels.gas ? ' · gas' : ' · electricity') : '';
+  r.priceLabel.textContent = `${FUSE_RANGE_WORDS[T.view]} so far${which}`;
+  r.fuelCtl.classList.toggle('hidden', !(v.hasElec && v.hasGas));
+  r.fuelViews.forEach((b) => { const on = b.dataset.fuel === T.fuel; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
   setDot(r.priceDot, v.status);
   setDot(r.chartDot, v.status);
   delete r.price.dataset.band;
-  const e = v.today.elec, g = v.today.gas;
-  if (!v.hasToday) {
+  const e = T.elec, g = T.gas;
+  if (!T.ready || !T.has) { // (what Fuse last sent still shows when it is signed out or failing: the reach line says so)
     r.priceBig.className = 'big none';
     r.priceBig.textContent = '–';
     r.priceBand.className = 'band-chip hidden';
     r.priceSub.replaceChildren(...fuseQuiet(v, now, tz));
   } else {
-    r.priceBig.className = 'big';
-    r.priceBig.replaceChildren(h('span', { class: 'num' }, pounds(v.totalP)));
-    r.priceBand.className = 'band-chip chip-fuel';
+    // A month or a year is a longer number than a day: the figure steps down in size so the rest still fits beside it.
+    const size = pounds(T.totalP).length >= 9 ? ' xlong' : pounds(T.totalP).length >= 7 ? ' long' : '';
+    r.priceBig.className = `big${size}`;
+    r.priceBig.replaceChildren(h('span', { class: 'num' }, pounds(T.totalP)));
+    r.priceBand.className = `band-chip chip-fuel${size ? ' compact' : ''}`;
+    const kwh = (x) => (x?.kwh > 0 ? `${x.estKwh > 0 ? '≈' : ''}${x.kwh >= 100 ? Math.round(x.kwh) : x.kwh.toFixed(1)} kWh` : '–');
     r.priceBand.replaceChildren(
-      v.hasElec ? h('span', { class: 'fz fz-elec' }, icon('bolt'), e.kwh > 0 ? `${e.kwh.toFixed(1)} kWh` : '–') : '',
-      v.hasGas ? h('span', { class: 'fz fz-gas' }, icon('flame'), g.kwh > 0 ? `${g.kwh.toFixed(1)} kWh` : '–') : '');
-    // Where the readings reach (the newest of either fuel). Gas often comes later than electricity: say so when it does.
-    const reaches = v.newest.elec ?? v.newest.gas ?? now;
+      T.fuels.elec ? h('span', { class: 'fz fz-elec' }, icon('bolt'), kwh(e)) : '',
+      T.fuels.gas ? h('span', { class: 'fz fz-gas' }, icon('flame'), kwh(g)) : '');
+    // Where the readings reach (the newest of the fuels shown). Gas often comes later than electricity: say so when it does.
+    const both = T.fuels.elec && T.fuels.gas;
+    const reaches = T.fuels.elec ? (v.newest.elec ?? v.newest.gas ?? now) : (v.newest.gas ?? now);
     const lag = now - reaches;
-    const gasBehind = v.hasElec && v.hasGas && (!v.newest.gas || (v.newest.elec ?? 0) - v.newest.gas > 2 * 3600e3);
+    const gasBehind = both && (!v.newest.gas || (v.newest.elec ?? 0) - v.newest.gas > 2 * 3600e3);
     const to = untilWords(reaches, now, tz);
     const reach = v.status?.error ? ['readings to ', h('b', {}, to), ' · Usage unavailable (tap for why)']
-      : gasBehind ? [fuseNewestText(v, now, tz), v.newest.gas ? '' : ' · no gas readings yet']
-        : ['readings to ', h('b', {}, to), lag <= 2 * 3600e3 ? ' · Fuse is about an hour behind' : ` · Fuse is ${Math.round(lag / 3600e3)} hours behind`];
-    // The amounts that make up the total, for each fuel the account has (one that hasn't reported yet says so).
-    const bits = [v.hasElec && (e.kwh > 0 ? ['Electricity ', h('b', {}, pounds(v.parts.elec))] : 'electricity not reported yet'),
-      v.hasGas && (g.kwh > 0 ? ['Gas ', h('b', {}, pounds(v.parts.gas))]
-        : v.chart.gasEven ? ['Gas comes once a day', ...(v.yesterday.gas.hours ? [' · yesterday ', h('b', {}, pounds(Math.round(v.yesterday.gas.pence)))] : [])]
-          : 'gas not reported yet')].filter(Boolean);
+      : !T.fuels.elec ? (v.newest.gas ? ['gas readings to ', h('b', {}, to), ' · Fuse reads gas about once a day'] : ['no gas readings yet'])
+        : gasBehind ? [fuseNewestText(v, now, tz), v.newest.gas ? '' : ' · no gas readings yet']
+          : ['readings to ', h('b', {}, to), lag <= 2 * 3600e3 ? ' · Fuse is about an hour behind' : ` · Fuse is ${Math.round(lag / 3600e3)} hours behind`];
+    // The amounts that make up the total, for each fuel shown (one that hasn't reported yet says so; estimated gas says how much).
+    const bits = [T.fuels.elec && (e?.kwh > 0 ? ['Electricity ', h('b', {}, pounds(T.parts.elec))] : 'electricity not reported yet'),
+      T.fuels.gas && (g?.kwh > 0 ? ['Gas ', h('b', {}, pounds(T.parts.gas)), T.parts.est > 0 ? ` (${pounds(T.parts.est)} estimated)` : ''] : 'gas not reported yet')].filter(Boolean);
     const split = bits.flatMap((b, i) => (i ? [' · ', b] : [b]));
     r.priceSub.replaceChildren(h('div', {}, ...reach), h('div', {}, ...split, bits.length === 1 ? ' · standing charge included' : ''));
   }
@@ -1055,13 +1078,13 @@ function renderFuseChart(r, v, now, tz) {
   const when = c.view === 'D' ? dayWords(v.shown.start, now, tz) : month ? 'this month' : 'this year';
   const data = c.view === 'D' ? v.shownDay : c.range;
   r.chartLabel.replaceChildren(`${stacked ? 'Cost' : 'Usage'} ${when} `,
-    h('span', { class: 'unit' }, `${stacked ? '£' : 'kWh'} per ${{ hour: 'hour', day: 'day', month: 'month' }[level]}${c.view === 'D' && c.gasEven ? " · gas isn't hourly" : ''}`));
+    h('span', { class: 'unit' }, `${stacked ? '£' : 'kWh'} per ${{ hour: 'hour', day: 'day', month: 'month' }[level]}${c.view === 'D' && c.gasEven && c.fuels.gas && c.fuels.elec ? " · gas isn't hourly" : ''}`));
 
   // Rows: electricity, and gas (by the hour only when Fuse really sends it that way).
-  const gasShown = v.hasGas && (c.view !== 'D' || c.gasHourly);
+  const gasShown = c.fuels.gas && (c.view !== 'D' || c.gasHourly);
   const min = { hour: { elec: 0.5, gas: 1, pounds: 0.25 }, day: { elec: 5, gas: 15, pounds: 2 }, month: { elec: 100, gas: 300, pounds: 25 } }[level];
   const rows = [];
-  if (v.hasElec) rows.push({ fuel: 'elec', label: 'Electricity', min: min.elec, hours: data?.elec || [] });
+  if (c.fuels.elec) rows.push({ fuel: 'elec', label: 'Electricity', min: min.elec, hours: data?.elec || [] });
   if (gasShown) rows.push({ fuel: 'gas', label: 'Gas', min: min.gas, hours: data?.gas || [] });
   r.legend.dataset.key = `fuse/${rows.length}`;
   const item = (cls, text) => h('span', { class: 'lg' }, h('span', { class: `sw sw-${cls}` }), text);
@@ -1100,19 +1123,36 @@ function renderFuseTiles(r, v, now, tz) {
       t.extra.replaceChildren(h('div', { class: 'muted' }, why(none)), v.notSetUp || v.signedOut ? '' : yesterday(yest));
     }
   };
-  const FUEL = { elec: { label: 'Electricity', icon: 'bolt', none: 'No readings yet today · tap' },
-    gas: { label: 'Gas', icon: 'flame', none: v.chart.gasEven ? 'Comes once a day · tap' : 'No gas readings yet today · tap' } };
+  // Gas is read about once a day, so its box is yesterday's total, the newest day that is really in.
+  const gasYesterday = (t) => {
+    t.label.textContent = 'Gas · yesterday';
+    const y = v.yesterday.gas;
+    if (y.kwh > 0) {
+      t.value.textContent = money(y);
+      t.extra.replaceChildren(h('div', { class: 'muted' }, `${y.kwh.toFixed(1)} kWh`, y.complete ? '' : ` · to ${hhmm(y.last, tz)}`));
+    } else {
+      t.value.textContent = '–';
+      t.extra.replaceChildren(h('div', { class: 'muted' }, why('No gas for yesterday yet · tap')));
+    }
+  };
+  const FUEL = { elec: { label: 'Electricity', icon: 'bolt', none: 'No readings yet today · tap' }, gas: { label: 'Gas', icon: 'flame' } };
   const fuels = [v.hasElec && 'elec', v.hasGas && 'gas'].filter(Boolean);
   const first = fuels[0] || 'elec';
-  r.tUsage.el.querySelector('.ico').replaceChildren(icon(FUEL[first].icon));
-  r.tUsage.el.dataset.fuel = first;
-  tile(r.tUsage, FUEL[first].label, v.today[first], v.yesterday[first], FUEL[first].none);
-  if (fuels[1]) {
-    r.tCost.el.querySelector('.ico').replaceChildren(icon(FUEL[fuels[1]].icon));
-    r.tCost.el.dataset.fuel = fuels[1];
-    tile(r.tCost, FUEL[fuels[1]].label, v.today[fuels[1]], v.yesterday[fuels[1]], FUEL[fuels[1]].none);
+  const fill = (t, f) => {
+    t.el.querySelector('.ico').replaceChildren(icon(FUEL[f].icon));
+    t.el.dataset.fuel = f;
+    if (f === 'gas') gasYesterday(t); else tile(t, FUEL[f].label, v.today[f], v.yesterday[f], FUEL[f].none);
+  };
+  fill(r.tUsage, first);
+  if (fuels[1]) fill(r.tCost, fuels[1]);
+  else if (first === 'gas') {
+    // Gas alone: the other box is the month so far (gas's newest days estimated).
+    const m = v.monthGas;
+    r.tCost.label.textContent = 'This month';
+    r.tCost.value.textContent = m ? money(m) : '–';
+    r.tCost.extra.replaceChildren(m ? h('div', { class: 'muted' }, `${m.estKwh > 0 ? '≈' : ''}${m.kwh.toFixed(1)} kWh`, m.estPence > 0 ? ' · part estimated' : '') : h('div', { class: 'muted' }, why('Loading…')));
   } else {
-    // One fuel on the account: the other tile says what yesterday cost instead.
+    // Electricity alone: the other box says what yesterday cost instead.
     const y = v.yesterday[first];
     r.tCost.label.textContent = 'Yesterday';
     r.tCost.value.textContent = y.hours ? money(y) : '–';

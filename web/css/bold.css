@@ -655,6 +655,15 @@ svg { display: block; }
 .chip-fuel .fz-gas svg { color: var(--gas); }
 /* The average-prices and by-hour buttons are about Agile prices: not shown here either. */
 .src-fuse .price .stats-btn, .src-fuse .price .usage-btn { display: none; }
+/* The label row of the headline card: the label, and (Fuse) the Both / Electric / Gas choice at its right. */
+.price-head { grid-area: label; display: flex; align-items: center; justify-content: space-between; gap: 1em; min-width: 0; }
+.src-fuse .price-head { padding-right: 1.5em; } /* clear of the status dot */
+.price-head .fz-seg { min-height: 32px; min-width: 32px; padding: 0 0.75em; font-size: 0.85em; }
+/* A month or year is a longer figure than a day: it steps down so the chip and the lines beside it still fit. */
+.src-fuse .price .big.long { font-size: 4.8em; }
+.src-fuse .price .big.xlong { font-size: 3.9em; }
+.src-fuse .price .band-chip.compact { font-size: 1.05em; padding: 0.34em 0.7em 0.36em; }
+
 .src-fuse .price > .dot { right: 0.9em; }
 
 /* ---------- Doorbell: a press shows its live view above everything, with a banner ---------- */

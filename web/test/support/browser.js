@@ -24,7 +24,7 @@ export async function startBrowser() {
  */
 export async function openPanel(env, {
   now = NOW, settings, viewport = { width: 1280, height: 800 }, userAgent, clock = 'fixed', fail, xss, kiaReading, initScript, homeMiniStopsAt,
-  style, theme, geolocation, spotify, touch, readingsUntil, brightUntil, glow, brightAccount, fuse, fuseUntil, fuseNoGas, fuseNoElec,
+  style, theme, geolocation, spotify, touch, readingsUntil, brightUntil, glow, brightAccount, fuse, fuseUntil, fuseNoGas, fuseNoElec, fuseView = 'D', fuseFuel = 'both',
 } = {}) {
   // `geolocation`: { latitude, longitude } the tablet reports (location allowed); by default it's refused.
   const ctx = await env.browser.newContext({ viewport, userAgent, timezoneId: 'Europe/London', locale: 'en-GB', serviceWorkers: 'block',
@@ -52,7 +52,16 @@ export async function openPanel(env, {
   // fuse: true = already signed in to Fuse; or { access, refresh } (an expired access token: the panel renews it).
   if (fuse) {
     const tokens = fuse === true ? { access: 'fuse-acc-1', refresh: 'fuse-ref-1' } : fuse;
-    await page.addInitScript((t) => { if (!sessionStorage.getItem('seeded-fuse')) { localStorage.setItem('wallpanel.fuse.v1', JSON.stringify({ deviceId: 'dev-test', ...t })); sessionStorage.setItem('seeded-fuse', '1'); } }, tokens);
+    // `fuseView` (D, M or Y) and `fuseFuel` (both, elec, gas): what the card starts on. The panel's own default is M (the
+    // month so far); most tests are about today, so they start on D.
+    await page.addInitScript(([t, view, fuel]) => {
+      if (!sessionStorage.getItem('seeded-fuse')) {
+        localStorage.setItem('wallpanel.fuse.v1', JSON.stringify({ deviceId: 'dev-test', ...t }));
+        if (view) localStorage.setItem('wallpanel.fuse.view.v2', view);
+        if (fuel) localStorage.setItem('wallpanel.fuse.fuel', fuel);
+        sessionStorage.setItem('seeded-fuse', '1');
+      }
+    }, [tokens, fuseView, fuseFuel]);
   }
   if (initScript) await page.addInitScript(initScript);
   await page.goto(env.url);
