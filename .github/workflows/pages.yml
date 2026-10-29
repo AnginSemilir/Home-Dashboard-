@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # not ubuntu-latest: from late October 2026 that is Ubuntu 26.04, which Playwright 1.56 cannot install a browser on
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
